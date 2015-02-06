@@ -28,6 +28,10 @@ import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.spi.*;
 
+/**
+ * LoopEnd nodes represent a loop back-edge. When a LoopEnd is reached, execution continues at the
+ * {@linkplain #loopBegin() loop header}.
+ */
 @NodeInfo
 public class LoopEndNode extends AbstractEndNode {
 
@@ -35,11 +39,7 @@ public class LoopEndNode extends AbstractEndNode {
     protected boolean canSafepoint;
     protected int endIndex;
 
-    public static LoopEndNode create(LoopBeginNode begin) {
-        return new LoopEndNode(begin);
-    }
-
-    protected LoopEndNode(LoopBeginNode begin) {
+    public LoopEndNode(LoopBeginNode begin) {
         int idx = begin.nextEndIndex();
         assert idx >= 0;
         this.endIndex = idx;
@@ -48,7 +48,7 @@ public class LoopEndNode extends AbstractEndNode {
     }
 
     @Override
-    public MergeNode merge() {
+    public AbstractMergeNode merge() {
         return loopBegin();
     }
 
@@ -78,22 +78,23 @@ public class LoopEndNode extends AbstractEndNode {
     @Override
     public boolean verify() {
         assertTrue(loopBegin != null, "must have a loop begin");
-        assertTrue(usages().isEmpty(), "LoopEnds can not be used");
+        assertTrue(hasNoUsages(), "LoopEnds can not be used");
         return super.verify();
     }
 
     /**
-     * Returns the 0-based index of this loop end. This is <b>not</b> the index into {@link PhiNode}
-     * values at the loop begin. Use {@link MergeNode#phiPredecessorIndex(AbstractEndNode)} for this
-     * purpose.
+     * Returns the index of this loop end amongst its {@link LoopBeginNode}'s loop ends.<br>
      *
-     * @return The 0-based index of this loop end.
+     * Since a LoopBeginNode also has {@linkplain LoopBeginNode#forwardEnds() forward ends}, this is
+     * <b>not</b> the index into {@link PhiNode} values at the loop begin. Use
+     * {@link LoopBeginNode#phiPredecessorIndex(AbstractEndNode)} for this purpose.
+     *
      */
-    public int endIndex() {
+    int endIndex() {
         return endIndex;
     }
 
-    public void setEndIndex(int idx) {
+    void setEndIndex(int idx) {
         this.endIndex = idx;
     }
 

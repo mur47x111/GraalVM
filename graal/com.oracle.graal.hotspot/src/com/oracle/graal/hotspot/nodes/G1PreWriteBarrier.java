@@ -27,17 +27,13 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.extended.*;
 
 @NodeInfo
-public class G1PreWriteBarrier extends WriteBarrier implements DeoptimizingNode.DeoptBefore {
+public final class G1PreWriteBarrier extends WriteBarrier implements DeoptimizingNode.DeoptBefore {
 
     @OptionalInput(InputType.State) FrameState stateBefore;
     protected final boolean nullCheck;
     protected final boolean doLoad;
 
-    public static G1PreWriteBarrier create(ValueNode object, ValueNode expectedObject, LocationNode location, boolean doLoad, boolean nullCheck) {
-        return new G1PreWriteBarrier(object, expectedObject, location, doLoad, nullCheck);
-    }
-
-    protected G1PreWriteBarrier(ValueNode object, ValueNode expectedObject, LocationNode location, boolean doLoad, boolean nullCheck) {
+    public G1PreWriteBarrier(ValueNode object, ValueNode expectedObject, LocationNode location, boolean doLoad, boolean nullCheck) {
         super(object, expectedObject, location, true);
         this.doLoad = doLoad;
         this.nullCheck = nullCheck;

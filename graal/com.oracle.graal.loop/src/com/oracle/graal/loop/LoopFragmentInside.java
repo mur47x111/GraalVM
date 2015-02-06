@@ -89,13 +89,13 @@ public class LoopFragmentInside extends LoopFragment {
 
         patchNodes(dataFixBefore);
 
-        BeginNode end = mergeEnds();
+        AbstractBeginNode end = mergeEnds();
 
         mergeEarlyExits();
 
         original().patchPeeling(this);
 
-        BeginNode entry = getDuplicatedNode(loop.loopBegin());
+        AbstractBeginNode entry = getDuplicatedNode(loop.loopBegin());
         loop.entryPoint().replaceAtPredecessor(entry);
         end.setNext(loop.entryPoint());
     }
@@ -152,7 +152,7 @@ public class LoopFragmentInside extends LoopFragment {
                     if (value != null) {
                         return value;
                     }
-                    BeginNode newValue = graph.add(BeginNode.create());
+                    AbstractBeginNode newValue = graph.add(new BeginNode());
                     seenNode.put(original, newValue);
                     return newValue;
                 }
@@ -161,7 +161,7 @@ public class LoopFragmentInside extends LoopFragment {
                     if (value != null) {
                         return value;
                     }
-                    BeginNode newValue = graph.add(BeginNode.create());
+                    AbstractBeginNode newValue = graph.add(new BeginNode());
                     seenNode.put(original, newValue);
                     return newValue;
                 }
@@ -170,7 +170,7 @@ public class LoopFragmentInside extends LoopFragment {
                     if (value != null) {
                         return value;
                     }
-                    EndNode newValue = graph.add(EndNode.create());
+                    EndNode newValue = graph.add(new EndNode());
                     seenNode.put(original, newValue);
                     return newValue;
                 }
@@ -184,14 +184,14 @@ public class LoopFragmentInside extends LoopFragment {
         // TODO (gd) ?
     }
 
-    private static PhiNode patchPhi(StructuredGraph graph, PhiNode phi, MergeNode merge) {
+    private static PhiNode patchPhi(StructuredGraph graph, PhiNode phi, AbstractMergeNode merge) {
         PhiNode ret;
         if (phi instanceof ValuePhiNode) {
-            ret = ValuePhiNode.create(phi.stamp(), merge);
+            ret = new ValuePhiNode(phi.stamp(), merge);
         } else if (phi instanceof GuardPhiNode) {
-            ret = GuardPhiNode.create(merge);
+            ret = new GuardPhiNode(merge);
         } else if (phi instanceof MemoryPhiNode) {
-            ret = MemoryPhiNode.create(merge, ((MemoryPhiNode) phi).getLocationIdentity());
+            ret = new MemoryPhiNode(merge, ((MemoryPhiNode) phi).getLocationIdentity());
         } else {
             throw GraalInternalError.shouldNotReachHere();
         }
@@ -213,7 +213,7 @@ public class LoopFragmentInside extends LoopFragment {
         markStateNodes(loopBegin, usagesToPatch);
 
         for (PhiNode phi : loopBegin.phis().snapshot()) {
-            if (phi.usages().isEmpty()) {
+            if (phi.hasNoUsages()) {
                 continue;
             }
             ValueNode first;
@@ -253,7 +253,7 @@ public class LoopFragmentInside extends LoopFragment {
             }
         }
 
-        for (PhiNode deadPhi : loopBegin.phis().filter(n -> n.usages().isEmpty()).snapshot()) {
+        for (PhiNode deadPhi : loopBegin.phis().filter(n -> n.hasNoUsages()).snapshot()) {
             if (deadPhi.isAlive()) {
                 GraphUtil.killWithUnusedFloatingInputs(deadPhi);
             }
@@ -291,7 +291,7 @@ public class LoopFragmentInside extends LoopFragment {
         }
     }
 
-    private BeginNode mergeEnds() {
+    private AbstractBeginNode mergeEnds() {
         assert isDuplicate();
         List<AbstractEndNode> endsToMerge = new LinkedList<>();
         // map peel exits to the corresponding loop exits
@@ -305,17 +305,17 @@ public class LoopFragmentInside extends LoopFragment {
             }
         }
         mergedInitializers = Node.newIdentityMap();
-        BeginNode newExit;
+        AbstractBeginNode newExit;
         StructuredGraph graph = graph();
         if (endsToMerge.size() == 1) {
             AbstractEndNode end = endsToMerge.get(0);
-            assert end.usages().isEmpty();
-            newExit = graph.add(BeginNode.create());
+            assert end.hasNoUsages();
+            newExit = graph.add(new BeginNode());
             end.replaceAtPredecessor(newExit);
             end.safeDelete();
         } else {
             assert endsToMerge.size() > 1;
-            MergeNode newExitMerge = graph.add(MergeNode.create());
+            AbstractMergeNode newExitMerge = graph.add(new MergeNode());
             newExit = newExitMerge;
             FrameState state = loopBegin.stateAfter();
             FrameState duplicateState = null;
@@ -328,7 +328,7 @@ public class LoopFragmentInside extends LoopFragment {
             }
 
             for (final PhiNode phi : loopBegin.phis().snapshot()) {
-                if (phi.usages().isEmpty()) {
+                if (phi.hasNoUsages()) {
                     continue;
                 }
                 final PhiNode firstPhi = patchPhi(graph, phi, newExitMerge);

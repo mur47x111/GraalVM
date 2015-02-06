@@ -38,18 +38,14 @@ public class WeakCounterNode extends DynamicCounterNode implements Simplifiable,
 
     @Input ValueNode checkedValue;
 
-    public static WeakCounterNode create(String group, String name, ValueNode increment, boolean addContext, ValueNode checkedValue) {
-        return new WeakCounterNode(group, name, increment, addContext, checkedValue);
-    }
-
-    protected WeakCounterNode(String group, String name, ValueNode increment, boolean addContext, ValueNode checkedValue) {
+    public WeakCounterNode(String group, String name, ValueNode increment, boolean addContext, ValueNode checkedValue) {
         super(group, name, increment, addContext);
         this.checkedValue = checkedValue;
     }
 
     @Override
     public void simplify(SimplifierTool tool) {
-        if (checkedValue instanceof FloatingNode && checkedValue.usages().count() == 1) {
+        if (checkedValue instanceof FloatingNode && checkedValue.getUsageCount() == 1) {
             tool.addToWorkList(checkedValue);
             graph().removeFixed(this);
         }
@@ -65,7 +61,7 @@ public class WeakCounterNode extends DynamicCounterNode implements Simplifiable,
 
     public static void addCounterBefore(String group, String name, long increment, boolean addContext, ValueNode checkedValue, FixedNode position) {
         StructuredGraph graph = position.graph();
-        WeakCounterNode counter = graph.add(WeakCounterNode.create(name, group, ConstantNode.forLong(increment, graph), addContext, checkedValue));
+        WeakCounterNode counter = graph.add(new WeakCounterNode(name, group, ConstantNode.forLong(increment, graph), addContext, checkedValue));
         graph.addBeforeFixed(position, counter);
     }
 }

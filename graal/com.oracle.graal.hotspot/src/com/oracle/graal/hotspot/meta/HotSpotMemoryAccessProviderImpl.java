@@ -33,7 +33,7 @@ import com.oracle.graal.hotspot.HotSpotVMConfig.CompressEncoding;
 /**
  * HotSpot implementation of {@link MemoryAccessProvider}.
  */
-public class HotSpotMemoryAccessProviderImpl implements HotSpotMemoryAccessProvider, Remote {
+public class HotSpotMemoryAccessProviderImpl implements HotSpotMemoryAccessProvider, HotSpotProxified {
 
     protected final HotSpotGraalRuntimeProvider runtime;
 
@@ -194,7 +194,7 @@ public class HotSpotMemoryAccessProviderImpl implements HotSpotMemoryAccessProvi
         int compressed = (int) readRawValue(base, displacement, 32);
         long klass = encoding.uncompress(compressed);
         if (klass == 0) {
-            return JavaConstant.NULL_POINTER;
+            return HotSpotCompressedNullConstant.COMPRESSED_NULL;
         }
         HotSpotResolvedObjectType metaKlass = HotSpotResolvedObjectTypeImpl.fromMetaspaceKlass(klass);
         return HotSpotMetaspaceConstantImpl.forMetaspaceObject(Kind.Int, compressed, metaKlass, true);

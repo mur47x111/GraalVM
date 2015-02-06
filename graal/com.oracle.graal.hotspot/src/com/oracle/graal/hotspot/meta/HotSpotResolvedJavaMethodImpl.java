@@ -42,7 +42,7 @@ import com.oracle.graal.nodes.*;
 /**
  * Implementation of {@link JavaMethod} for resolved HotSpot methods.
  */
-public final class HotSpotResolvedJavaMethodImpl extends HotSpotMethod implements HotSpotResolvedJavaMethod, Remote {
+public final class HotSpotResolvedJavaMethodImpl extends HotSpotMethod implements HotSpotResolvedJavaMethod, HotSpotProxified {
 
     private static final long serialVersionUID = -5486975070147586588L;
 
@@ -187,7 +187,7 @@ public final class HotSpotResolvedJavaMethodImpl extends HotSpotMethod implement
 
     @Override
     public boolean canBeStaticallyBound() {
-        return (isFinal() || isPrivate() || isStatic() || holder.isFinal()) && !isAbstract();
+        return (isFinal() || isPrivate() || isStatic() || holder.isFinal()) && isConcrete();
     }
 
     @Override

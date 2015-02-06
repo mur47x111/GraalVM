@@ -62,46 +62,34 @@ public abstract class AbstractBytecodeParser<T extends KindProvider, F extends A
     public static final int TRACELEVEL_STATE = 2;
 
     protected F frameState;
-    protected BytecodeStream stream;
-    protected GraphBuilderConfiguration graphBuilderConfig;
-    protected ResolvedJavaMethod method;
     protected BciBlock currentBlock;
-    protected ProfilingInfo profilingInfo;
-    protected OptimisticOptimizations optimisticOpts;
-    protected ConstantPool constantPool;
-    private final MetaAccessProvider metaAccess;
-    protected int entryBCI;
+
+    protected final BytecodeStream stream;
+    protected final GraphBuilderConfiguration graphBuilderConfig;
+    protected final ResolvedJavaMethod method;
+    protected final ProfilingInfo profilingInfo;
+    protected final OptimisticOptimizations optimisticOpts;
+    protected final ConstantPool constantPool;
+    protected final MetaAccessProvider metaAccess;
 
     /**
      * Meters the number of actual bytecodes parsed.
      */
     public static final DebugMetric BytecodesParsed = Debug.metric("BytecodesParsed");
 
-    public AbstractBytecodeParser(MetaAccessProvider metaAccess, ResolvedJavaMethod method, GraphBuilderConfiguration graphBuilderConfig, OptimisticOptimizations optimisticOpts, F frameState,
-                    BytecodeStream stream, ProfilingInfo profilingInfo, ConstantPool constantPool, int entryBCI) {
-        this.frameState = frameState;
+    public AbstractBytecodeParser(MetaAccessProvider metaAccess, ResolvedJavaMethod method, GraphBuilderConfiguration graphBuilderConfig, OptimisticOptimizations optimisticOpts) {
         this.graphBuilderConfig = graphBuilderConfig;
         this.optimisticOpts = optimisticOpts;
         this.metaAccess = metaAccess;
-        this.stream = stream;
-        this.profilingInfo = profilingInfo;
-        this.constantPool = constantPool;
-        this.entryBCI = entryBCI;
+        this.stream = new BytecodeStream(method.getCode());
+        this.profilingInfo = method.getProfilingInfo();
+        this.constantPool = method.getConstantPool();
         this.method = method;
         assert metaAccess != null;
     }
 
-    /**
-     * Start the bytecode parser.
-     */
-    protected abstract void build();
-
     public void setCurrentFrameState(F frameState) {
         this.frameState = frameState;
-    }
-
-    public final void setStream(BytecodeStream stream) {
-        this.stream = stream;
     }
 
     protected final BytecodeStream getStream() {
@@ -700,7 +688,10 @@ public abstract class AbstractBytecodeParser<T extends KindProvider, F extends A
         Kind kind = field.getKind();
         T receiver = frameState.apop();
         if ((field instanceof ResolvedJavaField) && ((ResolvedJavaField) field).getDeclaringClass().isInitialized()) {
-            appendOptimizedLoadField(kind, genLoadField(receiver, (ResolvedJavaField) field));
+            GraphBuilderPlugins.LoadFieldPlugin loadFieldPlugin = this.graphBuilderConfig.getLoadFieldPlugin();
+            if (loadFieldPlugin == null || !loadFieldPlugin.apply((GraphBuilderContext) this, (ValueNode) receiver, (ResolvedJavaField) field)) {
+                appendOptimizedLoadField(kind, genLoadField(receiver, (ResolvedJavaField) field));
+            }
         } else {
             handleUnresolvedLoadField(field, receiver);
         }
@@ -716,7 +707,8 @@ public abstract class AbstractBytecodeParser<T extends KindProvider, F extends A
 
     protected void emitExplicitExceptions(T receiver, T outOfBoundsIndex) {
         assert receiver != null;
-        if (graphBuilderConfig.omitAllExceptionEdges() || (optimisticOpts.useExceptionProbabilityForOperations() && profilingInfo.getExceptionSeen(bci()) == TriState.FALSE)) {
+        if (graphBuilderConfig.omitAllExceptionEdges() ||
+                        (optimisticOpts.useExceptionProbabilityForOperations() && profilingInfo.getExceptionSeen(bci()) == TriState.FALSE && !GraalOptions.StressExplicitExceptionCode.getValue())) {
             return;
         }
 
@@ -745,7 +737,10 @@ public abstract class AbstractBytecodeParser<T extends KindProvider, F extends A
     private void genGetStatic(JavaField field) {
         Kind kind = field.getKind();
         if (field instanceof ResolvedJavaField && ((ResolvedJavaType) field.getDeclaringClass()).isInitialized()) {
-            appendOptimizedLoadField(kind, genLoadField(null, (ResolvedJavaField) field));
+            GraphBuilderPlugins.LoadFieldPlugin loadFieldPlugin = this.graphBuilderConfig.getLoadFieldPlugin();
+            if (loadFieldPlugin == null || !loadFieldPlugin.apply((GraphBuilderContext) this, (ResolvedJavaField) field)) {
+                appendOptimizedLoadField(kind, genLoadField(null, (ResolvedJavaField) field));
+            }
         } else {
             handleUnresolvedLoadField(field, null);
         }
@@ -891,7 +886,7 @@ public abstract class AbstractBytecodeParser<T extends KindProvider, F extends A
     protected abstract T append(T v);
 
     protected boolean isNeverExecutedCode(double probability) {
-        return probability == 0 && optimisticOpts.removeNeverExecutedCode() && entryBCI == StructuredGraph.INVOCATION_ENTRY_BCI;
+        return probability == 0 && optimisticOpts.removeNeverExecutedCode();
     }
 
     protected double branchProbability() {
@@ -902,7 +897,7 @@ public abstract class AbstractBytecodeParser<T extends KindProvider, F extends A
             probability = 0.5;
         }
 
-        if (!removeNeverExecutedCode()) {
+        if (!optimisticOpts.removeNeverExecutedCode()) {
             if (probability == 0) {
                 probability = 0.0000001;
             } else if (probability == 1) {
@@ -912,15 +907,9 @@ public abstract class AbstractBytecodeParser<T extends KindProvider, F extends A
         return probability;
     }
 
-    protected boolean removeNeverExecutedCode() {
-        return optimisticOpts.removeNeverExecutedCode() && entryBCI == StructuredGraph.INVOCATION_ENTRY_BCI;
-    }
-
-    protected abstract void processBlock(BciBlock block);
-
     protected abstract void iterateBytecodesForBlock(BciBlock block);
 
-    public void processBytecode(int bci, int opcode) {
+    public final void processBytecode(int bci, int opcode) {
         int cpi;
 
         // Checkstyle: stop
@@ -1148,26 +1137,27 @@ public abstract class AbstractBytecodeParser<T extends KindProvider, F extends A
         return frameState;
     }
 
-    protected final int traceLevel = Options.TraceBytecodeParserLevel.getValue();
-
     protected void traceInstruction(int bci, int opcode, boolean blockStart) {
-        if (traceLevel >= TRACELEVEL_INSTRUCTIONS && Debug.isLogEnabled()) {
-            StringBuilder sb = new StringBuilder(40);
-            sb.append(blockStart ? '+' : '|');
-            if (bci < 10) {
-                sb.append("  ");
-            } else if (bci < 100) {
-                sb.append(' ');
-            }
-            sb.append(bci).append(": ").append(Bytecodes.nameOf(opcode));
-            for (int i = bci + 1; i < stream.nextBCI(); ++i) {
-                sb.append(' ').append(stream.readUByte(i));
-            }
-            if (!currentBlock.jsrScope.isEmpty()) {
-                sb.append(' ').append(currentBlock.jsrScope);
-            }
-            Debug.log("%s", sb);
+        if (Debug.isEnabled() && Options.TraceBytecodeParserLevel.getValue() >= TRACELEVEL_INSTRUCTIONS && Debug.isLogEnabled()) {
+            traceInstructionHelper(bci, opcode, blockStart);
         }
     }
 
+    private void traceInstructionHelper(int bci, int opcode, boolean blockStart) {
+        StringBuilder sb = new StringBuilder(40);
+        sb.append(blockStart ? '+' : '|');
+        if (bci < 10) {
+            sb.append("  ");
+        } else if (bci < 100) {
+            sb.append(' ');
+        }
+        sb.append(bci).append(": ").append(Bytecodes.nameOf(opcode));
+        for (int i = bci + 1; i < stream.nextBCI(); ++i) {
+            sb.append(' ').append(stream.readUByte(i));
+        }
+        if (!currentBlock.getJsrScope().isEmpty()) {
+            sb.append(' ').append(currentBlock.getJsrScope());
+        }
+        Debug.log("%s", sb);
+    }
 }

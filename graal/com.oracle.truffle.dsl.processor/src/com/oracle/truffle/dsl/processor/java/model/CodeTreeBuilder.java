@@ -174,7 +174,11 @@ public class CodeTreeBuilder {
     }
 
     public CodeTreeBuilder startCall(String receiver, String callSite) {
-        return startCall(singleString(receiver), callSite);
+        if (receiver != null) {
+            return startCall(singleString(receiver), callSite);
+        } else {
+            return startCall(callSite);
+        }
     }
 
     public CodeTreeBuilder startCall(CodeTree receiver, String callSite) {
@@ -614,12 +618,17 @@ public class CodeTreeBuilder {
         return root;
     }
 
-    public CodeTree getRoot() {
+    public CodeTree build() {
         return root;
     }
 
     public CodeTreeBuilder cast(String baseClassName) {
         string("(").string(baseClassName).string(") ");
+        return this;
+    }
+
+    public CodeTreeBuilder cast(TypeMirror type) {
+        string("(").type(type).string(") ");
         return this;
     }
 
@@ -663,8 +672,11 @@ public class CodeTreeBuilder {
     }
 
     public CodeTreeBuilder instanceOf(CodeTree var, CodeTree type) {
-        tree(var).string(" instanceof ").tree(type);
-        return this;
+        return tree(var).string(" instanceof ").tree(type);
+    }
+
+    public CodeTreeBuilder instanceOf(CodeTree var, TypeMirror type) {
+        return tree(var).string(" instanceof ").type(type);
     }
 
     public CodeTreeBuilder instanceOf(String var, String type) {
@@ -732,6 +744,21 @@ public class CodeTreeBuilder {
     public CodeTreeBuilder startCatchBlock(TypeMirror exceptionType, String localVarName) {
         clearLast(CodeTreeKind.NEW_LINE);
         string(" catch (").type(exceptionType).string(" ").string(localVarName).string(") ");
+        return startBlock();
+    }
+
+    public CodeTreeBuilder startCatchBlock(TypeMirror[] exceptionTypes, String localVarName) {
+        clearLast(CodeTreeKind.NEW_LINE);
+        string(" catch (");
+
+        for (int i = 0; i < exceptionTypes.length; i++) {
+            if (i != 0) {
+                string(" | ");
+            }
+            type(exceptionTypes[i]);
+        }
+
+        string(" ").string(localVarName).string(") ");
         return startBlock();
     }
 

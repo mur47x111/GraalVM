@@ -31,20 +31,16 @@ import com.oracle.graal.nodes.extended.*;
 @NodeInfo(allowedUsageTypes = {InputType.Value, InputType.Anchor, InputType.Guard})
 public class SnippetAnchorNode extends FixedWithNextNode implements Simplifiable, GuardingNode {
 
-    public static SnippetAnchorNode create() {
-        return new SnippetAnchorNode();
-    }
-
-    protected SnippetAnchorNode() {
+    public SnippetAnchorNode() {
         super(StampFactory.object());
     }
 
     @Override
     public void simplify(SimplifierTool tool) {
-        BeginNode prevBegin = BeginNode.prevBegin(this);
+        AbstractBeginNode prevBegin = AbstractBeginNode.prevBegin(this);
         replaceAtUsages(InputType.Anchor, prevBegin);
         replaceAtUsages(InputType.Guard, prevBegin);
-        if (usages().isEmpty()) {
+        if (hasNoUsages()) {
             graph().removeFixed(this);
         }
     }

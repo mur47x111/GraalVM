@@ -32,7 +32,7 @@ import com.oracle.graal.nodes.calc.*;
 public class NodePosIteratorTest extends GraalCompilerTest {
 
     @NodeInfo
-    static class TestNode extends Node {
+    static final class TestNode extends Node {
         @Successor Node s1;
         @Successor Node s2;
         @Successor NodeSuccessorList<Node> stail;
@@ -41,18 +41,14 @@ public class NodePosIteratorTest extends GraalCompilerTest {
         @Input ConstantNode i1;
         @Input FloatingNode i2;
 
-        public static TestNode create() {
-            return new TestNode();
+        public TestNode() {
         }
 
-        protected TestNode() {
-            // TODO Auto-generated constructor stub
-        }
     }
 
     @Test
     public void testInputs() {
-        TestNode n = TestNode.create();
+        TestNode n = new TestNode();
 
         ConstantNode i1 = ConstantNode.forInt(1);
         ConstantNode i2 = ConstantNode.forDouble(1.0d);
@@ -139,11 +135,11 @@ public class NodePosIteratorTest extends GraalCompilerTest {
 
     @Test
     public void testSuccessors() {
-        TestNode n = TestNode.create();
-        EndNode s1 = EndNode.create();
-        EndNode s2 = EndNode.create();
-        EndNode s3 = EndNode.create();
-        EndNode s4 = EndNode.create();
+        TestNode n = new TestNode();
+        EndNode s1 = new EndNode();
+        EndNode s2 = new EndNode();
+        EndNode s3 = new EndNode();
+        EndNode s4 = new EndNode();
         n.s1 = s1;
         n.s2 = s2;
         n.stail = new NodeSuccessorList<>(n, new Node[]{s3, s4});

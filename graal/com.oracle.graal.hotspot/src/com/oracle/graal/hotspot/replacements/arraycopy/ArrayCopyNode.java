@@ -38,13 +38,9 @@ import com.oracle.graal.phases.tiers.*;
 import com.oracle.graal.replacements.nodes.*;
 
 @NodeInfo
-public class ArrayCopyNode extends BasicArrayCopyNode implements Virtualizable, Lowerable {
+public final class ArrayCopyNode extends BasicArrayCopyNode implements Virtualizable, Lowerable {
 
-    public static ArrayCopyNode create(Invoke invoke) {
-        return new ArrayCopyNode(invoke);
-    }
-
-    protected ArrayCopyNode(Invoke invoke) {
+    public ArrayCopyNode(Invoke invoke) {
         super(invoke);
     }
 

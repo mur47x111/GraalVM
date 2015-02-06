@@ -34,15 +34,11 @@ import com.oracle.graal.word.*;
  * Intrinsic for getting the lock in the current {@linkplain BeginLockScopeNode lock scope}.
  */
 @NodeInfo
-public class CurrentLockNode extends FixedWithNextNode implements LIRLowerable {
+public final class CurrentLockNode extends FixedWithNextNode implements LIRLowerable {
 
     protected int lockDepth;
 
-    public static CurrentLockNode create(int lockDepth) {
-        return new CurrentLockNode(lockDepth);
-    }
-
-    protected CurrentLockNode(int lockDepth) {
+    public CurrentLockNode(int lockDepth) {
         super(null);
         this.lockDepth = lockDepth;
     }
@@ -53,7 +49,7 @@ public class CurrentLockNode extends FixedWithNextNode implements LIRLowerable {
         HotSpotLIRGenerator hsGen = (HotSpotLIRGenerator) gen.getLIRGeneratorTool();
         StackSlotValue slot = hsGen.getLockSlot(lockDepth);
         // The register allocator cannot handle stack -> register moves so we use an LEA here
-        Value result = gen.getLIRGeneratorTool().emitMove(gen.getLIRGeneratorTool().emitAddress(slot));
+        Value result = gen.getLIRGeneratorTool().emitAddress(slot);
         gen.setResult(this, result);
     }
 

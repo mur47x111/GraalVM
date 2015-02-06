@@ -43,15 +43,11 @@ public class KlassLayoutHelperNode extends FloatingGuardedNode implements Canoni
     @Input protected ValueNode klass;
     protected final HotSpotVMConfig config;
 
-    public static KlassLayoutHelperNode create(@InjectedNodeParameter HotSpotVMConfig config, ValueNode klass) {
-        return new KlassLayoutHelperNode(config, klass, null);
+    public KlassLayoutHelperNode(@InjectedNodeParameter HotSpotVMConfig config, ValueNode klass) {
+        this(config, klass, null);
     }
 
-    public static KlassLayoutHelperNode create(@InjectedNodeParameter HotSpotVMConfig config, ValueNode klass, ValueNode guard) {
-        return new KlassLayoutHelperNode(config, klass, guard);
-    }
-
-    protected KlassLayoutHelperNode(HotSpotVMConfig config, ValueNode klass, ValueNode guard) {
+    public KlassLayoutHelperNode(@InjectedNodeParameter HotSpotVMConfig config, ValueNode klass, ValueNode guard) {
         super(StampFactory.forKind(Kind.Int), (GuardingNode) guard);
         this.klass = klass;
         this.config = config;
@@ -83,7 +79,7 @@ public class KlassLayoutHelperNode extends FloatingGuardedNode implements Canoni
 
     @Override
     public Node canonical(CanonicalizerTool tool) {
-        if (usages().isEmpty()) {
+        if (hasNoUsages()) {
             return null;
         } else {
             if (klass.isConstant()) {

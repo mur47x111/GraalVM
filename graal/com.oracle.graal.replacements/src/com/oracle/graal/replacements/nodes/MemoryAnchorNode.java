@@ -33,11 +33,7 @@ import com.oracle.graal.nodes.spi.*;
 @NodeInfo(allowedUsageTypes = {InputType.Memory})
 public class MemoryAnchorNode extends FixedWithNextNode implements LIRLowerable, MemoryNode, Canonicalizable {
 
-    public static MemoryAnchorNode create() {
-        return new MemoryAnchorNode();
-    }
-
-    protected MemoryAnchorNode() {
+    public MemoryAnchorNode() {
         super(StampFactory.forVoid());
     }
 
@@ -47,6 +43,6 @@ public class MemoryAnchorNode extends FixedWithNextNode implements LIRLowerable,
 
     @Override
     public Node canonical(CanonicalizerTool tool) {
-        return usages().isEmpty() ? null : this;
+        return hasNoUsages() ? null : this;
     }
 }

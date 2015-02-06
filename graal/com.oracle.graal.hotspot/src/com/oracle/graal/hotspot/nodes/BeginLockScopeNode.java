@@ -38,15 +38,11 @@ import com.oracle.graal.word.*;
  * check on the object.
  */
 @NodeInfo(allowedUsageTypes = {InputType.Memory})
-public class BeginLockScopeNode extends AbstractMemoryCheckpoint implements LIRLowerable, MonitorEnter, MemoryCheckpoint.Single {
+public final class BeginLockScopeNode extends AbstractMemoryCheckpoint implements LIRLowerable, MonitorEnter, MemoryCheckpoint.Single {
 
     protected int lockDepth;
 
-    public static BeginLockScopeNode create(int lockDepth) {
-        return new BeginLockScopeNode(lockDepth);
-    }
-
-    protected BeginLockScopeNode(int lockDepth) {
+    public BeginLockScopeNode(int lockDepth) {
         super(null);
         this.lockDepth = lockDepth;
     }

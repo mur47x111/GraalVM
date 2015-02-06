@@ -41,19 +41,11 @@ public class UnsafeStoreNode extends UnsafeAccessNode implements StateSplit, Low
     @Input ValueNode value;
     @OptionalInput(InputType.State) FrameState stateAfter;
 
-    public static UnsafeStoreNode create(ValueNode object, ValueNode offset, ValueNode value, Kind accessKind, LocationIdentity locationIdentity) {
-        return new UnsafeStoreNode(object, offset, value, accessKind, locationIdentity);
-    }
-
-    protected UnsafeStoreNode(ValueNode object, ValueNode offset, ValueNode value, Kind accessKind, LocationIdentity locationIdentity) {
+    public UnsafeStoreNode(ValueNode object, ValueNode offset, ValueNode value, Kind accessKind, LocationIdentity locationIdentity) {
         this(object, offset, value, accessKind, locationIdentity, null);
     }
 
-    public static UnsafeStoreNode create(ValueNode object, ValueNode offset, ValueNode value, Kind accessKind, LocationIdentity locationIdentity, FrameState stateAfter) {
-        return new UnsafeStoreNode(object, offset, value, accessKind, locationIdentity, stateAfter);
-    }
-
-    protected UnsafeStoreNode(ValueNode object, ValueNode offset, ValueNode value, Kind accessKind, LocationIdentity locationIdentity, FrameState stateAfter) {
+    public UnsafeStoreNode(ValueNode object, ValueNode offset, ValueNode value, Kind accessKind, LocationIdentity locationIdentity, FrameState stateAfter) {
         super(StampFactory.forVoid(), object, offset, accessKind, locationIdentity);
         this.value = value;
         this.stateAfter = stateAfter;
@@ -90,7 +82,7 @@ public class UnsafeStoreNode extends UnsafeAccessNode implements StateSplit, Low
             ValueNode indexValue = tool.getReplacedValue(offset());
             if (indexValue.isConstant()) {
                 long off = indexValue.asJavaConstant().asLong();
-                int entryIndex = state.getVirtualObject().entryIndexForOffset(off);
+                int entryIndex = state.getVirtualObject().entryIndexForOffset(off, accessKind());
                 if (entryIndex != -1) {
                     Kind entryKind = state.getVirtualObject().entryKind(entryIndex);
                     ValueNode entry = state.getEntry(entryIndex);
@@ -99,7 +91,7 @@ public class UnsafeStoreNode extends UnsafeAccessNode implements StateSplit, Low
                         tool.delete();
                     } else {
                         if ((accessKind() == Kind.Long || accessKind() == Kind.Double) && entryKind == Kind.Int) {
-                            int nextIndex = state.getVirtualObject().entryIndexForOffset(off + 4);
+                            int nextIndex = state.getVirtualObject().entryIndexForOffset(off + 4, entryKind);
                             if (nextIndex != -1) {
                                 Kind nextKind = state.getVirtualObject().entryKind(nextIndex);
                                 if (nextKind == Kind.Int) {
@@ -117,12 +109,12 @@ public class UnsafeStoreNode extends UnsafeAccessNode implements StateSplit, Low
 
     @Override
     protected ValueNode cloneAsFieldAccess(ResolvedJavaField field) {
-        return StoreFieldNode.create(object(), field, value(), stateAfter());
+        return new StoreFieldNode(object(), field, value(), stateAfter());
     }
 
     @Override
     protected ValueNode cloneAsArrayAccess(ValueNode location, LocationIdentity identity) {
-        return UnsafeStoreNode.create(object(), location, value, accessKind(), identity, stateAfter());
+        return new UnsafeStoreNode(object(), location, value, accessKind(), identity, stateAfter());
     }
 
     public FrameState getState() {

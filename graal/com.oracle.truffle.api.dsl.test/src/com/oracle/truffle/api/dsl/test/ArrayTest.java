@@ -26,7 +26,8 @@ import org.junit.*;
 
 import com.oracle.truffle.api.*;
 import com.oracle.truffle.api.dsl.*;
-import com.oracle.truffle.api.dsl.test.ArrayTestFactory.TestNode1Factory;
+import com.oracle.truffle.api.dsl.internal.*;
+import com.oracle.truffle.api.dsl.test.ArrayTestFactory.TestNode1NodeGen;
 import com.oracle.truffle.api.frame.*;
 import com.oracle.truffle.api.nodes.*;
 
@@ -34,7 +35,7 @@ public class ArrayTest {
 
     @Test
     public void testNode1() {
-        final TestNode1 node = TestNode1Factory.create(null);
+        final TestNode1 node = TestNode1NodeGen.create(null);
         RootNode root = new RootNode() {
             @Child TestNode1 test = node;
 
@@ -57,19 +58,19 @@ public class ArrayTest {
         abstract Object execute(VirtualFrame frame);
 
         int executeInt(VirtualFrame frame) throws UnexpectedResultException {
-            return ArrayTypeSystemGen.ARRAYTYPESYSTEM.expectInteger(execute(frame));
+            return ArrayTypeSystemGen.expectInteger(execute(frame));
         }
 
         int[] executeIntArray(VirtualFrame frame) throws UnexpectedResultException {
-            return ArrayTypeSystemGen.ARRAYTYPESYSTEM.expectIntArray(execute(frame));
+            return ArrayTypeSystemGen.expectIntArray(execute(frame));
         }
 
         String[] executeStringArray(VirtualFrame frame) throws UnexpectedResultException {
-            return ArrayTypeSystemGen.ARRAYTYPESYSTEM.expectStringArray(execute(frame));
+            return ArrayTypeSystemGen.expectStringArray(execute(frame));
         }
 
         double[] executeDoubleArray(VirtualFrame frame) throws UnexpectedResultException {
-            return ArrayTypeSystemGen.ARRAYTYPESYSTEM.expectDoubleArray(execute(frame));
+            return ArrayTypeSystemGen.expectDoubleArray(execute(frame));
         }
     }
 
@@ -96,10 +97,11 @@ public class ArrayTest {
     }
 
     @TypeSystem({int.class, int[].class, double[].class, String[].class, Object[].class})
+    @DSLOptions(useNewLayout = true)
     public static class ArrayTypeSystem {
 
         @ImplicitCast
-        public double[] castFromInt(int[] array) {
+        public static double[] castFromInt(int[] array) {
             double[] newArray = new double[array.length];
             for (int i = 0; i < array.length; i++) {
                 newArray[i] = array[i];
@@ -107,13 +109,13 @@ public class ArrayTest {
             return newArray;
         }
 
-        @TypeCheck
-        public boolean isIntArray(Object array) {
+        @TypeCheck(int[].class)
+        public static boolean isIntArray2(Object array) {
             return array instanceof int[];
         }
 
-        @TypeCast
-        public int[] asIntArray(Object array) {
+        @TypeCast(int[].class)
+        public static int[] asIntArray(Object array) {
             return (int[]) array;
         }
 

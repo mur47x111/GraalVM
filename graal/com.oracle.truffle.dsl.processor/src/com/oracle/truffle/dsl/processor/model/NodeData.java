@@ -52,23 +52,30 @@ public class NodeData extends Template implements Comparable<NodeData> {
     private Map<Integer, List<ExecutableTypeData>> executableTypes;
 
     private final NodeExecutionData thisExecution;
+    private final boolean generateFactory;
 
-    public NodeData(ProcessorContext context, TypeElement type, String shortName, TypeSystemData typeSystem, List<NodeChildData> children, List<NodeExecutionData> executions,
-                    List<NodeFieldData> fields, List<String> assumptions) {
-        super(context, type, null, null);
-        this.nodeId = type.getSimpleName().toString();
+    private TypeMirror frameType;
+
+    public NodeData(ProcessorContext context, TypeElement type, String shortName, TypeSystemData typeSystem, boolean generateFactory) {
+        super(context, type, null);
+        this.nodeId = ElementUtils.getSimpleName(type);
         this.shortName = shortName;
         this.typeSystem = typeSystem;
-        this.fields = fields;
-        this.children = children;
-        this.childExecutions = executions;
-        this.assumptions = assumptions;
+        this.fields = new ArrayList<>();
+        this.children = new ArrayList<>();
+        this.childExecutions = new ArrayList<>();
+        this.assumptions = new ArrayList<>();
         this.thisExecution = new NodeExecutionData(new NodeChildData(null, null, "this", getNodeType(), getNodeType(), null, Cardinality.ONE), -1, false);
         this.thisExecution.getChild().setNode(this);
+        this.generateFactory = generateFactory;
     }
 
     public NodeData(ProcessorContext context, TypeElement type) {
-        this(context, type, null, null, null, null, null, null);
+        this(context, type, null, null, false);
+    }
+
+    public boolean isGenerateFactory() {
+        return generateFactory;
     }
 
     public NodeExecutionData getThisExecution() {
@@ -83,6 +90,14 @@ public class NodeData extends Template implements Comparable<NodeData> {
         return false;
     }
 
+    public void setFrameType(TypeMirror frameType) {
+        this.frameType = frameType;
+    }
+
+    public TypeMirror getFrameType() {
+        return frameType;
+    }
+
     public void addEnclosedNode(NodeData node) {
         this.enclosingNodes.add(node);
         node.declaringNode = this;
@@ -92,6 +107,35 @@ public class NodeData extends Template implements Comparable<NodeData> {
         return childExecutions;
     }
 
+    public Set<TypeData> findSpecializedTypes(NodeExecutionData execution) {
+        Set<TypeData> types = new HashSet<>();
+        for (SpecializationData specialization : getSpecializations()) {
+            if (!specialization.isSpecialized()) {
+                continue;
+            }
+            List<Parameter> parameters = specialization.findByExecutionData(execution);
+            for (Parameter parameter : parameters) {
+                TypeData type = parameter.getTypeSystemType();
+                if (type == null) {
+                    throw new AssertionError();
+                }
+                types.add(type);
+            }
+        }
+        return types;
+    }
+
+    public Collection<TypeData> findSpecializedReturnTypes() {
+        Set<TypeData> types = new HashSet<>();
+        for (SpecializationData specialization : getSpecializations()) {
+            if (!specialization.isSpecialized()) {
+                continue;
+            }
+            types.add(specialization.getReturnType().getTypeSystemType());
+        }
+        return types;
+    }
+
     public int getSignatureSize() {
         if (getSpecializations() != null && !getSpecializations().isEmpty()) {
             return getSpecializations().get(0).getSignatureSize();
@@ -99,12 +143,12 @@ public class NodeData extends Template implements Comparable<NodeData> {
         return 0;
     }
 
-    public boolean isFrameUsedByAnyGuard(ProcessorContext context) {
+    public boolean isFrameUsedByAnyGuard() {
         for (SpecializationData specialization : specializations) {
             if (!specialization.isReachable()) {
                 continue;
             }
-            if (specialization.isFrameUsedByGuard(context)) {
+            if (specialization.isFrameUsedByGuard()) {
                 return true;
             }
         }
@@ -231,13 +275,13 @@ public class NodeData extends Template implements Comparable<NodeData> {
         return null;
     }
 
-    public List<NodeData> getNodeDeclaringChildren() {
+    public List<NodeData> getNodesWithFactories() {
         List<NodeData> nodeChildren = new ArrayList<>();
         for (NodeData child : getEnclosingNodes()) {
-            if (child.needsFactory()) {
+            if (child.needsFactory() && child.isGenerateFactory()) {
                 nodeChildren.add(child);
             }
-            nodeChildren.addAll(child.getNodeDeclaringChildren());
+            nodeChildren.addAll(child.getNodesWithFactories());
         }
         return nodeChildren;
     }
@@ -347,7 +391,7 @@ public class NodeData extends Template implements Comparable<NodeData> {
 
     public SpecializationData getGenericSpecialization() {
         for (SpecializationData specialization : specializations) {
-            if (specialization.isGeneric()) {
+            if (specialization.isFallback()) {
                 return specialization;
             }
         }
@@ -368,6 +412,7 @@ public class NodeData extends Template implements Comparable<NodeData> {
         return typeSystem;
     }
 
+    @Override
     public String dump() {
         return dump(0);
     }

@@ -92,15 +92,11 @@ public class DataPatchTest extends GraalCompilerTest {
     }
 
     @NodeInfo
-    private static class ConstantFoldBarrier extends FloatingNode implements LIRLowerable {
+    private static final class ConstantFoldBarrier extends FloatingNode implements LIRLowerable {
 
         @Input protected ValueNode input;
 
-        public static ConstantFoldBarrier create(ValueNode input) {
-            return new ConstantFoldBarrier(input);
-        }
-
-        protected ConstantFoldBarrier(ValueNode input) {
+        public ConstantFoldBarrier(ValueNode input) {
             super(input.stamp());
             this.input = input;
         }

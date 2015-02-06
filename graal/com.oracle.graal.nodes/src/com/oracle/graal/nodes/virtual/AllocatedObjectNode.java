@@ -33,16 +33,12 @@ import com.oracle.graal.nodes.spi.*;
  * {@link VirtualObjectNode}.
  */
 @NodeInfo
-public class AllocatedObjectNode extends FloatingNode implements Virtualizable, ArrayLengthProvider {
+public final class AllocatedObjectNode extends FloatingNode implements Virtualizable, ArrayLengthProvider {
 
     @Input VirtualObjectNode virtualObject;
     @Input(InputType.Extension) CommitAllocationNode commit;
 
-    public static AllocatedObjectNode create(VirtualObjectNode virtualObject) {
-        return new AllocatedObjectNode(virtualObject);
-    }
-
-    protected AllocatedObjectNode(VirtualObjectNode virtualObject) {
+    public AllocatedObjectNode(VirtualObjectNode virtualObject) {
         super(StampFactory.exactNonNull(virtualObject.type()));
         this.virtualObject = virtualObject;
     }

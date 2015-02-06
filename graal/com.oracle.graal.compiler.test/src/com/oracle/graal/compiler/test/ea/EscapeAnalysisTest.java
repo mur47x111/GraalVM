@@ -276,8 +276,9 @@ public class EscapeAnalysisTest extends EATestBase {
         return obj2.x instanceof TestClassObject;
     }
 
+    @SuppressWarnings("unused")
     public static void testNewNodeSnippet() {
-        ValueAnchorNode.create(null);
+        new ValueAnchorNode(null);
     }
 
     /**
@@ -338,8 +339,7 @@ public class EscapeAnalysisTest extends EATestBase {
     @Test
     public void testPeeledLoop() {
         prepareGraph("testPeeledLoopSnippet", false);
-        new LoopTransformHighPhase().apply(graph);
-        new LoopTransformLowPhase().apply(graph);
+        new LoopPeelingPhase().apply(graph);
         new SchedulePhase().apply(graph);
     }
 

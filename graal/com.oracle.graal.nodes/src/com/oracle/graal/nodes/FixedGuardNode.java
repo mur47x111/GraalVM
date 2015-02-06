@@ -30,21 +30,13 @@ import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo(nameTemplate = "FixedGuard(!={p#negated}) {p#reason/s}", allowedUsageTypes = {InputType.Guard})
-public class FixedGuardNode extends AbstractFixedGuardNode implements Lowerable, IterableNodeType {
+public final class FixedGuardNode extends AbstractFixedGuardNode implements Lowerable, IterableNodeType {
 
-    public static FixedGuardNode create(LogicNode condition, DeoptimizationReason deoptReason, DeoptimizationAction action) {
-        return new FixedGuardNode(condition, deoptReason, action);
-    }
-
-    protected FixedGuardNode(LogicNode condition, DeoptimizationReason deoptReason, DeoptimizationAction action) {
+    public FixedGuardNode(LogicNode condition, DeoptimizationReason deoptReason, DeoptimizationAction action) {
         this(condition, deoptReason, action, false);
     }
 
-    public static FixedGuardNode create(LogicNode condition, DeoptimizationReason deoptReason, DeoptimizationAction action, boolean negated) {
-        return new FixedGuardNode(condition, deoptReason, action, negated);
-    }
-
-    protected FixedGuardNode(LogicNode condition, DeoptimizationReason deoptReason, DeoptimizationAction action, boolean negated) {
+    public FixedGuardNode(LogicNode condition, DeoptimizationReason deoptReason, DeoptimizationAction action, boolean negated) {
         super(condition, deoptReason, action, negated);
     }
 
@@ -60,22 +52,38 @@ public class FixedGuardNode extends AbstractFixedGuardNode implements Lowerable,
                     tool.deleteBranch(currentNext);
                 }
 
-                DeoptimizeNode deopt = graph().add(DeoptimizeNode.create(getAction(), getReason()));
+                DeoptimizeNode deopt = graph().add(new DeoptimizeNode(getAction(), getReason()));
                 deopt.setStateBefore(stateBefore());
                 setNext(deopt);
             }
             this.replaceAtUsages(null);
             graph().removeFixed(this);
+        } else if (condition() instanceof ShortCircuitOrNode) {
+            ShortCircuitOrNode shortCircuitOr = (ShortCircuitOrNode) condition();
+            if (isNegated() && hasNoUsages()) {
+                graph().addAfterFixed(this, graph().add(new FixedGuardNode(shortCircuitOr.getY(), getReason(), getAction(), !shortCircuitOr.isYNegated())));
+                graph().replaceFixedWithFixed(this, graph().add(new FixedGuardNode(shortCircuitOr.getX(), getReason(), getAction(), !shortCircuitOr.isXNegated())));
+            }
         }
     }
 
     @Override
     public void lower(LoweringTool tool) {
-        if (graph().getGuardsStage() == StructuredGraph.GuardsStage.FLOATING_GUARDS) {
-            ValueNode guard = tool.createGuard(this, condition(), getReason(), getAction(), isNegated()).asNode();
-            this.replaceAtUsages(guard);
-            ValueAnchorNode newAnchor = graph().add(ValueAnchorNode.create(guard.asNode()));
-            graph().replaceFixedWithFixed(this, newAnchor);
+        if (graph().getGuardsStage().allowsFloatingGuards()) {
+            /*
+             * Don't allow guards with action None and reason RuntimeConstraint to float. In cases
+             * where 2 guards are testing equivalent conditions they might be lowered at the same
+             * location. If the guard with the None action is lowered before the the other guard
+             * then the code will be stuck repeatedly deoptimizing without invalidating the code.
+             * Conditional elimination will eliminate the guard if it's truly redundant in this
+             * case.
+             */
+            if (getAction() != DeoptimizationAction.None || getReason() != DeoptimizationReason.RuntimeConstraint) {
+                ValueNode guard = tool.createGuard(this, condition(), getReason(), getAction(), isNegated()).asNode();
+                this.replaceAtUsages(guard);
+                ValueAnchorNode newAnchor = graph().add(new ValueAnchorNode(guard.asNode()));
+                graph().replaceFixedWithFixed(this, newAnchor);
+            }
         } else {
             lowerToIf().lower(tool);
         }

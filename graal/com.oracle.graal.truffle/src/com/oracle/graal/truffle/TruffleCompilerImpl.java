@@ -31,6 +31,7 @@ import com.oracle.graal.api.code.*;
 import com.oracle.graal.api.code.Assumptions.Assumption;
 import com.oracle.graal.api.code.CallingConvention.Type;
 import com.oracle.graal.api.meta.*;
+import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.api.runtime.*;
 import com.oracle.graal.compiler.target.*;
 import com.oracle.graal.debug.*;
@@ -40,6 +41,7 @@ import com.oracle.graal.debug.internal.*;
 import com.oracle.graal.java.*;
 import com.oracle.graal.lir.asm.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.tiers.*;
@@ -82,9 +84,9 @@ public class TruffleCompilerImpl {
         ResolvedJavaType[] skippedExceptionTypes = getSkippedExceptionTypes(providers.getMetaAccess());
         GraphBuilderConfiguration eagerConfig = GraphBuilderConfiguration.getEagerDefault().withSkippedExceptionTypes(skippedExceptionTypes);
         this.config = GraphBuilderConfiguration.getDefault().withSkippedExceptionTypes(skippedExceptionTypes);
-        this.truffleCache = new TruffleCacheImpl(providers, eagerConfig, config, TruffleCompilerImpl.Optimizations);
+        this.truffleCache = new TruffleCacheImpl(providers, eagerConfig, TruffleCompilerImpl.Optimizations);
 
-        this.partialEvaluator = new PartialEvaluator(providers, truffleCache);
+        this.partialEvaluator = new PartialEvaluator(providers, config, truffleCache, Graal.getRequiredCapability(SnippetReflectionProvider.class));
 
         if (Debug.isEnabled()) {
             DebugEnvironment.initialize(System.out);
@@ -123,6 +125,13 @@ public class TruffleCompilerImpl {
                 return;
             }
 
+            if (!TruffleCompilerOptions.TruffleInlineAcrossTruffleBoundary.getValue()) {
+                // Do not inline across Truffle boundaries.
+                for (MethodCallTargetNode mct : graph.getNodes(MethodCallTargetNode.class)) {
+                    mct.invoke().setUseForInlining(false);
+                }
+            }
+
             compilationNotify.notifyCompilationTruffleTierFinished(compilable, graph);
             CompilationResult compilationResult = compileMethodHelper(graph, assumptions, compilable.toString(), compilable.getSpeculationLog(), compilable);
             compilationNotify.notifyCompilationSuccess(compilable, graph, compilationResult);
@@ -144,7 +153,7 @@ public class TruffleCompilerImpl {
             CodeCacheProvider codeCache = providers.getCodeCache();
             CallingConvention cc = getCallingConvention(codeCache, Type.JavaCallee, graph.method(), false);
             CompilationResult compilationResult = new CompilationResult(name);
-            result = compileGraph(graph, null, cc, graph.method(), providers, backend, codeCache.getTarget(), null, createGraphBuilderSuite(), Optimizations, getProfilingInfo(graph), speculationLog,
+            result = compileGraph(graph, cc, graph.method(), providers, backend, codeCache.getTarget(), null, createGraphBuilderSuite(), Optimizations, getProfilingInfo(graph), speculationLog,
                             suites, compilationResult, CompilationResultBuilderFactory.Default);
         } catch (Throwable e) {
             throw Debug.handle(e);
@@ -188,8 +197,9 @@ public class TruffleCompilerImpl {
     private PhaseSuite<HighTierContext> createGraphBuilderSuite() {
         PhaseSuite<HighTierContext> suite = backend.getSuites().getDefaultGraphBuilderSuite().copy();
         ListIterator<BasePhase<? super HighTierContext>> iterator = suite.findPhase(GraphBuilderPhase.class);
+        GraphBuilderPhase graphBuilderPhase = (GraphBuilderPhase) iterator.previous();
         iterator.remove();
-        iterator.add(new GraphBuilderPhase(config));
+        iterator.add(new GraphBuilderPhase(config, graphBuilderPhase.getGraphBuilderPlugins()));
         return suite;
     }
 

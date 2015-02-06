@@ -38,7 +38,7 @@ import com.oracle.graal.word.*;
  * expected value or the compared against value instead of a boolean.
  */
 @NodeInfo(allowedUsageTypes = {InputType.Memory})
-public class DirectCompareAndSwapNode extends FixedWithNextNode implements LIRLowerable, MemoryCheckpoint.Single {
+public final class DirectCompareAndSwapNode extends FixedWithNextNode implements LIRLowerable, MemoryCheckpoint.Single {
 
     @Input ValueNode object;
     @Input ValueNode offset;
@@ -47,11 +47,7 @@ public class DirectCompareAndSwapNode extends FixedWithNextNode implements LIRLo
 
     protected final LocationIdentity locationIdentity;
 
-    public static DirectCompareAndSwapNode create(ValueNode object, ValueNode offset, ValueNode expected, ValueNode newValue, LocationIdentity locationIdentity) {
-        return new DirectCompareAndSwapNode(object, offset, expected, newValue, locationIdentity);
-    }
-
-    protected DirectCompareAndSwapNode(ValueNode object, ValueNode offset, ValueNode expected, ValueNode newValue, LocationIdentity locationIdentity) {
+    public DirectCompareAndSwapNode(ValueNode object, ValueNode offset, ValueNode expected, ValueNode newValue, LocationIdentity locationIdentity) {
         super(expected.stamp());
         this.object = object;
         this.offset = offset;

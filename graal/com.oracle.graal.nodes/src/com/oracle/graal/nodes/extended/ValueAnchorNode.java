@@ -38,11 +38,7 @@ public class ValueAnchorNode extends FixedWithNextNode implements LIRLowerable, 
 
     @OptionalInput(InputType.Guard) ValueNode anchored;
 
-    public static ValueAnchorNode create(ValueNode value) {
-        return new ValueAnchorNode(value);
-    }
-
-    protected ValueAnchorNode(ValueNode value) {
+    public ValueAnchorNode(ValueNode value) {
         super(StampFactory.forVoid());
         this.anchored = value;
     }
@@ -69,7 +65,7 @@ public class ValueAnchorNode extends FixedWithNextNode implements LIRLowerable, 
                 break;
             }
         }
-        if (usages().isEmpty() && next() instanceof FixedAccessNode) {
+        if (hasNoUsages() && next() instanceof FixedAccessNode) {
             FixedAccessNode currentNext = (FixedAccessNode) next();
             if (currentNext.getGuard() == anchored) {
                 GraphUtil.removeFixedWithUnusedInputs(this);
@@ -87,7 +83,7 @@ public class ValueAnchorNode extends FixedWithNextNode implements LIRLowerable, 
             removeAnchoredNode();
         }
 
-        if (anchored == null && usages().isEmpty()) {
+        if (anchored == null && hasNoUsages()) {
             // anchor is not necessary any more => remove.
             GraphUtil.removeFixedWithUnusedInputs(this);
         }
@@ -95,7 +91,7 @@ public class ValueAnchorNode extends FixedWithNextNode implements LIRLowerable, 
 
     @Override
     public void virtualize(VirtualizerTool tool) {
-        if (anchored != null && !(anchored instanceof BeginNode)) {
+        if (anchored != null && !(anchored instanceof AbstractBeginNode)) {
             State state = tool.getObjectState(anchored);
             if (state == null || state.getState() != EscapeState.Virtual) {
                 return;

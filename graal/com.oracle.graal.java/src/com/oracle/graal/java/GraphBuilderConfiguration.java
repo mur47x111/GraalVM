@@ -36,6 +36,10 @@ public class GraphBuilderConfiguration {
     private final ResolvedJavaType[] skippedExceptionTypes;
     private final DebugInfoMode debugInfoMode;
     private final boolean doLivenessAnalysis;
+    private GraphBuilderPlugins.LoadFieldPlugin loadFieldPlugin;
+    private GraphBuilderPlugins.ParameterPlugin parameterPlugin;
+    private GraphBuilderPlugins.InlineInvokePlugin inlineInvokePlugin;
+    private GraphBuilderPlugins.LoopExplosionPlugin loopExplosionPlugin;
 
     public static enum DebugInfoMode {
         SafePointsOnly,
@@ -69,8 +73,18 @@ public class GraphBuilderConfiguration {
         this.doLivenessAnalysis = doLivenessAnalysis;
     }
 
+    public GraphBuilderConfiguration copy() {
+        GraphBuilderConfiguration result = new GraphBuilderConfiguration(eagerResolving, omitAllExceptionEdges, debugInfoMode, skippedExceptionTypes, doLivenessAnalysis);
+        result.loadFieldPlugin = loadFieldPlugin;
+        return result;
+    }
+
     public GraphBuilderConfiguration withSkippedExceptionTypes(ResolvedJavaType[] newSkippedExceptionTypes) {
         return new GraphBuilderConfiguration(eagerResolving, omitAllExceptionEdges, debugInfoMode, newSkippedExceptionTypes, doLivenessAnalysis);
+    }
+
+    public GraphBuilderConfiguration withOmitAllExceptionEdges(boolean newOmitAllExceptionEdges) {
+        return new GraphBuilderConfiguration(eagerResolving, newOmitAllExceptionEdges, debugInfoMode, skippedExceptionTypes, doLivenessAnalysis);
     }
 
     public GraphBuilderConfiguration withDebugInfoMode(DebugInfoMode newDebugInfoMode) {
@@ -80,6 +94,14 @@ public class GraphBuilderConfiguration {
 
     public GraphBuilderConfiguration withDoLivenessAnalysis(boolean newLivenessAnalysis) {
         return new GraphBuilderConfiguration(eagerResolving, omitAllExceptionEdges, debugInfoMode, skippedExceptionTypes, newLivenessAnalysis);
+    }
+
+    public GraphBuilderPlugins.LoadFieldPlugin getLoadFieldPlugin() {
+        return loadFieldPlugin;
+    }
+
+    public void setLoadFieldPlugin(GraphBuilderPlugins.LoadFieldPlugin loadFieldPlugin) {
+        this.loadFieldPlugin = loadFieldPlugin;
     }
 
     public ResolvedJavaType[] getSkippedExceptionTypes() {
@@ -129,5 +151,29 @@ public class GraphBuilderConfiguration {
      */
     public boolean unresolvedIsError() {
         return eagerResolving;
+    }
+
+    public GraphBuilderPlugins.ParameterPlugin getParameterPlugin() {
+        return parameterPlugin;
+    }
+
+    public void setParameterPlugin(GraphBuilderPlugins.ParameterPlugin parameterPlugin) {
+        this.parameterPlugin = parameterPlugin;
+    }
+
+    public GraphBuilderPlugins.InlineInvokePlugin getInlineInvokePlugin() {
+        return inlineInvokePlugin;
+    }
+
+    public void setInlineInvokePlugin(GraphBuilderPlugins.InlineInvokePlugin inlineInvokePlugin) {
+        this.inlineInvokePlugin = inlineInvokePlugin;
+    }
+
+    public GraphBuilderPlugins.LoopExplosionPlugin getLoopExplosionPlugin() {
+        return loopExplosionPlugin;
+    }
+
+    public void setLoopExplosionPlugin(GraphBuilderPlugins.LoopExplosionPlugin loopExplosionPlugin) {
+        this.loopExplosionPlugin = loopExplosionPlugin;
     }
 }

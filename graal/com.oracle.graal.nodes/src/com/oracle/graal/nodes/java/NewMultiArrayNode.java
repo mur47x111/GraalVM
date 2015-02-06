@@ -33,7 +33,7 @@ import com.oracle.graal.nodes.spi.*;
  * The {@code NewMultiArrayNode} represents an allocation of a multi-dimensional object array.
  */
 @NodeInfo
-public class NewMultiArrayNode extends DeoptimizingFixedWithNextNode implements Lowerable, ArrayLengthProvider {
+public final class NewMultiArrayNode extends DeoptimizingFixedWithNextNode implements Lowerable, ArrayLengthProvider {
 
     @Input protected NodeInputList<ValueNode> dimensions;
     protected final ResolvedJavaType type;
@@ -50,17 +50,7 @@ public class NewMultiArrayNode extends DeoptimizingFixedWithNextNode implements 
         return dimensions;
     }
 
-    /**
-     * Constructs a new NewMultiArrayNode.
-     *
-     * @param type the element type of the array
-     * @param dimensions the node which produce the dimensions for this array
-     */
-    public static NewMultiArrayNode create(ResolvedJavaType type, ValueNode[] dimensions) {
-        return new NewMultiArrayNode(type, dimensions);
-    }
-
-    protected NewMultiArrayNode(ResolvedJavaType type, ValueNode[] dimensions) {
+    public NewMultiArrayNode(ResolvedJavaType type, ValueNode[] dimensions) {
         super(StampFactory.exactNonNull(type));
         this.type = type;
         this.dimensions = new NodeInputList<>(this, dimensions);

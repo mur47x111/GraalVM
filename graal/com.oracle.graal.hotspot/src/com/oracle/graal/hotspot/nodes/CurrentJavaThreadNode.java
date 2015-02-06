@@ -38,15 +38,11 @@ import com.oracle.graal.word.*;
  * Gets the address of the C++ JavaThread object for the current thread.
  */
 @NodeInfo
-public class CurrentJavaThreadNode extends FloatingNode implements LIRLowerable {
+public final class CurrentJavaThreadNode extends FloatingNode implements LIRLowerable {
 
     protected LIRKind wordKind;
 
-    public static CurrentJavaThreadNode create(Kind kind) {
-        return new CurrentJavaThreadNode(kind);
-    }
-
-    protected CurrentJavaThreadNode(Kind kind) {
+    public CurrentJavaThreadNode(Kind kind) {
         super(StampFactory.forKind(kind));
         this.wordKind = LIRKind.value(kind);
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,6 +41,9 @@ import com.oracle.graal.compiler.common.type.ArithmeticOpTable.BinaryOp.Xor;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.IntegerConvertOp.Narrow;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.IntegerConvertOp.SignExtend;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.IntegerConvertOp.ZeroExtend;
+import com.oracle.graal.compiler.common.type.ArithmeticOpTable.ShiftOp.Shl;
+import com.oracle.graal.compiler.common.type.ArithmeticOpTable.ShiftOp.Shr;
+import com.oracle.graal.compiler.common.type.ArithmeticOpTable.ShiftOp.UShr;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.UnaryOp.Abs;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.UnaryOp.Neg;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.UnaryOp.Not;
@@ -64,6 +67,10 @@ public final class ArithmeticOpTable {
     private final BinaryOp<Or> or;
     private final BinaryOp<Xor> xor;
 
+    private final ShiftOp<Shl> shl;
+    private final ShiftOp<Shr> shr;
+    private final ShiftOp<UShr> ushr;
+
     private final UnaryOp<Abs> abs;
     private final UnaryOp<Sqrt> sqrt;
 
@@ -72,6 +79,7 @@ public final class ArithmeticOpTable {
     private final IntegerConvertOp<Narrow> narrow;
 
     private final FloatConvertOp[] floatConvert;
+    private final int hash;
 
     public static ArithmeticOpTable forStamp(Stamp s) {
         if (s instanceof ArithmeticStamp) {
@@ -81,12 +89,12 @@ public final class ArithmeticOpTable {
         }
     }
 
-    public static final ArithmeticOpTable EMPTY = new ArithmeticOpTable(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    public static final ArithmeticOpTable EMPTY = new ArithmeticOpTable(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
     public ArithmeticOpTable(UnaryOp<Neg> neg, BinaryOp<Add> add, BinaryOp<Sub> sub, BinaryOp<Mul> mul, BinaryOp<Div> div, BinaryOp<Rem> rem, UnaryOp<Not> not, BinaryOp<And> and, BinaryOp<Or> or,
-                    BinaryOp<Xor> xor, UnaryOp<Abs> abs, UnaryOp<Sqrt> sqrt, IntegerConvertOp<ZeroExtend> zeroExtend, IntegerConvertOp<SignExtend> signExtend, IntegerConvertOp<Narrow> narrow,
-                    FloatConvertOp... floatConvert) {
-        this(neg, add, sub, mul, div, rem, not, and, or, xor, abs, sqrt, zeroExtend, signExtend, narrow, Stream.of(floatConvert));
+                    BinaryOp<Xor> xor, ShiftOp<Shl> shl, ShiftOp<Shr> shr, ShiftOp<UShr> ushr, UnaryOp<Abs> abs, UnaryOp<Sqrt> sqrt, IntegerConvertOp<ZeroExtend> zeroExtend,
+                    IntegerConvertOp<SignExtend> signExtend, IntegerConvertOp<Narrow> narrow, FloatConvertOp... floatConvert) {
+        this(neg, add, sub, mul, div, rem, not, and, or, xor, shl, shr, ushr, abs, sqrt, zeroExtend, signExtend, narrow, Stream.of(floatConvert));
     }
 
     public interface ArithmeticOpWrapper {
@@ -94,6 +102,8 @@ public final class ArithmeticOpTable {
         <OP> UnaryOp<OP> wrapUnaryOp(UnaryOp<OP> op);
 
         <OP> BinaryOp<OP> wrapBinaryOp(BinaryOp<OP> op);
+
+        <OP> ShiftOp<OP> wrapShiftOp(ShiftOp<OP> op);
 
         <OP> IntegerConvertOp<OP> wrapIntegerConvertOp(IntegerConvertOp<OP> op);
 
@@ -122,6 +132,10 @@ public final class ArithmeticOpTable {
         BinaryOp<Or> or = wrapIfNonNull(wrapper::wrapBinaryOp, inner.getOr());
         BinaryOp<Xor> xor = wrapIfNonNull(wrapper::wrapBinaryOp, inner.getXor());
 
+        ShiftOp<Shl> shl = wrapIfNonNull(wrapper::wrapShiftOp, inner.getShl());
+        ShiftOp<Shr> shr = wrapIfNonNull(wrapper::wrapShiftOp, inner.getShr());
+        ShiftOp<UShr> ushr = wrapIfNonNull(wrapper::wrapShiftOp, inner.getUShr());
+
         UnaryOp<Abs> abs = wrapIfNonNull(wrapper::wrapUnaryOp, inner.getAbs());
         UnaryOp<Sqrt> sqrt = wrapIfNonNull(wrapper::wrapUnaryOp, inner.getSqrt());
 
@@ -131,12 +145,12 @@ public final class ArithmeticOpTable {
 
         Stream<FloatConvertOp> floatConvert = Stream.of(inner.floatConvert).filter(Objects::nonNull).map(wrapper::wrapFloatConvertOp);
 
-        return new ArithmeticOpTable(neg, add, sub, mul, div, rem, not, and, or, xor, abs, sqrt, zeroExtend, signExtend, narrow, floatConvert);
+        return new ArithmeticOpTable(neg, add, sub, mul, div, rem, not, and, or, xor, shl, shr, ushr, abs, sqrt, zeroExtend, signExtend, narrow, floatConvert);
     }
 
     private ArithmeticOpTable(UnaryOp<Neg> neg, BinaryOp<Add> add, BinaryOp<Sub> sub, BinaryOp<Mul> mul, BinaryOp<Div> div, BinaryOp<Rem> rem, UnaryOp<Not> not, BinaryOp<And> and, BinaryOp<Or> or,
-                    BinaryOp<Xor> xor, UnaryOp<Abs> abs, UnaryOp<Sqrt> sqrt, IntegerConvertOp<ZeroExtend> zeroExtend, IntegerConvertOp<SignExtend> signExtend, IntegerConvertOp<Narrow> narrow,
-                    Stream<FloatConvertOp> floatConvert) {
+                    BinaryOp<Xor> xor, ShiftOp<Shl> shl, ShiftOp<Shr> shr, ShiftOp<UShr> ushr, UnaryOp<Abs> abs, UnaryOp<Sqrt> sqrt, IntegerConvertOp<ZeroExtend> zeroExtend,
+                    IntegerConvertOp<SignExtend> signExtend, IntegerConvertOp<Narrow> narrow, Stream<FloatConvertOp> floatConvert) {
         this.neg = neg;
         this.add = add;
         this.sub = sub;
@@ -147,6 +161,9 @@ public final class ArithmeticOpTable {
         this.and = and;
         this.or = or;
         this.xor = xor;
+        this.shl = shl;
+        this.shr = shr;
+        this.ushr = ushr;
         this.abs = abs;
         this.sqrt = sqrt;
         this.zeroExtend = zeroExtend;
@@ -154,6 +171,13 @@ public final class ArithmeticOpTable {
         this.narrow = narrow;
         this.floatConvert = new FloatConvertOp[FloatConvert.values().length];
         floatConvert.forEach(op -> this.floatConvert[op.getFloatConvert().ordinal()] = op);
+
+        this.hash = Objects.hash(neg, add, sub, mul, div, rem, not, and, or, xor, shl, shr, ushr, abs, sqrt, zeroExtend, signExtend, narrow);
+    }
+
+    @Override
+    public int hashCode() {
+        return hash;
     }
 
     /**
@@ -227,6 +251,27 @@ public final class ArithmeticOpTable {
     }
 
     /**
+     * Describes the shift left operation.
+     */
+    public ShiftOp<Shl> getShl() {
+        return shl;
+    }
+
+    /**
+     * Describes the signed shift right operation.
+     */
+    public ShiftOp<Shr> getShr() {
+        return shr;
+    }
+
+    /**
+     * Describes the unsigned shift right operation.
+     */
+    public ShiftOp<UShr> getUShr() {
+        return ushr;
+    }
+
+    /**
      * Describes the absolute value operation.
      */
     public UnaryOp<Abs> getAbs() {
@@ -272,10 +317,53 @@ public final class ArithmeticOpTable {
         return Arrays.asList(ops).stream().map(o -> o == null ? "null" : o.operator + "{" + getSimpleName(o.getClass(), false) + "}").collect(Collectors.joining(","));
     }
 
+    private boolean opsEquals(ArithmeticOpTable that) {
+        // @formatter:off
+        return Objects.equals(neg, that.neg) &&
+               Objects.equals(add, that.add) &&
+               Objects.equals(sub, that.sub) &&
+               Objects.equals(mul, that.mul) &&
+               Objects.equals(div, that.div) &&
+               Objects.equals(rem, that.rem) &&
+               Objects.equals(not, that.not) &&
+               Objects.equals(and, that.and) &&
+               Objects.equals(or, that.or) &&
+               Objects.equals(xor, that.xor) &&
+               Objects.equals(shl, that.shl) &&
+               Objects.equals(shr, that.shr) &&
+               Objects.equals(ushr, that.ushr) &&
+               Objects.equals(abs, that.abs) &&
+               Objects.equals(sqrt, that.sqrt) &&
+               Objects.equals(zeroExtend, that.zeroExtend) &&
+               Objects.equals(signExtend, that.signExtend) &&
+               Objects.equals(narrow, that.narrow);
+        // @formatter:on
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        ArithmeticOpTable that = (ArithmeticOpTable) obj;
+        if (opsEquals(that)) {
+            if (Arrays.equals(this.floatConvert, that.floatConvert)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "[" + toString(neg, add, sub, mul, div, rem, not, and, or, xor, abs, sqrt, zeroExtend, signExtend, narrow) + ",floatConvert[" + toString(floatConvert) +
-                        "]]";
+        return getClass().getSimpleName() + "[" + toString(neg, add, sub, mul, div, rem, not, and, or, xor, shl, shr, ushr, abs, sqrt, zeroExtend, signExtend, narrow) + ",floatConvert[" +
+                        toString(floatConvert) + "]]";
     }
 
     public abstract static class Op {
@@ -292,19 +380,26 @@ public final class ArithmeticOpTable {
         }
 
         @Override
-        public boolean equals(Object obj) {
-            if (obj == this) {
-                return true;
-            }
-            if (obj != null && getClass() == obj.getClass()) {
-                return obj.toString().equals(toString());
-            }
-            return false;
+        public int hashCode() {
+            return operator.hashCode();
         }
 
         @Override
-        public int hashCode() {
-            return toString().hashCode();
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (obj == null) {
+                return false;
+            }
+            if (getClass() != obj.getClass()) {
+                return false;
+            }
+            Op that = (Op) obj;
+            if (operator.equals(that.operator)) {
+                return true;
+            }
+            return true;
         }
     }
 
@@ -488,6 +583,36 @@ public final class ArithmeticOpTable {
         }
 
         @Override
+        public int hashCode() {
+            final int prime = 31;
+            int result = super.hashCode();
+            result = prime * result + (associative ? 1231 : 1237);
+            result = prime * result + (commutative ? 1231 : 1237);
+            return result;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (!super.equals(obj)) {
+                return false;
+            }
+            if (getClass() != obj.getClass()) {
+                return false;
+            }
+            BinaryOp<?> that = (BinaryOp<?>) obj;
+            if (associative != that.associative) {
+                return false;
+            }
+            if (commutative != that.commutative) {
+                return false;
+            }
+            return true;
+        }
+
+        @Override
         public String toString() {
             if (associative) {
                 if (commutative) {
@@ -500,6 +625,53 @@ public final class ArithmeticOpTable {
             }
             return super.toString();
         }
+    }
+
+    /**
+     * Describes a shift operation. The right argument of a shift operation always has kind
+     * {@link Kind#Int}.
+     */
+    public abstract static class ShiftOp<OP> extends Op {
+
+        public abstract static class Shl extends ShiftOp<Shl> {
+
+            public Shl() {
+                super("<<");
+            }
+        }
+
+        public abstract static class Shr extends ShiftOp<Shr> {
+
+            public Shr() {
+                super(">>");
+            }
+        }
+
+        public abstract static class UShr extends ShiftOp<UShr> {
+
+            public UShr() {
+                super(">>>");
+            }
+        }
+
+        protected ShiftOp(String operation) {
+            super(operation);
+        }
+
+        /**
+         * Apply the shift to a constant.
+         */
+        public abstract Constant foldConstant(Constant c, int amount);
+
+        /**
+         * Apply the shift to a stamp.
+         */
+        public abstract Stamp foldStamp(Stamp s, IntegerStamp amount);
+
+        /**
+         * Get the shift amount mask for a given result stamp.
+         */
+        public abstract int getShiftAmountMask(Stamp s);
     }
 
     public abstract static class FloatConvertOp extends UnaryOp<FloatConvertOp> {
@@ -518,6 +690,30 @@ public final class ArithmeticOpTable {
         @Override
         public FloatConvertOp unwrap() {
             return this;
+        }
+
+        @Override
+        public int hashCode() {
+            final int prime = 31;
+            return prime * super.hashCode() + op.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (!super.equals(obj)) {
+                return false;
+            }
+            if (getClass() != obj.getClass()) {
+                return false;
+            }
+            FloatConvertOp that = (FloatConvertOp) obj;
+            if (op != that.op) {
+                return false;
+            }
+            return true;
         }
     }
 

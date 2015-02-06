@@ -36,18 +36,14 @@ import com.oracle.graal.nodes.spi.*;
  * may need to insert a check.
  */
 @NodeInfo
-public class AssertionNode extends FixedWithNextNode implements Lowerable, Canonicalizable, LIRLowerable {
+public final class AssertionNode extends FixedWithNextNode implements Lowerable, Canonicalizable, LIRLowerable {
 
     @Input ValueNode value;
 
     protected final boolean compileTimeAssertion;
     protected final String message;
 
-    public static AssertionNode create(boolean compileTimeAssertion, ValueNode value, String message) {
-        return new AssertionNode(compileTimeAssertion, value, message);
-    }
-
-    protected AssertionNode(boolean compileTimeAssertion, ValueNode value, String message) {
+    public AssertionNode(boolean compileTimeAssertion, ValueNode value, String message) {
         super(StampFactory.forVoid());
         this.value = value;
         this.compileTimeAssertion = compileTimeAssertion;

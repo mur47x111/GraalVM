@@ -31,6 +31,8 @@ import java.util.*;
 import sun.misc.*;
 
 import com.oracle.graal.compiler.common.*;
+import com.oracle.graal.debug.*;
+import com.oracle.graal.graph.Graph.NodeEvent;
 import com.oracle.graal.graph.Graph.NodeEventListener;
 import com.oracle.graal.graph.iterators.*;
 import com.oracle.graal.graph.spi.*;
@@ -188,14 +190,17 @@ public abstract class Node implements Cloneable, Formattable {
     Node usage0;
     Node usage1;
     Node[] extraUsages;
+    int extraUsagesCount;
 
     private Node predecessor;
+    private NodeClass nodeClass;
 
     public static final int NODE_LIST = -2;
     public static final int NOT_ITERABLE = -1;
 
     public Node() {
         init();
+        this.nodeClass = NodeClass.get(this.getClass());
     }
 
     final void init() {
@@ -287,14 +292,14 @@ public abstract class Node implements Cloneable, Formattable {
     /**
      * Gets the maximum number of usages this node has had at any point in time.
      */
-    int getUsageCountUpperBound() {
+    public int getUsageCount() {
         if (usage0 == null) {
             return 0;
         }
         if (usage1 == null) {
             return 1;
         }
-        return 2 + extraUsages.length;
+        return 2 + extraUsagesCount;
     }
 
     /**
@@ -305,37 +310,10 @@ public abstract class Node implements Cloneable, Formattable {
     }
 
     /**
-     * Finds the index of the last non-null entry in a node array. The search assumes that all
-     * non-null entries precede the first null entry in the array.
-     *
-     * @param nodes the array to search
-     * @return the index of the last non-null entry in {@code nodes} if it exists, else -1
+     * Checks whether this node has no usages.
      */
-    private static int indexOfLastNonNull(Node[] nodes) {
-        if (nodes.length == 0 || nodes[0] == null) {
-            return -1;
-        }
-        if (nodes[nodes.length - 1] != null) {
-            return nodes.length - 1;
-        }
-
-        // binary search
-        int low = 0;
-        int high = nodes.length - 1;
-        while (true) {
-            int mid = (low + high) >>> 1;
-            if (nodes[mid] == null) {
-                if (nodes[mid - 1] != null) {
-                    return mid - 1;
-                }
-                high = mid - 1;
-            } else {
-                if (mid == nodes.length - 1 || nodes[mid + 1] == null) {
-                    return mid;
-                }
-                low = mid + 1;
-            }
-        }
+    public final boolean hasNoUsages() {
+        return this.usage0 == null;
     }
 
     /**
@@ -353,94 +331,38 @@ public abstract class Node implements Cloneable, Formattable {
             int length = extraUsages.length;
             if (length == 0) {
                 extraUsages = new Node[4];
-                extraUsages[0] = node;
-            } else {
-                int lastNonNull = indexOfLastNonNull(extraUsages);
-                if (lastNonNull == length - 1) {
-                    extraUsages = Arrays.copyOf(extraUsages, length * 2 + 1);
-                    extraUsages[length] = node;
-                } else if (lastNonNull == -1) {
-                    extraUsages[0] = node;
-                } else {
-                    extraUsages[lastNonNull + 1] = node;
-                }
+            } else if (extraUsagesCount == length) {
+                extraUsages = Arrays.copyOf(extraUsages, length * 2 + 1);
             }
+            extraUsages[extraUsagesCount++] = node;
         }
     }
 
-    int usageCount() {
-        if (usage0 == null) {
-            return 0;
-        }
-        if (usage1 == null) {
-            return 1;
-        }
-        return 2 + indexOfLastNonNull(extraUsages) + 1;
-    }
-
-    /**
-     * Remove all usages between {@code fromIndex} and {@code toIndex} (exclusive), also, if
-     * {@code toIndex} is a valid usage, it is moved to {@code fromIndex}.
-     *
-     * <p>
-     * Visually,
-     *
-     * <pre>
-     * {@code
-     * [1, 2, 3, 4, 5, 6, 7].removeUsagesAndShiftFirst(1, 2) == [1, 4, 6, 7, 5, null, null]}
-     * </pre>
-     *
-     *
-     * @param fromIndex the index of the first element to be removed
-     * @param toIndex the index after the last element to be removed
-     */
-    private void removeUsagesAndShiftFirst(int fromIndex, int toIndex) {
-        assert fromIndex < toIndex;
-        int firstNullIndex = usageCount();
-        assert toIndex <= firstNullIndex;
-        int i = fromIndex;
-        int limit = toIndex;
-        if (toIndex < firstNullIndex) {
-            // move usage at toIndex to fromIndex(!)
-            movUsageTo(toIndex, fromIndex);
-            limit++;
-            i++;
-        }
-        while (i < limit && firstNullIndex > limit) {
-            movUsageTo(firstNullIndex - 1, i);
-            firstNullIndex--;
-            i++;
-        }
-        while (i < limit) {
-            if (i == 0) {
+    private void movUsageFromEndTo(int destIndex) {
+        int lastIndex = this.getUsageCount() - 1;
+        if (destIndex == 0) {
+            if (lastIndex == 0) {
                 usage0 = null;
-            } else if (i == 1) {
-                usage1 = null;
-            } else {
-                extraUsages[i - INLINE_USAGE_COUNT] = null;
-            }
-            i++;
-        }
-
-    }
-
-    private void movUsageTo(int usageIndex, int toIndex) {
-        assert usageIndex > toIndex;
-        if (toIndex == 0) {
-            if (usageIndex == 1) {
+                return;
+            } else if (lastIndex == 1) {
                 usage0 = usage1;
                 usage1 = null;
+                return;
             } else {
-                usage0 = extraUsages[usageIndex - INLINE_USAGE_COUNT];
-                extraUsages[usageIndex - INLINE_USAGE_COUNT] = null;
+                usage0 = extraUsages[lastIndex - INLINE_USAGE_COUNT];
             }
-        } else if (toIndex == 1) {
-            usage1 = extraUsages[usageIndex - INLINE_USAGE_COUNT];
-            extraUsages[usageIndex - INLINE_USAGE_COUNT] = null;
+        } else if (destIndex == 1) {
+            if (lastIndex == 1) {
+                usage1 = null;
+                return;
+            }
+            usage1 = extraUsages[lastIndex - INLINE_USAGE_COUNT];
         } else {
-            extraUsages[toIndex - INLINE_USAGE_COUNT] = extraUsages[usageIndex - INLINE_USAGE_COUNT];
-            extraUsages[usageIndex - INLINE_USAGE_COUNT] = null;
+            Node n = extraUsages[lastIndex - INLINE_USAGE_COUNT];
+            extraUsages[destIndex - INLINE_USAGE_COUNT] = n;
         }
+        extraUsages[lastIndex - INLINE_USAGE_COUNT] = null;
+        this.extraUsagesCount--;
     }
 
     /**
@@ -455,46 +377,18 @@ public abstract class Node implements Cloneable, Formattable {
         // the usage list has no null element preceding a non-null element
         incUsageModCount();
         if (usage0 == node) {
-            if (usage1 != null) {
-                int lastNonNull = indexOfLastNonNull(extraUsages);
-                if (lastNonNull >= 0) {
-                    usage0 = extraUsages[lastNonNull];
-                    extraUsages[lastNonNull] = null;
-                } else {
-                    // usage1 is the last element
-                    usage0 = usage1;
-                    usage1 = null;
-                }
-            } else {
-                // usage0 is the last element
-                usage0 = null;
-            }
+            this.movUsageFromEndTo(0);
             return true;
         }
         if (usage1 == node) {
-            int lastNonNull = indexOfLastNonNull(extraUsages);
-            if (lastNonNull >= 0) {
-                usage1 = extraUsages[lastNonNull];
-                extraUsages[lastNonNull] = null;
-            } else {
-                // usage1 is the last element
-                usage1 = null;
-            }
+            this.movUsageFromEndTo(1);
             return true;
         }
-        int matchIndex = -1;
-        int i = 0;
-        Node n;
-        while (i < extraUsages.length && (n = extraUsages[i]) != null) {
-            if (n == node) {
-                matchIndex = i;
+        for (int i = 0; i < this.extraUsagesCount; ++i) {
+            if (extraUsages[i] == node) {
+                this.movUsageFromEndTo(i + INLINE_USAGE_COUNT);
+                return true;
             }
-            i++;
-        }
-        if (matchIndex >= 0) {
-            extraUsages[matchIndex] = extraUsages[i - 1];
-            extraUsages[i - 1] = null;
-            return true;
         }
         return false;
     }
@@ -504,6 +398,7 @@ public abstract class Node implements Cloneable, Formattable {
         usage0 = null;
         usage1 = null;
         extraUsages = NO_NODES;
+        extraUsagesCount = 0;
     }
 
     public final Node predecessor() {
@@ -560,7 +455,7 @@ public abstract class Node implements Cloneable, Formattable {
             if (newInput != null) {
                 newInput.addUsage(this);
             }
-            if (oldInput != null && oldInput.usages().isEmpty()) {
+            if (oldInput != null && oldInput.hasNoUsages()) {
                 maybeNotifyZeroUsages(oldInput);
             }
         }
@@ -603,7 +498,7 @@ public abstract class Node implements Cloneable, Formattable {
     }
 
     public final NodeClass getNodeClass() {
-        return NodeClass.get(getClass());
+        return nodeClass;
     }
 
     public boolean isAllowedUsageType(InputType type) {
@@ -631,35 +526,32 @@ public abstract class Node implements Cloneable, Formattable {
         clearUsages();
     }
 
+    public Node getUsageAt(int index) {
+        if (index == 0) {
+            return this.usage0;
+        } else if (index == 1) {
+            return this.usage1;
+        } else {
+            return this.extraUsages[index - INLINE_USAGE_COUNT];
+        }
+    }
+
     public void replaceAtMatchingUsages(Node other, NodePredicate usagePredicate) {
         assert checkReplaceWith(other);
-        NodeUsageIterator it = (NodeUsageIterator) usages().iterator();
-        int removeStart = -1;
-        while (it.hasNext()) {
-            Node usage = it.next();
+        int index = 0;
+        while (index < this.getUsageCount()) {
+            Node usage = getUsageAt(index);
             if (usagePredicate.apply(usage)) {
-                if (removeStart < 0) {
-                    removeStart = it.index - 1;
-                }
                 boolean result = usage.getNodeClass().getEdges(Inputs).replaceFirst(usage, this, other);
                 assert assertTrue(result, "not found in inputs, usage: %s", usage);
                 if (other != null) {
                     maybeNotifyInputChanged(usage);
                     other.addUsage(usage);
                 }
+                this.movUsageFromEndTo(index);
             } else {
-                if (removeStart >= 0) {
-                    int removeEndIndex = it.index - 1;
-                    removeUsagesAndShiftFirst(removeStart, removeEndIndex);
-                    it.index = removeStart;
-                    it.advance();
-                    removeStart = -1;
-                }
+                index++;
             }
-        }
-        if (removeStart >= 0) {
-            int removeEndIndex = it.index;
-            removeUsagesAndShiftFirst(removeStart, removeEndIndex);
         }
     }
 
@@ -683,6 +575,9 @@ public abstract class Node implements Cloneable, Formattable {
             if (listener != null) {
                 listener.inputChanged(node);
             }
+            if (Fingerprint.ENABLED) {
+                Fingerprint.submit("%s: %s", NodeEvent.INPUT_CHANGED, node);
+            }
         }
     }
 
@@ -692,6 +587,9 @@ public abstract class Node implements Cloneable, Formattable {
             NodeEventListener listener = graph.nodeEventListener;
             if (listener != null) {
                 listener.usagesDroppedToZero(node);
+            }
+            if (Fingerprint.ENABLED) {
+                Fingerprint.submit("%s: %s", NodeEvent.ZERO_USAGES, node);
             }
         }
     }
@@ -730,7 +628,7 @@ public abstract class Node implements Cloneable, Formattable {
     private void unregisterInputs() {
         for (Node input : inputs()) {
             removeThisFromUsages(input);
-            if (input.usages().isEmpty()) {
+            if (input.hasNoUsages()) {
                 maybeNotifyZeroUsages(input);
             }
         }
@@ -762,7 +660,7 @@ public abstract class Node implements Cloneable, Formattable {
     }
 
     private boolean checkDeletion() {
-        assertTrue(usages().isEmpty(), "cannot delete node %s because of usages: %s", this, usages());
+        assertTrue(hasNoUsages(), "cannot delete node %s because of usages: %s", this, usages());
         assertTrue(predecessor == null, "cannot delete node %s because of predecessor: %s", this, predecessor);
         return true;
     }
@@ -812,15 +710,15 @@ public abstract class Node implements Cloneable, Formattable {
      * @param edgesToCopy if {@code type} is in this set, the edges are copied otherwise they are
      *            cleared
      */
-    private void copyOrClearEdgesForClone(NodeClass nodeClass, Node newNode, Edges.Type type, EnumSet<Edges.Type> edgesToCopy) {
+    private void copyOrClearEdgesForClone(Node newNode, Edges.Type type, EnumSet<Edges.Type> edgesToCopy) {
         if (edgesToCopy.contains(type)) {
-            nodeClass.getEdges(type).copy(this, newNode);
+            getNodeClass().getEdges(type).copy(this, newNode);
         } else {
             if (USE_UNSAFE_TO_CLONE) {
                 // The direct edges are already null
-                nodeClass.getEdges(type).initializeLists(newNode, this);
+                getNodeClass().getEdges(type).initializeLists(newNode, this);
             } else {
-                nodeClass.getEdges(type).clear(newNode);
+                getNodeClass().getEdges(type).clear(newNode);
             }
         }
     }
@@ -841,10 +739,10 @@ public abstract class Node implements Cloneable, Formattable {
      * @return the copy of this node
      */
     final Node clone(Graph into, EnumSet<Edges.Type> edgesToCopy) {
-        NodeClass nodeClass = getNodeClass();
+        final NodeClass nodeClassTmp = getNodeClass();
         boolean useIntoLeafNodeCache = false;
         if (into != null) {
-            if (nodeClass.valueNumberable() && nodeClass.isLeafNode()) {
+            if (nodeClassTmp.valueNumberable() && nodeClassTmp.isLeafNode()) {
                 useIntoLeafNodeCache = true;
                 Node otherNode = into.findNodeInCache(this);
                 if (otherNode != null) {
@@ -857,17 +755,19 @@ public abstract class Node implements Cloneable, Formattable {
         try {
             if (USE_UNSAFE_TO_CLONE) {
                 newNode = (Node) UnsafeAccess.unsafe.allocateInstance(getClass());
-                nodeClass.getData().copy(this, newNode);
-                copyOrClearEdgesForClone(nodeClass, newNode, Inputs, edgesToCopy);
-                copyOrClearEdgesForClone(nodeClass, newNode, Successors, edgesToCopy);
+                newNode.nodeClass = nodeClassTmp;
+                nodeClassTmp.getData().copy(this, newNode);
+                copyOrClearEdgesForClone(newNode, Inputs, edgesToCopy);
+                copyOrClearEdgesForClone(newNode, Successors, edgesToCopy);
             } else {
                 newNode = (Node) this.clone();
                 newNode.typeCacheNext = null;
                 newNode.usage0 = null;
                 newNode.usage1 = null;
                 newNode.predecessor = null;
-                copyOrClearEdgesForClone(nodeClass, newNode, Inputs, edgesToCopy);
-                copyOrClearEdgesForClone(nodeClass, newNode, Successors, edgesToCopy);
+                newNode.extraUsagesCount = 0;
+                copyOrClearEdgesForClone(newNode, Inputs, edgesToCopy);
+                copyOrClearEdgesForClone(newNode, Successors, edgesToCopy);
             }
         } catch (Exception e) {
             throw new GraalGraphInternalError(e).addContext(this);
@@ -988,8 +888,7 @@ public abstract class Node implements Cloneable, Formattable {
      * @param map
      */
     public Map<Object, Object> getDebugProperties(Map<Object, Object> map) {
-        NodeClass nodeClass = getNodeClass();
-        Fields properties = nodeClass.getData();
+        Fields properties = getNodeClass().getData();
         for (int i = 0; i < properties.getCount(); i++) {
             map.put(properties.getName(i), properties.get(this, i));
         }
@@ -1072,7 +971,7 @@ public abstract class Node implements Cloneable, Formattable {
         }
 
         if (precision > 0) {
-            if (!usages().isEmpty()) {
+            if (!hasNoUsages()) {
                 formatter.format(" usages={");
                 int z = 0;
                 for (Node usage : usages()) {

@@ -31,16 +31,12 @@ import com.oracle.graal.nodes.spi.*;
 @NodeInfo
 public class IntegerAddExactSplitNode extends IntegerExactArithmeticSplitNode {
 
-    public static IntegerAddExactSplitNode create(Stamp stamp, ValueNode x, ValueNode y, BeginNode next, BeginNode overflowSuccessor) {
-        return new IntegerAddExactSplitNode(stamp, x, y, next, overflowSuccessor);
-    }
-
-    protected IntegerAddExactSplitNode(Stamp stamp, ValueNode x, ValueNode y, BeginNode next, BeginNode overflowSuccessor) {
+    public IntegerAddExactSplitNode(Stamp stamp, ValueNode x, ValueNode y, AbstractBeginNode next, AbstractBeginNode overflowSuccessor) {
         super(stamp, x, y, next, overflowSuccessor);
     }
 
     @Override
     protected Value generateArithmetic(NodeLIRBuilderTool gen) {
-        return gen.getLIRGeneratorTool().emitAdd(gen.operand(getX()), gen.operand(getY()));
+        return gen.getLIRGeneratorTool().emitAdd(gen.operand(getX()), gen.operand(getY()), true);
     }
 }

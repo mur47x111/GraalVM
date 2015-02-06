@@ -119,6 +119,7 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
 
     @Override
     public Variable emitMove(Value input) {
+        assert !(input instanceof Variable) : "Creating a copy of a variable via this method is not supported (and potentially a bug): " + input;
         Variable result = newVariable(input.getLIRKind());
         emitMove(result, input);
         return result;
@@ -241,7 +242,7 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
     public abstract void emitCompareBranch(PlatformKind cmpKind, Value left, Value right, Condition cond, boolean unorderedIsTrue, LabelRef trueDestination, LabelRef falseDestination,
                     double trueDestinationProbability);
 
-    public abstract void emitOverflowCheckBranch(LabelRef overflow, LabelRef noOverflow, double overflowProbability);
+    public abstract void emitOverflowCheckBranch(LabelRef overflow, LabelRef noOverflow, LIRKind cmpKind, double overflowProbability);
 
     public abstract void emitIntegerTestBranch(Value left, Value right, LabelRef trueDestination, LabelRef falseDestination, double trueSuccessorProbability);
 
@@ -249,7 +250,11 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
 
     public abstract Variable emitIntegerTestMove(Value leftVal, Value right, Value trueValue, Value falseValue);
 
-    protected abstract void emitForeignCall(ForeignCallLinkage linkage, Value result, Value[] arguments, Value[] temps, LIRFrameState info);
+    /**
+     * Emits the single call operation at the heart of generating LIR for a
+     * {@linkplain #emitForeignCall(ForeignCallLinkage, LIRFrameState, Value...) foreign call}.
+     */
+    protected abstract void emitForeignCallOp(ForeignCallLinkage linkage, Value result, Value[] arguments, Value[] temps, LIRFrameState info);
 
     public static AllocatableValue toStackKind(AllocatableValue value) {
         if (value.getKind().getStackKind() != value.getKind()) {
@@ -291,7 +296,7 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
             argLocations[i] = loc;
         }
         res.setForeignCall(true);
-        emitForeignCall(linkage, linkageCc.getReturn(), argLocations, linkage.getTemporaries(), state);
+        emitForeignCallOp(linkage, linkageCc.getReturn(), argLocations, linkage.getTemporaries(), state);
 
         if (isLegal(linkageCc.getReturn())) {
             return emitMove(linkageCc.getReturn());
@@ -392,5 +397,9 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
 
     public LIRGenerationResult getResult() {
         return res;
+    }
+
+    public void emitBlackhole(Value operand) {
+        append(new StandardOp.BlackholeOp(operand));
     }
 }

@@ -36,21 +36,11 @@ import com.oracle.graal.nodes.spi.*;
  * The {@code AbstractNewObjectNode} is the base class for the new instance and new array nodes.
  */
 @NodeInfo
-public class AbstractNewObjectNode extends DeoptimizingFixedWithNextNode implements Simplifiable, Lowerable {
+public abstract class AbstractNewObjectNode extends DeoptimizingFixedWithNextNode implements Simplifiable, Lowerable {
 
     protected final boolean fillContents;
 
-    /**
-     * Constructs a new AbstractNewObjectNode.
-     *
-     * @param stamp the stamp of the newly created object
-     * @param fillContents determines if the object's contents should be initialized to zero/null.
-     */
-    public static AbstractNewObjectNode create(Stamp stamp, boolean fillContents) {
-        return new AbstractNewObjectNode(stamp, fillContents);
-    }
-
-    protected AbstractNewObjectNode(Stamp stamp, boolean fillContents) {
+    public AbstractNewObjectNode(Stamp stamp, boolean fillContents) {
         super(stamp);
         this.fillContents = fillContents;
     }

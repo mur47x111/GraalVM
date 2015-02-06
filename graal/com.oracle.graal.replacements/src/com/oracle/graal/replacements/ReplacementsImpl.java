@@ -47,7 +47,6 @@ import com.oracle.graal.graph.*;
 import com.oracle.graal.java.*;
 import com.oracle.graal.java.GraphBuilderPhase.Instance;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.CallTargetNode.InvokeKind;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.phases.*;
@@ -114,11 +113,13 @@ public class ReplacementsImpl implements Replacements {
                         }
                         String originalName = originalName(substituteMethod, methodSubstitution.value());
                         JavaSignature originalSignature = originalSignature(substituteMethod, methodSubstitution.signature(), methodSubstitution.isStatic());
-                        Executable originalMethod = originalMethod(classSubstitution, methodSubstitution.optional(), originalName, originalSignature);
-                        if (originalMethod != null && (guard == null || guard.execute())) {
-                            ResolvedJavaMethod original = registerMethodSubstitution(this, originalMethod, substituteMethod);
-                            if (original != null && methodSubstitution.forced() && shouldIntrinsify(original)) {
-                                forcedSubstitutions.add(original);
+                        Executable[] originalMethods = originalMethods(classSubstitution, methodSubstitution.optional(), originalName, originalSignature);
+                        for (Executable originalMethod : originalMethods) {
+                            if (originalMethod != null && (guard == null || guard.execute())) {
+                                ResolvedJavaMethod original = registerMethodSubstitution(this, originalMethod, substituteMethod);
+                                if (original != null && methodSubstitution.forced() && shouldIntrinsify(original)) {
+                                    forcedSubstitutions.add(original);
+                                }
                             }
                         }
                     }
@@ -127,11 +128,13 @@ public class ReplacementsImpl implements Replacements {
                     if (macroSubstitution != null && (defaultGuard == null || defaultGuard.execute())) {
                         String originalName = originalName(substituteMethod, macroSubstitution.value());
                         JavaSignature originalSignature = originalSignature(substituteMethod, macroSubstitution.signature(), macroSubstitution.isStatic());
-                        Executable originalMethod = originalMethod(classSubstitution, macroSubstitution.optional(), originalName, originalSignature);
-                        if (originalMethod != null) {
-                            ResolvedJavaMethod original = registerMacroSubstitution(this, originalMethod, macroSubstitution.macro());
-                            if (original != null && macroSubstitution.forced() && shouldIntrinsify(original)) {
-                                forcedSubstitutions.add(original);
+                        Executable[] originalMethods = originalMethods(classSubstitution, macroSubstitution.optional(), originalName, originalSignature);
+                        for (Executable originalMethod : originalMethods) {
+                            if (originalMethod != null) {
+                                ResolvedJavaMethod original = registerMacroSubstitution(this, originalMethod, macroSubstitution.macro());
+                                if (original != null && macroSubstitution.forced() && shouldIntrinsify(original)) {
+                                    forcedSubstitutions.add(original);
+                                }
                             }
                         }
                     }
@@ -160,15 +163,30 @@ public class ReplacementsImpl implements Replacements {
             return new JavaSignature(returnType, parameters);
         }
 
-        private Executable originalMethod(ClassSubstitution classSubstitution, boolean optional, String name, JavaSignature signature) {
+        private Executable[] originalMethods(ClassSubstitution classSubstitution, boolean optional, String name, JavaSignature signature) {
             Class<?> originalClass = classSubstitution.value();
             if (originalClass == ClassSubstitution.class) {
-                originalClass = resolveClass(classSubstitution.className(), classSubstitution.optional());
-                if (originalClass == null) {
+                ArrayList<Executable> result = new ArrayList<>();
+                for (String className : classSubstitution.className()) {
+                    originalClass = resolveClass(className, classSubstitution.optional());
+                    if (originalClass != null) {
+                        result.add(lookupOriginalMethod(originalClass, name, signature, optional));
+                    }
+                }
+                if (result.size() == 0) {
                     // optional class was not found
                     return null;
                 }
+                return result.toArray(new Executable[result.size()]);
             }
+            Executable original = lookupOriginalMethod(originalClass, name, signature, optional);
+            if (original != null) {
+                return new Executable[]{original};
+            }
+            return null;
+        }
+
+        private Executable lookupOriginalMethod(Class<?> originalClass, String name, JavaSignature signature, boolean optional) throws GraalInternalError {
             try {
                 if (name.equals("<init>")) {
                     assert signature.returnType.equals(void.class) : signature;
@@ -197,7 +215,9 @@ public class ReplacementsImpl implements Replacements {
     private final Map<String, AtomicReference<ClassReplacements>> classReplacements;
     private final Map<String, Class<?>[]> internalNameToSubstitutionClasses;
 
-    private final Map<Class<? extends SnippetTemplateCache>, SnippetTemplateCache> snippetTemplateCache;
+    // This map is key'ed by a class name instead of a Class object so that
+    // it is stable across VM executions (in support of replay compilation).
+    private final Map<String, SnippetTemplateCache> snippetTemplateCache;
 
     public ReplacementsImpl(Providers providers, SnippetReflectionProvider snippetReflection, Assumptions assumptions, TargetDescription target) {
         this.providers = providers.copyWith(this);
@@ -237,7 +257,7 @@ public class ReplacementsImpl implements Replacements {
     @Override
     public StructuredGraph getSnippet(ResolvedJavaMethod method, ResolvedJavaMethod recursiveEntry) {
         assert method.getAnnotation(Snippet.class) != null : "Snippet must be annotated with @" + Snippet.class.getSimpleName();
-        assert !method.isAbstract() && !method.isNative() : "Snippet must not be abstract or native";
+        assert method.hasBytecodes() : "Snippet must not be abstract or native";
 
         StructuredGraph graph = UseSnippetGraphCache ? graphs.get(method) : null;
         if (graph == null) {
@@ -333,18 +353,26 @@ public class ReplacementsImpl implements Replacements {
         return null;
     }
 
-    private static String getOriginalInternalName(Class<?> substitutions) {
+    private static boolean checkSubstitutionInternalName(Class<?> substitutions, String internalName) {
         ClassSubstitution cs = substitutions.getAnnotation(ClassSubstitution.class);
         assert cs != null : substitutions + " must be annotated by " + ClassSubstitution.class.getSimpleName();
         if (cs.value() == ClassSubstitution.class) {
-            return toInternalName(cs.className());
+            for (String className : cs.className()) {
+                if (toInternalName(className).equals(internalName)) {
+                    return true;
+                }
+            }
+            assert false : internalName + " not found in " + Arrays.toString(cs.className());
+        } else {
+            String originalInternalName = toInternalName(cs.value().getName());
+            assert originalInternalName.equals(internalName) : originalInternalName + " != " + internalName;
         }
-        return toInternalName(cs.value().getName());
+        return true;
     }
 
     public void registerSubstitutions(Type original, Class<?> substitutionClass) {
         String internalName = toInternalName(original.getTypeName());
-        assert getOriginalInternalName(substitutionClass).equals(internalName) : getOriginalInternalName(substitutionClass) + " != " + (internalName);
+        assert checkSubstitutionInternalName(substitutionClass, internalName);
         Class<?>[] classes = internalNameToSubstitutionClasses.get(internalName);
         if (classes == null) {
             classes = new Class<?>[]{substitutionClass};
@@ -589,9 +617,10 @@ public class ReplacementsImpl implements Replacements {
                 MetaAccessProvider metaAccess = replacements.providers.getMetaAccess();
 
                 if (MethodsElidedInSnippets != null && methodToParse.getSignature().getReturnKind() == Kind.Void && MethodFilter.matches(MethodsElidedInSnippets, methodToParse)) {
-                    graph.addAfterFixed(graph.start(), graph.add(ReturnNode.create(null)));
+                    graph.addAfterFixed(graph.start(), graph.add(new ReturnNode(null)));
                 } else {
-                    createGraphBuilder(metaAccess, GraphBuilderConfiguration.getSnippetDefault(), OptimisticOptimizations.NONE).apply(graph);
+                    createGraphBuilder(metaAccess, replacements.providers.getStampProvider(), replacements.assumptions, replacements.providers.getConstantReflection(),
+                                    GraphBuilderConfiguration.getSnippetDefault(), OptimisticOptimizations.NONE).apply(graph);
                 }
                 afterParsing(graph);
 
@@ -604,8 +633,9 @@ public class ReplacementsImpl implements Replacements {
             return graph;
         }
 
-        protected Instance createGraphBuilder(MetaAccessProvider metaAccess, GraphBuilderConfiguration graphBuilderConfig, OptimisticOptimizations optimisticOpts) {
-            return new GraphBuilderPhase.Instance(metaAccess, graphBuilderConfig, optimisticOpts);
+        protected Instance createGraphBuilder(MetaAccessProvider metaAccess, StampProvider stampProvider, Assumptions assumptions, ConstantReflectionProvider constantReflectionProvider,
+                        GraphBuilderConfiguration graphBuilderConfig, OptimisticOptimizations optimisticOpts) {
+            return new GraphBuilderPhase.Instance(metaAccess, stampProvider, assumptions, constantReflectionProvider, graphBuilderConfig, optimisticOpts);
         }
 
         protected void afterParsing(StructuredGraph graph) {
@@ -644,7 +674,7 @@ public class ReplacementsImpl implements Replacements {
 
         private StructuredGraph buildGraph(final ResolvedJavaMethod methodToParse, final SnippetInliningPolicy policy, int inliningDepth) {
             assert inliningDepth < MAX_GRAPH_INLINING_DEPTH : "inlining limit exceeded";
-            assert isInlinable(methodToParse) : methodToParse;
+            assert methodToParse.hasBytecodes() : methodToParse;
             final StructuredGraph graph = buildInitialGraph(methodToParse);
             try (Scope s = Debug.scope("buildGraph", graph)) {
                 Set<MethodCallTargetNode> doNotInline = null;
@@ -658,7 +688,7 @@ public class ReplacementsImpl implements Replacements {
                          * Ensure that calls to the original method inside of a substitution ends up
                          * calling it instead of the Graal substitution.
                          */
-                        if (isInlinable(substitutedMethod)) {
+                        if (substitutedMethod.hasBytecodes()) {
                             final StructuredGraph originalGraph = buildInitialGraph(substitutedMethod);
                             Mark mark = graph.getMark();
                             InliningUtil.inline(callTarget.invoke(), originalGraph, true, null);
@@ -681,8 +711,7 @@ public class ReplacementsImpl implements Replacements {
                             InliningUtil.inlineMacroNode(callTarget.invoke(), callee, macroNodeClass);
                         } else {
                             StructuredGraph intrinsicGraph = InliningUtil.getIntrinsicGraph(replacements, callee);
-                            if ((callTarget.invokeKind() == InvokeKind.Static || callTarget.invokeKind() == InvokeKind.Special) &&
-                                            (policy.shouldInline(callee, methodToParse) || (intrinsicGraph != null && policy.shouldUseReplacement(callee, methodToParse)))) {
+                            if (callTarget.invokeKind().isDirect() && (policy.shouldInline(callee, methodToParse) || (intrinsicGraph != null && policy.shouldUseReplacement(callee, methodToParse)))) {
                                 StructuredGraph targetGraph;
                                 if (intrinsicGraph != null && policy.shouldUseReplacement(callee, methodToParse)) {
                                     targetGraph = intrinsicGraph;
@@ -715,10 +744,6 @@ public class ReplacementsImpl implements Replacements {
             }
             return graph;
         }
-    }
-
-    private static boolean isInlinable(final ResolvedJavaMethod method) {
-        return !method.isAbstract() && !method.isNative();
     }
 
     private static String originalName(Method substituteMethod, String methodSubstitution) {
@@ -803,13 +828,13 @@ public class ReplacementsImpl implements Replacements {
 
     @Override
     public void registerSnippetTemplateCache(SnippetTemplateCache templates) {
-        assert snippetTemplateCache.get(templates.getClass()) == null;
-        snippetTemplateCache.put(templates.getClass(), templates);
+        assert snippetTemplateCache.get(templates.getClass().getName()) == null;
+        snippetTemplateCache.put(templates.getClass().getName(), templates);
     }
 
     @Override
     public <T extends SnippetTemplateCache> T getSnippetTemplateCache(Class<T> templatesClass) {
-        SnippetTemplateCache ret = snippetTemplateCache.get(templatesClass);
+        SnippetTemplateCache ret = snippetTemplateCache.get(templatesClass.getName());
         return templatesClass.cast(ret);
     }
 }

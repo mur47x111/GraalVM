@@ -39,16 +39,12 @@ import com.oracle.graal.word.*;
  * A call to the runtime code {@code Deoptimization::fetch_unroll_info}.
  */
 @NodeInfo(allowedUsageTypes = {InputType.Memory})
-public class DeoptimizationFetchUnrollInfoCallNode extends FixedWithNextNode implements LIRLowerable, MemoryCheckpoint.Multi {
+public final class DeoptimizationFetchUnrollInfoCallNode extends FixedWithNextNode implements LIRLowerable, MemoryCheckpoint.Multi {
 
     @Input SaveAllRegistersNode registerSaver;
     protected final ForeignCallsProvider foreignCalls;
 
-    public static DeoptimizationFetchUnrollInfoCallNode create(@InjectedNodeParameter ForeignCallsProvider foreignCalls, ValueNode registerSaver) {
-        return new DeoptimizationFetchUnrollInfoCallNode(foreignCalls, registerSaver);
-    }
-
-    protected DeoptimizationFetchUnrollInfoCallNode(ForeignCallsProvider foreignCalls, ValueNode registerSaver) {
+    public DeoptimizationFetchUnrollInfoCallNode(@InjectedNodeParameter ForeignCallsProvider foreignCalls, ValueNode registerSaver) {
         super(StampFactory.forKind(Kind.fromJavaClass(FETCH_UNROLL_INFO.getResultType())));
         this.registerSaver = (SaveAllRegistersNode) registerSaver;
         this.foreignCalls = foreignCalls;

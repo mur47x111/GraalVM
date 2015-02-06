@@ -54,6 +54,8 @@ import com.oracle.graal.phases.tiers.*;
  */
 public abstract class Stub {
 
+    private static final List<Stub> stubs = new ArrayList<>();
+
     /**
      * The linkage information for a call to this stub from compiled code.
      */
@@ -107,6 +109,14 @@ public abstract class Stub {
     public Stub(HotSpotProviders providers, HotSpotForeignCallLinkage linkage) {
         this.linkage = linkage;
         this.providers = providers;
+        stubs.add(this);
+    }
+
+    /**
+     * Gets an immutable view of all stubs that have been created.
+     */
+    public static Collection<Stub> getStubs() {
+        return Collections.unmodifiableList(stubs);
     }
 
     /**
@@ -148,7 +158,7 @@ public abstract class Stub {
             try (Scope d = Debug.sandbox("CompilingStub", DebugScope.getConfig(), providers.getCodeCache(), debugScopeContext())) {
                 final StructuredGraph graph = getGraph();
                 if (!(graph.start() instanceof StubStartNode)) {
-                    StubStartNode newStart = graph.add(StubStartNode.create(Stub.this));
+                    StubStartNode newStart = graph.add(new StubStartNode(Stub.this));
                     newStart.setStateAfter(graph.start().stateAfter());
                     graph.replaceFixed(graph.start(), newStart);
                 }

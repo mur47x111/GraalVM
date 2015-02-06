@@ -31,10 +31,9 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.truffle.nodes.asserts.*;
-import com.oracle.truffle.api.*;
 
 /**
- * Macro node for method {@link CompilerDirectives#unsafeCast(Object, Class, boolean, boolean)}.
+ * Macro node for method CompilerDirectives#unsafeCast.
  */
 @NodeInfo
 public class UnsafeTypeCastMacroNode extends NeverPartOfCompilationNode implements Simplifiable {
@@ -45,11 +44,7 @@ public class UnsafeTypeCastMacroNode extends NeverPartOfCompilationNode implemen
     private static final int NONNULL_ARGUMENT_INDEX = 3;
     private static final int ARGUMENT_COUNT = 4;
 
-    public static UnsafeTypeCastMacroNode create(Invoke invoke) {
-        return new UnsafeTypeCastMacroNode(invoke);
-    }
-
-    protected UnsafeTypeCastMacroNode(Invoke invoke) {
+    public UnsafeTypeCastMacroNode(Invoke invoke) {
         super(invoke, "The class of the unsafe cast could not be reduced to a compile time constant.");
         assert arguments.size() == ARGUMENT_COUNT;
     }
@@ -69,8 +64,8 @@ public class UnsafeTypeCastMacroNode extends NeverPartOfCompilationNode implemen
             } else {
                 Stamp piStamp = StampFactory.declaredTrusted(lookupJavaType, nonNullArgument.asJavaConstant().asInt() != 0);
                 ConditionAnchorNode valueAnchorNode = graph().add(
-                                ConditionAnchorNode.create(CompareNode.createCompareNode(graph(), Condition.EQ, conditionArgument, ConstantNode.forBoolean(true, graph()))));
-                PiNode piCast = graph().unique(PiNode.create(objectArgument, piStamp, valueAnchorNode));
+                                new ConditionAnchorNode(CompareNode.createCompareNode(graph(), Condition.EQ, conditionArgument, ConstantNode.forBoolean(true, graph()))));
+                PiNode piCast = graph().unique(new PiNode(objectArgument, piStamp, valueAnchorNode));
                 replaceAtUsages(piCast);
                 graph().replaceFixedWithFixed(this, valueAnchorNode);
             }

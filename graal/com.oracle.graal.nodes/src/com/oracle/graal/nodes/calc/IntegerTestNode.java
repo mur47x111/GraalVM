@@ -35,17 +35,7 @@ import com.oracle.graal.nodes.*;
 @NodeInfo
 public class IntegerTestNode extends BinaryOpLogicNode {
 
-    /**
-     * Constructs a new Test instruction.
-     *
-     * @param x the instruction producing the first input to the instruction
-     * @param y the instruction that produces the second input to this instruction
-     */
-    public static IntegerTestNode create(ValueNode x, ValueNode y) {
-        return new IntegerTestNode(x, y);
-    }
-
-    protected IntegerTestNode(ValueNode x, ValueNode y) {
+    public IntegerTestNode(ValueNode x, ValueNode y) {
         super(x, y);
     }
 
@@ -54,7 +44,7 @@ public class IntegerTestNode extends BinaryOpLogicNode {
         if (forX.isConstant() && forY.isConstant()) {
             return LogicConstantNode.forBoolean((forX.asJavaConstant().asLong() & forY.asJavaConstant().asLong()) == 0);
         }
-        if (getX().stamp() instanceof IntegerStamp && getY().stamp() instanceof IntegerStamp) {
+        if (forX.stamp() instanceof IntegerStamp && forY.stamp() instanceof IntegerStamp) {
             IntegerStamp xStamp = (IntegerStamp) forX.stamp();
             IntegerStamp yStamp = (IntegerStamp) forY.stamp();
             if ((xStamp.upMask() & yStamp.upMask()) == 0) {

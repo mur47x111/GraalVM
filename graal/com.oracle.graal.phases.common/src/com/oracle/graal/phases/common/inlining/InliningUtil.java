@@ -176,7 +176,7 @@ public class InliningUtil {
 
     public static void replaceInvokeCallTarget(Invoke invoke, StructuredGraph graph, InvokeKind invokeKind, ResolvedJavaMethod targetMethod) {
         MethodCallTargetNode oldCallTarget = (MethodCallTargetNode) invoke.callTarget();
-        MethodCallTargetNode newCallTarget = graph.add(MethodCallTargetNode.create(invokeKind, targetMethod, oldCallTarget.arguments().toArray(new ValueNode[0]), oldCallTarget.returnType()));
+        MethodCallTargetNode newCallTarget = graph.add(new MethodCallTargetNode(invokeKind, targetMethod, oldCallTarget.arguments().toArray(new ValueNode[0]), oldCallTarget.returnType()));
         invoke.asNode().replaceFirstInput(oldCallTarget, newCallTarget);
     }
 
@@ -186,7 +186,7 @@ public class InliningUtil {
 
     private static GuardedValueNode createAnchoredReceiver(StructuredGraph graph, GuardingNode anchor, ValueNode receiver, Stamp stamp) {
         // to avoid that floating reads on receiver fields float above the type check
-        return graph.unique(GuardedValueNode.create(receiver, anchor, stamp));
+        return graph.unique(new GuardedValueNode(receiver, anchor, stamp));
     }
 
     /**
@@ -228,6 +228,9 @@ public class InliningUtil {
      *            canonicalized after inlining
      */
     public static Map<Node, Node> inline(Invoke invoke, StructuredGraph inlineGraph, boolean receiverNullCheck, List<Node> canonicalizedNodes) {
+        if (Fingerprint.ENABLED) {
+            Fingerprint.submit("inlining %s into %s: %s", formatGraph(inlineGraph), formatGraph(invoke.asNode().graph()), inlineGraph.getNodes().snapshot());
+        }
         final NodeInputList<ValueNode> parameters = invoke.callTarget().arguments();
         FixedNode invokeNode = invoke.asNode();
         StructuredGraph graph = invokeNode.graph();
@@ -262,7 +265,7 @@ public class InliningUtil {
             }
         }
 
-        final BeginNode prevBegin = BeginNode.prevBegin(invokeNode);
+        final AbstractBeginNode prevBegin = AbstractBeginNode.prevBegin(invokeNode);
         DuplicationReplacement localReplacement = new DuplicationReplacement() {
 
             public Node replacement(Node node) {
@@ -300,9 +303,9 @@ public class InliningUtil {
             }
 
             // get rid of memory kill
-            BeginNode begin = invokeWithException.next();
+            AbstractBeginNode begin = invokeWithException.next();
             if (begin instanceof KillingBeginNode) {
-                BeginNode newBegin = BeginNode.create();
+                AbstractBeginNode newBegin = new BeginNode();
                 graph.addAfterFixed(begin, graph.add(newBegin));
                 begin.replaceAtUsages(newBegin);
                 graph.removeFixed(begin);
@@ -310,7 +313,7 @@ public class InliningUtil {
         } else {
             if (unwindNode != null) {
                 UnwindNode unwindDuplicate = (UnwindNode) duplicates.get(unwindNode);
-                DeoptimizeNode deoptimizeNode = graph.add(DeoptimizeNode.create(DeoptimizationAction.InvalidateRecompile, DeoptimizationReason.NotCompiledExceptionHandler));
+                DeoptimizeNode deoptimizeNode = graph.add(new DeoptimizeNode(DeoptimizationAction.InvalidateRecompile, DeoptimizationReason.NotCompiledExceptionHandler));
                 unwindDuplicate.replaceAndDelete(deoptimizeNode);
             }
         }
@@ -341,7 +344,7 @@ public class InliningUtil {
                 for (ReturnNode returnNode : returnNodes) {
                     returnDuplicates.add((ReturnNode) duplicates.get(returnNode));
                 }
-                MergeNode merge = graph.add(MergeNode.create());
+                AbstractMergeNode merge = graph.add(new MergeNode());
                 merge.setStateAfter(stateAfter);
                 ValueNode returnValue = mergeReturns(merge, returnDuplicates, canonicalizedNodes);
                 invokeNode.replaceAtUsages(returnValue);
@@ -353,6 +356,13 @@ public class InliningUtil {
         GraphUtil.killCFG(invokeNode);
 
         return duplicates;
+    }
+
+    private static String formatGraph(StructuredGraph graph) {
+        if (graph.method() == null) {
+            return graph.name;
+        }
+        return graph.method().format("%H.%n(%p)");
     }
 
     private static void processSimpleInfopoints(Invoke invoke, StructuredGraph inlineGraph, Map<Node, Node> duplicates) {
@@ -438,17 +448,17 @@ public class InliningUtil {
                 } else {
                     StateSplit stateSplit = (StateSplit) usage;
                     FixedNode fixedStateSplit = stateSplit.asNode();
-                    if (fixedStateSplit instanceof MergeNode) {
-                        MergeNode merge = (MergeNode) fixedStateSplit;
+                    if (fixedStateSplit instanceof AbstractMergeNode) {
+                        AbstractMergeNode merge = (AbstractMergeNode) fixedStateSplit;
                         while (merge.isAlive()) {
                             AbstractEndNode end = merge.forwardEnds().first();
-                            DeoptimizeNode deoptimizeNode = graph.add(DeoptimizeNode.create(DeoptimizationAction.InvalidateRecompile, DeoptimizationReason.NotCompiledExceptionHandler));
+                            DeoptimizeNode deoptimizeNode = graph.add(new DeoptimizeNode(DeoptimizationAction.InvalidateRecompile, DeoptimizationReason.NotCompiledExceptionHandler));
                             end.replaceAtPredecessor(deoptimizeNode);
                             GraphUtil.killCFG(end);
                         }
                     } else {
-                        FixedNode deoptimizeNode = graph.add(DeoptimizeNode.create(DeoptimizationAction.InvalidateRecompile, DeoptimizationReason.NotCompiledExceptionHandler));
-                        if (fixedStateSplit instanceof BeginNode) {
+                        FixedNode deoptimizeNode = graph.add(new DeoptimizeNode(DeoptimizationAction.InvalidateRecompile, DeoptimizationReason.NotCompiledExceptionHandler));
+                        if (fixedStateSplit instanceof AbstractBeginNode) {
                             deoptimizeNode = BeginNode.begin(deoptimizeNode);
                         }
                         fixedStateSplit.replaceAtPredecessor(deoptimizeNode);
@@ -459,17 +469,17 @@ public class InliningUtil {
         }
     }
 
-    public static ValueNode mergeReturns(MergeNode merge, List<? extends ReturnNode> returnNodes, List<Node> canonicalizedNodes) {
+    public static ValueNode mergeReturns(AbstractMergeNode merge, List<? extends ReturnNode> returnNodes, List<Node> canonicalizedNodes) {
         PhiNode returnValuePhi = null;
 
         for (ReturnNode returnNode : returnNodes) {
             // create and wire up a new EndNode
-            EndNode endNode = merge.graph().add(EndNode.create());
+            EndNode endNode = merge.graph().add(new EndNode());
             merge.addForwardEnd(endNode);
 
             if (returnNode.result() != null) {
                 if (returnValuePhi == null) {
-                    returnValuePhi = merge.graph().addWithoutUnique(ValuePhiNode.create(returnNode.result().stamp().unrestricted(), merge));
+                    returnValuePhi = merge.graph().addWithoutUnique(new ValuePhiNode(returnNode.result().stamp().unrestricted(), merge));
                     if (canonicalizedNodes != null) {
                         canonicalizedNodes.add(returnValuePhi);
                     }
@@ -501,9 +511,9 @@ public class InliningUtil {
         StructuredGraph graph = callTarget.graph();
         ValueNode firstParam = callTarget.arguments().get(0);
         if (firstParam.getKind() == Kind.Object && !StampTool.isPointerNonNull(firstParam)) {
-            IsNullNode condition = graph.unique(IsNullNode.create(firstParam));
+            IsNullNode condition = graph.unique(new IsNullNode(firstParam));
             Stamp stamp = firstParam.stamp().join(objectNonNull());
-            GuardingPiNode nonNullReceiver = graph.add(GuardingPiNode.create(firstParam, condition, true, NullCheckException, InvalidateReprofile, stamp));
+            GuardingPiNode nonNullReceiver = graph.add(new GuardingPiNode(firstParam, condition, true, NullCheckException, InvalidateReprofile, stamp));
             graph.addBeforeFixed(invoke.asNode(), nonNullReceiver);
             callTarget.replaceFirstInput(firstParam, nonNullReceiver);
             return nonNullReceiver;
@@ -526,7 +536,7 @@ public class InliningUtil {
     public static FixedWithNextNode inlineMacroNode(Invoke invoke, ResolvedJavaMethod concrete, Class<? extends FixedWithNextNode> macroNodeClass) throws GraalInternalError {
         StructuredGraph graph = invoke.asNode().graph();
         if (!concrete.equals(((MethodCallTargetNode) invoke.callTarget()).targetMethod())) {
-            assert ((MethodCallTargetNode) invoke.callTarget()).invokeKind() != InvokeKind.Static;
+            assert ((MethodCallTargetNode) invoke.callTarget()).invokeKind().hasReceiver();
             InliningUtil.replaceInvokeCallTarget(invoke, graph, InvokeKind.Special, concrete);
         }
 
@@ -546,8 +556,8 @@ public class InliningUtil {
 
     private static FixedWithNextNode createMacroNodeInstance(Class<? extends FixedWithNextNode> macroNodeClass, Invoke invoke) throws GraalInternalError {
         try {
-            Method factory = macroNodeClass.getDeclaredMethod("create", Invoke.class);
-            return (FixedWithNextNode) factory.invoke(null, invoke);
+            Constructor<?> cons = macroNodeClass.getDeclaredConstructor(Invoke.class);
+            return (FixedWithNextNode) cons.newInstance(invoke);
         } catch (ReflectiveOperationException | IllegalArgumentException | SecurityException e) {
             throw new GraalGraphInternalError(e).addContext(invoke.asNode()).addContext("macroSubstitution", macroNodeClass);
         }

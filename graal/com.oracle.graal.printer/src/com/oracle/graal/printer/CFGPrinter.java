@@ -37,6 +37,7 @@ import com.oracle.graal.graph.*;
 import com.oracle.graal.java.*;
 import com.oracle.graal.java.BciBlockMapping.BciBlock;
 import com.oracle.graal.lir.*;
+import com.oracle.graal.lir.stackslotalloc.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
@@ -74,7 +75,7 @@ class CFGPrinter extends CompilationPrinter {
     public void printCFG(String label, BciBlockMapping blockMap) {
         begin("cfg");
         out.print("name \"").print(label).println('"');
-        for (BciBlockMapping.BciBlock block : blockMap.blocks) {
+        for (BciBlockMapping.BciBlock block : blockMap.getBlocks()) {
             begin("block");
             printBlock(block);
             end("block");
@@ -265,9 +266,9 @@ class CFGPrinter extends CompilationPrinter {
         out.println("HIR");
         out.disableIndentation();
 
-        if (block.getBeginNode() instanceof MergeNode) {
+        if (block.getBeginNode() instanceof AbstractMergeNode) {
             // Currently phi functions are not in the schedule, so print them separately here.
-            for (ValueNode phi : ((MergeNode) block.getBeginNode()).phis()) {
+            for (ValueNode phi : ((AbstractMergeNode) block.getBeginNode()).phis()) {
                 printNode(phi, false);
             }
         }
@@ -343,7 +344,7 @@ class CFGPrinter extends CompilationPrinter {
         out.println("=== Succesors ===");
         printNamedNodes(node, node.successors().iterator(), "", "\n", null);
         out.println("=== Usages ===");
-        if (!node.usages().isEmpty()) {
+        if (!node.hasNoUsages()) {
             for (Node usage : node.usages()) {
                 out.print(nodeToString(usage)).print(" ");
             }
@@ -484,7 +485,7 @@ class CFGPrinter extends CompilationPrinter {
             return "-";
         }
         String prefix;
-        if (node instanceof BeginNode && (lir == null && schedule == null)) {
+        if (node instanceof AbstractBeginNode && (lir == null && schedule == null)) {
             prefix = "B";
         } else if (node instanceof ValueNode) {
             ValueNode value = (ValueNode) node;
@@ -560,6 +561,36 @@ class CFGPrinter extends CompilationPrinter {
         out.println();
     }
 
+    public void printStackIntervals(String label, StackInterval[] intervals) {
+        begin("intervals");
+        out.println(String.format("name \"%s\"", label));
+
+        for (StackInterval interval : intervals) {
+            if (interval != null) {
+                printStackInterval(interval);
+            }
+        }
+
+        end("intervals");
+    }
+
+    private void printStackInterval(StackInterval interval) {
+        out.printf("%s %s ", interval.getOperand(), interval.isFixed() ? "fixed" : interval.kind().getPlatformKind());
+        if (interval.location() != null) {
+            out.printf("\"[%s|%c]\"", interval.location(), interval.location().getKind().getTypeChar());
+        } else {
+            out.printf("\"[%s|%c]\"", interval.getOperand(), interval.getOperand().getKind().getTypeChar());
+        }
+
+        out.printf("%s -1 ", interval.getOperand());
+
+        out.printf("[%d, %d[", interval.from(), interval.to());
+
+        // print spill state
+        out.printf(" \"NOT_SUPPORTED\"");
+        out.println();
+    }
+
     public void printSchedule(String message, SchedulePhase theSchedule) {
         schedule = theSchedule;
         cfg = schedule.getCFG();
@@ -579,15 +610,15 @@ class CFGPrinter extends CompilationPrinter {
         printedNodes = null;
     }
 
-    private void printScheduledBlock(Block block, List<ScheduledNode> nodesFor) {
+    private void printScheduledBlock(Block block, List<ValueNode> nodesFor) {
         printBlockProlog(block);
         begin("IR");
         out.println("HIR");
         out.disableIndentation();
 
-        if (block.getBeginNode() instanceof MergeNode) {
+        if (block.getBeginNode() instanceof AbstractMergeNode) {
             // Currently phi functions are not in the schedule, so print them separately here.
-            for (ValueNode phi : ((MergeNode) block.getBeginNode()).phis()) {
+            for (ValueNode phi : ((AbstractMergeNode) block.getBeginNode()).phis()) {
                 printNode(phi, false);
             }
         }

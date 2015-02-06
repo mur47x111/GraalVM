@@ -34,43 +34,35 @@ import com.oracle.graal.nodeinfo.*;
 public class NodeUsagesTests {
 
     @NodeInfo
-    static class Def extends Node {
+    static final class Def extends Node {
         protected Def() {
-            // TODO Auto-generated constructor stub
-        }
-
-        public static Def create() {
-            return new Def();
         }
     }
 
     @NodeInfo
-    static class Use extends Node {
+    static final class Use extends Node {
         @Input Def in0;
         @Input Def in1;
         @Input Def in2;
 
-        public static Use create(Def in0, Def in1, Def in2) {
-            return new Use(in0, in1, in2);
-        }
-
-        protected Use(Def in0, Def in1, Def in2) {
+        public Use(Def in0, Def in1, Def in2) {
             this.in0 = in0;
             this.in1 = in1;
             this.in2 = in2;
         }
+
     }
 
     @Test
     public void testReplaceAtUsages() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
 
-        assertEquals(3, def0.usages().count());
+        assertEquals(3, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -82,7 +74,7 @@ public class NodeUsagesTests {
 
         assertThat(def0.usages(), isEmpty());
 
-        assertEquals(3, def1.usages().count());
+        assertEquals(3, def1.getUsageCount());
         assertThat(def1.usages(), contains(use0));
         assertThat(def1.usages(), contains(use1));
         assertThat(def1.usages(), contains(use2));
@@ -93,13 +85,13 @@ public class NodeUsagesTests {
     @Test
     public void testReplaceAtUsagesWithPredicateAll() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
 
-        assertEquals(3, def0.usages().count());
+        assertEquals(3, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -111,7 +103,7 @@ public class NodeUsagesTests {
 
         assertThat(def0.usages(), isEmpty());
 
-        assertEquals(3, def1.usages().count());
+        assertEquals(3, def1.getUsageCount());
         assertThat(def1.usages(), contains(use0));
         assertThat(def1.usages(), contains(use1));
         assertThat(def1.usages(), contains(use2));
@@ -122,13 +114,13 @@ public class NodeUsagesTests {
     @Test
     public void testReplaceAtUsagesWithPredicateNone() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
 
-        assertEquals(3, def0.usages().count());
+        assertEquals(3, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -140,7 +132,7 @@ public class NodeUsagesTests {
 
         assertThat(def1.usages(), isEmpty());
 
-        assertEquals(3, def0.usages().count());
+        assertEquals(3, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -151,13 +143,13 @@ public class NodeUsagesTests {
     @Test
     public void testReplaceAtUsagesWithPredicate1() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
 
-        assertEquals(3, def0.usages().count());
+        assertEquals(3, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -167,12 +159,12 @@ public class NodeUsagesTests {
 
         def0.replaceAtMatchingUsages(def1, u -> u == use1);
 
-        assertEquals(1, def1.usages().count());
+        assertEquals(1, def1.getUsageCount());
         assertThat(def1.usages(), contains(use1));
 
         assertThat(def1.usages(), isNotEmpty());
 
-        assertEquals(2, def0.usages().count());
+        assertEquals(2, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use2));
 
@@ -182,13 +174,13 @@ public class NodeUsagesTests {
     @Test
     public void testReplaceAtUsagesWithPredicate2() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
 
-        assertEquals(3, def0.usages().count());
+        assertEquals(3, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -198,12 +190,12 @@ public class NodeUsagesTests {
 
         def0.replaceAtMatchingUsages(def1, u -> u == use2);
 
-        assertEquals(1, def1.usages().count());
+        assertEquals(1, def1.getUsageCount());
         assertThat(def1.usages(), contains(use2));
 
         assertThat(def1.usages(), isNotEmpty());
 
-        assertEquals(2, def0.usages().count());
+        assertEquals(2, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
 
@@ -213,13 +205,13 @@ public class NodeUsagesTests {
     @Test
     public void testReplaceAtUsagesWithPredicate0() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
 
-        assertEquals(3, def0.usages().count());
+        assertEquals(3, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -229,12 +221,12 @@ public class NodeUsagesTests {
 
         def0.replaceAtMatchingUsages(def1, u -> u == use0);
 
-        assertEquals(1, def1.usages().count());
+        assertEquals(1, def1.getUsageCount());
         assertThat(def1.usages(), contains(use0));
 
         assertThat(def1.usages(), isNotEmpty());
 
-        assertEquals(2, def0.usages().count());
+        assertEquals(2, def0.getUsageCount());
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
 
@@ -244,13 +236,13 @@ public class NodeUsagesTests {
     @Test
     public void testReplaceAtUsagesWithPredicate02() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
 
-        assertEquals(3, def0.usages().count());
+        assertEquals(3, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -260,12 +252,12 @@ public class NodeUsagesTests {
 
         def0.replaceAtMatchingUsages(def1, u -> u != use1);
 
-        assertEquals(1, def0.usages().count());
+        assertEquals(1, def0.getUsageCount());
         assertThat(def0.usages(), contains(use1));
 
         assertThat(def0.usages(), isNotEmpty());
 
-        assertEquals(2, def1.usages().count());
+        assertEquals(2, def1.getUsageCount());
         assertThat(def1.usages(), contains(use0));
         assertThat(def1.usages(), contains(use2));
 
@@ -275,14 +267,14 @@ public class NodeUsagesTests {
     @Test
     public void testReplaceAtUsagesWithPredicate023() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
-        Use use3 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
+        Use use3 = graph.add(new Use(null, null, def0));
 
-        assertEquals(4, def0.usages().count());
+        assertEquals(4, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -293,12 +285,12 @@ public class NodeUsagesTests {
 
         def0.replaceAtMatchingUsages(def1, u -> u != use1);
 
-        assertEquals(1, def0.usages().count());
+        assertEquals(1, def0.getUsageCount());
         assertThat(def0.usages(), contains(use1));
 
         assertThat(def0.usages(), isNotEmpty());
 
-        assertEquals(3, def1.usages().count());
+        assertEquals(3, def1.getUsageCount());
         assertThat(def1.usages(), contains(use0));
         assertThat(def1.usages(), contains(use2));
         assertThat(def1.usages(), contains(use3));
@@ -309,14 +301,14 @@ public class NodeUsagesTests {
     @Test
     public void testReplaceAtUsagesWithPredicate013() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
-        Use use3 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
+        Use use3 = graph.add(new Use(null, null, def0));
 
-        assertEquals(4, def0.usages().count());
+        assertEquals(4, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -327,12 +319,12 @@ public class NodeUsagesTests {
 
         def0.replaceAtMatchingUsages(def1, u -> u != use2);
 
-        assertEquals(1, def0.usages().count());
+        assertEquals(1, def0.getUsageCount());
         assertThat(def0.usages(), contains(use2));
 
         assertThat(def0.usages(), isNotEmpty());
 
-        assertEquals(3, def1.usages().count());
+        assertEquals(3, def1.getUsageCount());
         assertThat(def1.usages(), contains(use0));
         assertThat(def1.usages(), contains(use1));
         assertThat(def1.usages(), contains(use3));
@@ -343,14 +335,14 @@ public class NodeUsagesTests {
     @Test
     public void testReplaceAtUsagesWithPredicate203() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
-        Use use3 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
+        Use use3 = graph.add(new Use(null, null, def0));
 
-        assertEquals(4, def0.usages().count());
+        assertEquals(4, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -361,12 +353,12 @@ public class NodeUsagesTests {
 
         def0.replaceAtMatchingUsages(def1, u -> u == use2);
 
-        assertEquals(1, def1.usages().count());
+        assertEquals(1, def1.getUsageCount());
         assertThat(def1.usages(), contains(use2));
 
         assertThat(def1.usages(), isNotEmpty());
 
-        assertEquals(3, def0.usages().count());
+        assertEquals(3, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use3));
@@ -377,13 +369,13 @@ public class NodeUsagesTests {
     @Test
     public void testReplaceAtUsagesWithPredicate01() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
 
-        assertEquals(3, def0.usages().count());
+        assertEquals(3, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -393,12 +385,12 @@ public class NodeUsagesTests {
 
         def0.replaceAtMatchingUsages(def1, u -> u != use2);
 
-        assertEquals(1, def0.usages().count());
+        assertEquals(1, def0.getUsageCount());
         assertThat(def0.usages(), contains(use2));
 
         assertThat(def0.usages(), isNotEmpty());
 
-        assertEquals(2, def1.usages().count());
+        assertEquals(2, def1.getUsageCount());
         assertThat(def1.usages(), contains(use0));
         assertThat(def1.usages(), contains(use1));
 
@@ -408,13 +400,13 @@ public class NodeUsagesTests {
     @Test
     public void testReplaceAtUsagesWithPredicate12() {
         Graph graph = new Graph();
-        Def def0 = graph.add(Def.create());
-        Def def1 = graph.add(Def.create());
-        Use use0 = graph.add(Use.create(def0, null, null));
-        Use use1 = graph.add(Use.create(null, def0, null));
-        Use use2 = graph.add(Use.create(null, null, def0));
+        Def def0 = graph.add(new Def());
+        Def def1 = graph.add(new Def());
+        Use use0 = graph.add(new Use(def0, null, null));
+        Use use1 = graph.add(new Use(null, def0, null));
+        Use use2 = graph.add(new Use(null, null, def0));
 
-        assertEquals(3, def0.usages().count());
+        assertEquals(3, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
         assertThat(def0.usages(), contains(use1));
         assertThat(def0.usages(), contains(use2));
@@ -424,12 +416,12 @@ public class NodeUsagesTests {
 
         def0.replaceAtMatchingUsages(def1, u -> u != use0);
 
-        assertEquals(1, def0.usages().count());
+        assertEquals(1, def0.getUsageCount());
         assertThat(def0.usages(), contains(use0));
 
         assertThat(def0.usages(), isNotEmpty());
 
-        assertEquals(2, def1.usages().count());
+        assertEquals(2, def1.getUsageCount());
         assertThat(def1.usages(), contains(use1));
         assertThat(def1.usages(), contains(use2));
 

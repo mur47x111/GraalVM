@@ -27,7 +27,7 @@ package com.oracle.truffle.api.dsl;
 import java.lang.annotation.*;
 
 /**
- * Marks a type as being generated based on another class or method.
+ * Marks a type as being generated based on another class or method of a class.
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target({ElementType.TYPE})

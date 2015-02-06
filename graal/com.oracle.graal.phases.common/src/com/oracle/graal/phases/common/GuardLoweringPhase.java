@@ -111,7 +111,7 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
                     fixedAccess.setNullCheck(true);
                     LogicNode condition = guard.condition();
                     guard.replaceAndDelete(fixedAccess);
-                    if (condition.usages().isEmpty()) {
+                    if (condition.hasNoUsages()) {
                         GraphUtil.killWithUnusedFloatingInputs(condition);
                     }
                     nullGuarded.remove(fixedAccess.object());
@@ -161,12 +161,12 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
 
         private void lowerToIf(GuardNode guard) {
             StructuredGraph graph = guard.graph();
-            BeginNode fastPath = graph.add(BeginNode.create());
+            AbstractBeginNode fastPath = graph.add(new BeginNode());
             @SuppressWarnings("deprecation")
-            DeoptimizeNode deopt = graph.add(DeoptimizeNode.create(guard.action(), guard.reason(), useGuardIdAsDebugId ? guard.getId() : 0, guard.getSpeculation(), null));
-            BeginNode deoptBranch = BeginNode.begin(deopt);
-            BeginNode trueSuccessor;
-            BeginNode falseSuccessor;
+            DeoptimizeNode deopt = graph.add(new DeoptimizeNode(guard.action(), guard.reason(), useGuardIdAsDebugId ? guard.getId() : 0, guard.getSpeculation(), null));
+            AbstractBeginNode deoptBranch = BeginNode.begin(deopt);
+            AbstractBeginNode trueSuccessor;
+            AbstractBeginNode falseSuccessor;
             insertLoopExits(deopt);
             if (guard.isNegated()) {
                 trueSuccessor = deoptBranch;
@@ -175,7 +175,7 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
                 trueSuccessor = fastPath;
                 falseSuccessor = deoptBranch;
             }
-            IfNode ifNode = graph.add(IfNode.create(guard.condition(), trueSuccessor, falseSuccessor, trueSuccessor == fastPath ? 1 : 0));
+            IfNode ifNode = graph.add(new IfNode(guard.condition(), trueSuccessor, falseSuccessor, trueSuccessor == fastPath ? 1 : 0));
             guard.replaceAndDelete(fastPath);
             insert(ifNode, fastPath);
         }
@@ -184,7 +184,7 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
             Loop<Block> loop = block.getLoop();
             StructuredGraph graph = deopt.graph();
             while (loop != null) {
-                LoopExitNode exit = graph.add(LoopExitNode.create((LoopBeginNode) loop.getHeader().getBeginNode()));
+                LoopExitNode exit = graph.add(new LoopExitNode((LoopBeginNode) loop.getHeader().getBeginNode()));
                 graph.addBeforeFixed(deopt, exit);
                 loop = loop.getParent();
             }
@@ -193,7 +193,7 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
 
     @Override
     protected void run(StructuredGraph graph, MidTierContext context) {
-        if (graph.getGuardsStage().ordinal() < GuardsStage.FIXED_DEOPTS.ordinal()) {
+        if (graph.getGuardsStage().allowsFloatingGuards()) {
             SchedulePhase schedule = new SchedulePhase(SchedulingStrategy.EARLIEST);
             schedule.apply(graph);
 
@@ -203,7 +203,12 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
             graph.setGuardsStage(GuardsStage.FIXED_DEOPTS);
         }
 
-        assert graph.getNodes(GuardNode.class).isEmpty();
+        assert assertNoGuardsLeft(graph);
+    }
+
+    private static boolean assertNoGuardsLeft(StructuredGraph graph) {
+        assert graph.getNodes().filter(GuardNode.class).isEmpty();
+        return true;
     }
 
     private static void processBlock(Block block, SchedulePhase schedule, int implicitNullCheckLimit) {

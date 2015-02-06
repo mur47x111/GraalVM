@@ -29,15 +29,11 @@ import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo
-public class DynamicDeoptimizeNode extends AbstractDeoptimizeNode implements LIRLowerable, Lowerable, Canonicalizable {
+public final class DynamicDeoptimizeNode extends AbstractDeoptimizeNode implements LIRLowerable, Lowerable, Canonicalizable {
     @Input ValueNode actionAndReason;
     @Input ValueNode speculation;
 
-    public static DynamicDeoptimizeNode create(ValueNode actionAndReason, ValueNode speculation) {
-        return new DynamicDeoptimizeNode(actionAndReason, speculation);
-    }
-
-    protected DynamicDeoptimizeNode(ValueNode actionAndReason, ValueNode speculation) {
+    public DynamicDeoptimizeNode(ValueNode actionAndReason, ValueNode speculation) {
         this.actionAndReason = actionAndReason;
         this.speculation = speculation;
     }
@@ -74,8 +70,8 @@ public class DynamicDeoptimizeNode extends AbstractDeoptimizeNode implements LIR
         if (actionAndReason.isConstant() && speculation.isConstant()) {
             JavaConstant constant = actionAndReason.asJavaConstant();
             JavaConstant speculationConstant = speculation.asJavaConstant();
-            DeoptimizeNode newDeopt = DeoptimizeNode.create(tool.getMetaAccess().decodeDeoptAction(constant), tool.getMetaAccess().decodeDeoptReason(constant),
-                            tool.getMetaAccess().decodeDebugId(constant), speculationConstant, stateBefore());
+            DeoptimizeNode newDeopt = new DeoptimizeNode(tool.getMetaAccess().decodeDeoptAction(constant), tool.getMetaAccess().decodeDeoptReason(constant), tool.getMetaAccess().decodeDebugId(
+                            constant), speculationConstant, stateBefore());
             return newDeopt;
         }
         return this;

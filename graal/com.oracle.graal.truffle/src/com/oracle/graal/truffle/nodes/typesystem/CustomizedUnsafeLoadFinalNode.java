@@ -33,26 +33,21 @@ import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.truffle.nodes.*;
-import com.oracle.truffle.api.*;
 
 /**
  * Load of a final value from a location specified as an offset relative to an object.
  *
- * Substitution for method {@link CompilerDirectives#unsafeGetFinalObject} and friends.
+ * Substitution for method CompilerDirectives#unsafeGet*.
  */
 @NodeInfo
-public class CustomizedUnsafeLoadFinalNode extends FixedWithNextNode implements Canonicalizable, Virtualizable, Lowerable {
+public final class CustomizedUnsafeLoadFinalNode extends FixedWithNextNode implements Canonicalizable, Virtualizable, Lowerable {
     @Input ValueNode object;
     @Input ValueNode offset;
     @Input ValueNode condition;
     @Input ValueNode location;
     protected final Kind accessKind;
 
-    public static CustomizedUnsafeLoadFinalNode create(ValueNode object, ValueNode offset, ValueNode condition, ValueNode location, Kind accessKind) {
-        return new CustomizedUnsafeLoadFinalNode(object, offset, condition, location, accessKind);
-    }
-
-    protected CustomizedUnsafeLoadFinalNode(ValueNode object, ValueNode offset, ValueNode condition, ValueNode location, Kind accessKind) {
+    public CustomizedUnsafeLoadFinalNode(ValueNode object, ValueNode offset, ValueNode condition, ValueNode location, Kind accessKind) {
         super(StampFactory.forKind(accessKind.getStackKind()));
         this.object = object;
         this.offset = offset;
@@ -80,7 +75,7 @@ public class CustomizedUnsafeLoadFinalNode extends FixedWithNextNode implements 
             ValueNode offsetValue = tool.getReplacedValue(offset);
             if (offsetValue.isConstant()) {
                 long constantOffset = offsetValue.asJavaConstant().asLong();
-                int entryIndex = state.getVirtualObject().entryIndexForOffset(constantOffset);
+                int entryIndex = state.getVirtualObject().entryIndexForOffset(constantOffset, accessKind);
                 if (entryIndex != -1) {
                     ValueNode entry = state.getEntry(entryIndex);
                     if (entry.getKind() == getKind() || state.getVirtualObject().entryKind(entryIndex) == accessKind) {
@@ -100,7 +95,7 @@ public class CustomizedUnsafeLoadFinalNode extends FixedWithNextNode implements 
         } else {
             locationIdentity = ObjectLocationIdentity.create(location.asJavaConstant());
         }
-        UnsafeLoadNode result = graph().add(UnsafeLoadNode.create(object, offset, accessKind, locationIdentity, compare));
+        UnsafeLoadNode result = graph().add(new UnsafeLoadNode(object, offset, accessKind, locationIdentity, compare));
         graph().replaceFixedWithFixed(this, result);
         result.lower(tool);
     }

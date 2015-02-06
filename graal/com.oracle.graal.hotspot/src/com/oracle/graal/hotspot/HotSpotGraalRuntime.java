@@ -31,7 +31,6 @@ import static com.oracle.graal.hotspot.InitTimer.*;
 
 import java.lang.reflect.*;
 import java.util.*;
-import java.util.function.*;
 
 import sun.misc.*;
 
@@ -61,7 +60,7 @@ import com.oracle.graal.runtime.*;
 /**
  * Singleton class holding the instance of the {@link GraalRuntime}.
  */
-public final class HotSpotGraalRuntime implements HotSpotGraalRuntimeProvider, Remote {
+public final class HotSpotGraalRuntime implements HotSpotGraalRuntimeProvider, HotSpotProxified {
 
     private static final HotSpotGraalRuntime instance;
 
@@ -80,25 +79,11 @@ public final class HotSpotGraalRuntime implements HotSpotGraalRuntimeProvider, R
         }
     }
 
-    private static Predicate<Void> runtimeAccessCheck;
-
-    /**
-     * Sets a predicate which will be used to assert a valid calling context for a call to
-     * {@link #runtime()}. This is useful for verifying execution scopes that should not make a
-     * static access to {@link HotSpotGraalRuntime}. Such scopes are responsible for resetting the
-     * predicate to null.
-     */
-    public static void setRuntimeAccessCheck(Predicate<Void> predicate) {
-        assert runtimeAccessCheck == null || predicate == null : "at most once runtime access check can be active";
-        runtimeAccessCheck = predicate;
-    }
-
     /**
      * Gets the singleton {@link HotSpotGraalRuntime} object.
      */
     public static HotSpotGraalRuntime runtime() {
         assert instance != null;
-        assert runtimeAccessCheck == null || runtimeAccessCheck.test(null);
         return instance;
     }
 
@@ -106,6 +91,7 @@ public final class HotSpotGraalRuntime implements HotSpotGraalRuntimeProvider, R
      * Do deferred initialization.
      */
     public void completeInitialization() {
+        TTY.initialize(Options.LogFile.getStream(compilerToVm));
 
         // Proxies for the VM/Compiler interfaces cannot be initialized
         // in the constructor as proxy creation causes static
@@ -123,8 +109,6 @@ public final class HotSpotGraalRuntime implements HotSpotGraalRuntimeProvider, R
         }
 
         this.compilerToVm = toVM;
-
-        TTY.initialize(Options.LogFile.getStream(compilerToVm));
 
         if (Log.getValue() == null && Meter.getValue() == null && Time.getValue() == null && Dump.getValue() == null && Verify.getValue() == null) {
             if (MethodFilter.getValue() != null) {

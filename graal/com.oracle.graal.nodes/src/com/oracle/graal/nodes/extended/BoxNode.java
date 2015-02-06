@@ -40,15 +40,11 @@ import com.oracle.graal.nodes.virtual.*;
  * methods in Integer, Long, etc.
  */
 @NodeInfo
-public class BoxNode extends UnaryNode implements VirtualizableAllocation, Lowerable {
+public final class BoxNode extends UnaryNode implements VirtualizableAllocation, Lowerable {
 
     protected final Kind boxingKind;
 
-    public static BoxNode create(ValueNode value, ResolvedJavaType resultType, Kind boxingKind) {
-        return new BoxNode(value, resultType, boxingKind);
-    }
-
-    protected BoxNode(ValueNode value, ResolvedJavaType resultType, Kind boxingKind) {
+    public BoxNode(ValueNode value, ResolvedJavaType resultType, Kind boxingKind) {
         super(StampFactory.exactNonNull(resultType), value);
         this.boxingKind = boxingKind;
     }
@@ -76,7 +72,7 @@ public class BoxNode extends UnaryNode implements VirtualizableAllocation, Lower
         ValueNode v = tool.getReplacedValue(getValue());
         ResolvedJavaType type = StampTool.typeOrNull(stamp());
 
-        VirtualBoxingNode newVirtual = VirtualBoxingNode.create(type, boxingKind);
+        VirtualBoxingNode newVirtual = new VirtualBoxingNode(type, boxingKind);
         assert newVirtual.getFields().length == 1;
 
         tool.createVirtualObject(newVirtual, new ValueNode[]{v}, Collections.<MonitorIdNode> emptyList());

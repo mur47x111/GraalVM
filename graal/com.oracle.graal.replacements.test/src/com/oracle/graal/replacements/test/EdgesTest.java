@@ -38,23 +38,20 @@ import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.inlining.*;
+import com.oracle.graal.phases.common.inlining.policy.*;
 import com.oracle.graal.phases.tiers.*;
 
 public class EdgesTest extends GraalCompilerTest {
 
     @NodeInfo
-    static class TestNode extends Node {
+    static final class TestNode extends Node {
         @Input NodeInputList<ValueNode> itail;
         @Input ConstantNode i1;
         @Input FloatingNode i2;
 
-        public static TestNode create() {
-            return new TestNode();
+        public TestNode() {
         }
 
-        protected TestNode() {
-            // TODO Auto-generated constructor stub
-        }
     }
 
     StructuredGraph graph = new StructuredGraph();
@@ -66,7 +63,7 @@ public class EdgesTest extends GraalCompilerTest {
     Edges inputs;
 
     public EdgesTest() {
-        node = TestNode.create();
+        node = new TestNode();
         i1 = ConstantNode.forInt(1, graph);
         i2 = ConstantNode.forDouble(1.0d, graph);
         i3 = ConstantNode.forInt(4, graph);
@@ -119,7 +116,7 @@ public class EdgesTest extends GraalCompilerTest {
         StructuredGraph g = parseProfiled(javaMethod);
         Assumptions assumptions = new Assumptions(false);
         HighTierContext context = new HighTierContext(getProviders(), assumptions, null, getDefaultGraphBuilderSuite(), OptimisticOptimizations.ALL);
-        new InliningPhase(new CanonicalizerPhase(true)).apply(g, context);
+        new InliningPhase(new InlineMethodSubstitutionsPolicy(), new CanonicalizerPhase(true)).apply(g, context);
         new CanonicalizerPhase(false).apply(g, context);
         Assert.assertTrue(g.getNodes().filter(CheckCastNode.class).isEmpty());
     }

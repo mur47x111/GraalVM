@@ -42,25 +42,21 @@ import com.oracle.graal.nodes.spi.*;
  * {@link ReadNode#canonicalizeRead(ValueNode, LocationNode, ValueNode, CanonicalizerTool)}.
  */
 @NodeInfo
-public class ClassGetHubNode extends FloatingGuardedNode implements Lowerable, Canonicalizable, ConvertNode {
+public final class ClassGetHubNode extends FloatingGuardedNode implements Lowerable, Canonicalizable, ConvertNode {
     @Input protected ValueNode clazz;
 
-    public static ClassGetHubNode create(ValueNode clazz) {
-        return new ClassGetHubNode(clazz, null);
+    public ClassGetHubNode(ValueNode clazz) {
+        this(clazz, null);
     }
 
-    public static ClassGetHubNode create(ValueNode clazz, ValueNode guard) {
-        return new ClassGetHubNode(clazz, guard);
-    }
-
-    protected ClassGetHubNode(ValueNode clazz, ValueNode guard) {
+    public ClassGetHubNode(ValueNode clazz, ValueNode guard) {
         super(KlassPointerStamp.klass(), (GuardingNode) guard);
         this.clazz = clazz;
     }
 
     @Override
     public Node canonical(CanonicalizerTool tool) {
-        if (usages().isEmpty()) {
+        if (hasNoUsages()) {
             return null;
         } else {
             if (clazz.isConstant()) {

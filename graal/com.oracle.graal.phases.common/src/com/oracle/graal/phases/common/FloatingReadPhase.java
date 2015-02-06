@@ -150,7 +150,7 @@ public class FloatingReadPhase extends Phase {
         }
     }
 
-    public static MemoryMapImpl mergeMemoryMaps(MergeNode merge, List<? extends MemoryMap> states, boolean updateExistingPhis) {
+    public static MemoryMapImpl mergeMemoryMaps(AbstractMergeNode merge, List<? extends MemoryMap> states, boolean updateExistingPhis) {
         MemoryMapImpl newState = new MemoryMapImpl();
 
         Set<LocationIdentity> keys = CollectionsFactory.newSet();
@@ -186,7 +186,7 @@ public class FloatingReadPhase extends Phase {
                     } else {
                         MemoryPhiNode phi = null;
                         if (existingPhis == null || (phi = existingPhis.remove(key)) == null) {
-                            phi = merge.graph().addWithoutUnique(MemoryPhiNode.create(merge, key));
+                            phi = merge.graph().addWithoutUnique(new MemoryPhiNode(merge, key));
                         }
                         for (int j = 0; j < mergedStatesCount; j++) {
                             phi.addInput(ValueNodeUtil.asNode(merged));
@@ -237,7 +237,7 @@ public class FloatingReadPhase extends Phase {
         }
 
         @Override
-        protected Set<LocationIdentity> merge(MergeNode merge, List<Set<LocationIdentity>> states) {
+        protected Set<LocationIdentity> merge(AbstractMergeNode merge, List<Set<LocationIdentity>> states) {
             Set<LocationIdentity> result = CollectionsFactory.newSet();
             for (Set<LocationIdentity> other : states) {
                 result.addAll(other);
@@ -246,7 +246,7 @@ public class FloatingReadPhase extends Phase {
         }
 
         @Override
-        protected Set<LocationIdentity> afterSplit(BeginNode node, Set<LocationIdentity> oldState) {
+        protected Set<LocationIdentity> afterSplit(AbstractBeginNode node, Set<LocationIdentity> oldState) {
             return CollectionsFactory.newSet(oldState);
         }
 
@@ -298,7 +298,7 @@ public class FloatingReadPhase extends Phase {
             assert MemoryCheckpoint.TypeAssertion.correctType(node) : node;
 
             if (createMemoryMapNodes && node instanceof ReturnNode) {
-                ((ReturnNode) node).setMemoryMap(node.graph().unique(MemoryMapNode.create(state.lastMemorySnapshot)));
+                ((ReturnNode) node).setMemoryMap(node.graph().unique(new MemoryMapNode(state.lastMemorySnapshot)));
             }
             return state;
         }
@@ -338,7 +338,7 @@ public class FloatingReadPhase extends Phase {
                 ValueAnchorNode anchor = null;
                 GuardingNode guard = accessNode.getGuard();
                 if (guard != null) {
-                    anchor = graph.add(ValueAnchorNode.create(guard.asNode()));
+                    anchor = graph.add(new ValueAnchorNode(guard.asNode()));
                     graph.addAfterFixed(accessNode, anchor);
                 }
                 graph.replaceFixedWithFloating(accessNode, floatingNode);
@@ -346,12 +346,12 @@ public class FloatingReadPhase extends Phase {
         }
 
         @Override
-        protected MemoryMapImpl merge(MergeNode merge, List<MemoryMapImpl> states) {
+        protected MemoryMapImpl merge(AbstractMergeNode merge, List<MemoryMapImpl> states) {
             return mergeMemoryMaps(merge, states, updateExistingPhis);
         }
 
         @Override
-        protected MemoryMapImpl afterSplit(BeginNode node, MemoryMapImpl oldState) {
+        protected MemoryMapImpl afterSplit(AbstractBeginNode node, MemoryMapImpl oldState) {
             MemoryMapImpl result = new MemoryMapImpl(oldState);
             if (node.predecessor() instanceof InvokeWithExceptionNode) {
                 /*
@@ -392,7 +392,7 @@ public class FloatingReadPhase extends Phase {
 
             for (LocationIdentity location : modifiedLocations) {
                 if (!updateExistingPhis || !phis.containsKey(location)) {
-                    MemoryPhiNode phi = loop.graph().addWithoutUnique(MemoryPhiNode.create(loop, location));
+                    MemoryPhiNode phi = loop.graph().addWithoutUnique(new MemoryPhiNode(loop, location));
                     phi.addInput(ValueNodeUtil.asNode(initialState.getLastLocationAccess(location)));
                     phis.put(location, phi);
                 }

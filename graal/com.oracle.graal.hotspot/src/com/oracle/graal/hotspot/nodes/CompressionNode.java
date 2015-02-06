@@ -40,7 +40,7 @@ import com.oracle.graal.nodes.type.*;
  * Compress or uncompress an oop or metaspace pointer.
  */
 @NodeInfo(nameTemplate = "{p#op/s}")
-public class CompressionNode extends UnaryNode implements ConvertNode, LIRLowerable {
+public final class CompressionNode extends UnaryNode implements ConvertNode, LIRLowerable {
 
     public enum CompressionOp {
         Compress,
@@ -50,11 +50,7 @@ public class CompressionNode extends UnaryNode implements ConvertNode, LIRLowera
     protected final CompressionOp op;
     protected final CompressEncoding encoding;
 
-    public static CompressionNode create(CompressionOp op, ValueNode input, CompressEncoding encoding) {
-        return new CompressionNode(op, input, encoding);
-    }
-
-    protected CompressionNode(CompressionOp op, ValueNode input, CompressEncoding encoding) {
+    public CompressionNode(CompressionOp op, ValueNode input, CompressEncoding encoding) {
         super(mkStamp(op, input.stamp(), encoding), input);
         this.op = op;
         this.encoding = encoding;
@@ -66,11 +62,11 @@ public class CompressionNode extends UnaryNode implements ConvertNode, LIRLowera
     }
 
     public static CompressionNode compress(ValueNode input, CompressEncoding encoding) {
-        return input.graph().unique(CompressionNode.create(CompressionOp.Compress, input, encoding));
+        return input.graph().unique(new CompressionNode(CompressionOp.Compress, input, encoding));
     }
 
     public static CompressionNode uncompress(ValueNode input, CompressEncoding encoding) {
-        return input.graph().unique(CompressionNode.create(CompressionOp.Uncompress, input, encoding));
+        return input.graph().unique(new CompressionNode(CompressionOp.Uncompress, input, encoding));
     }
 
     private static Constant compress(Constant c, CompressEncoding encoding) {

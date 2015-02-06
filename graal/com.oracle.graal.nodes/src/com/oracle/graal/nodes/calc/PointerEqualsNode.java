@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,48 +32,37 @@ import com.oracle.graal.nodes.util.*;
 @NodeInfo(shortName = "==")
 public class PointerEqualsNode extends CompareNode {
 
-    /**
-     * Constructs a new pointer equality comparison node.
-     *
-     * @param x the instruction producing the first input to the instruction
-     * @param y the instruction that produces the second input to this instruction
-     */
-    public static PointerEqualsNode create(ValueNode x, ValueNode y) {
-        return new PointerEqualsNode(x, y);
-    }
-
-    protected PointerEqualsNode(ValueNode x, ValueNode y) {
-        super(x, y);
+    public PointerEqualsNode(ValueNode x, ValueNode y) {
+        super(Condition.EQ, false, x, y);
         assert x.stamp() instanceof AbstractPointerStamp;
         assert y.stamp() instanceof AbstractPointerStamp;
     }
 
     @Override
-    public Condition condition() {
-        return Condition.EQ;
-    }
-
-    @Override
-    public boolean unorderedIsTrue() {
-        return false;
-    }
-
-    @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forX, ValueNode forY) {
+        LogicNode result = findSynonym(forX, forY);
+        if (result != null) {
+            return result;
+        }
+        return super.canonical(tool, forX, forY);
+    }
+
+    public static LogicNode findSynonym(ValueNode forX, ValueNode forY) {
         if (GraphUtil.unproxify(forX) == GraphUtil.unproxify(forY)) {
             return LogicConstantNode.tautology();
         } else if (forX.stamp().alwaysDistinct(forY.stamp())) {
             return LogicConstantNode.contradiction();
         } else if (((AbstractPointerStamp) forX.stamp()).alwaysNull()) {
-            return IsNullNode.create(forY);
+            return new IsNullNode(forY);
         } else if (((AbstractPointerStamp) forY.stamp()).alwaysNull()) {
-            return IsNullNode.create(forX);
+            return new IsNullNode(forX);
+        } else {
+            return null;
         }
-        return super.canonical(tool, forX, forY);
     }
 
     @Override
     protected CompareNode duplicateModified(ValueNode newX, ValueNode newY) {
-        return PointerEqualsNode.create(newX, newY);
+        return new PointerEqualsNode(newX, newY);
     }
 }

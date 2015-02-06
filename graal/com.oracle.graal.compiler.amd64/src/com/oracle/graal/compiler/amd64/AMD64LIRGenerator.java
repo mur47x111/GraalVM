@@ -105,6 +105,28 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
         }
     }
 
+    /**
+     * Checks whether the supplied constant can be used without loading it into a register for store
+     * operations, i.e., on the right hand side of a memory access.
+     *
+     * @param c The constant to check.
+     * @return True if the constant can be used directly, false if the constant needs to be in a
+     *         register.
+     */
+    protected boolean canStoreConstant(JavaConstant c) {
+        // there is no immediate move of 64-bit constants on Intel
+        switch (c.getKind()) {
+            case Long:
+                return Util.isInt(c.asLong()) && !getCodeCache().needsDataPatch(c);
+            case Double:
+                return false;
+            case Object:
+                return c.isNull();
+            default:
+                return true;
+        }
+    }
+
     protected AMD64LIRInstruction createMove(AllocatableValue dst, Value src) {
         if (src instanceof AMD64AddressValue) {
             return new LeaOp(dst, (AMD64AddressValue) src);
@@ -155,7 +177,7 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
                 if (CodeUtil.isPowerOf2(scale)) {
                     indexRegister = emitShl(longIndex, JavaConstant.forLong(CodeUtil.log2(scale)));
                 } else {
-                    indexRegister = emitMul(longIndex, JavaConstant.forLong(scale));
+                    indexRegister = emitMul(longIndex, JavaConstant.forLong(scale), false);
                 }
                 scaleEnum = Scale.Times1;
 
@@ -179,7 +201,7 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
                 indexRegister = displacementRegister;
                 scaleEnum = Scale.Times1;
             } else {
-                baseRegister = emitAdd(baseRegister, displacementRegister);
+                baseRegister = emitAdd(baseRegister, displacementRegister, false);
             }
         }
 
@@ -231,7 +253,7 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     }
 
     @Override
-    public void emitOverflowCheckBranch(LabelRef overflow, LabelRef noOverflow, double overflowProbability) {
+    public void emitOverflowCheckBranch(LabelRef overflow, LabelRef noOverflow, LIRKind cmpLIRKind, double overflowProbability) {
         append(new BranchOp(ConditionFlag.Overflow, overflow, noOverflow, overflowProbability));
     }
 
@@ -498,7 +520,7 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     }
 
     @Override
-    public Variable emitAdd(Value a, Value b) {
+    public Variable emitAdd(Value a, Value b, boolean setFlags) {
         switch (a.getKind().getStackKind()) {
             case Int:
                 return emitBinary(IADD, true, a, b);
@@ -514,7 +536,7 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     }
 
     @Override
-    public Variable emitSub(Value a, Value b) {
+    public Variable emitSub(Value a, Value b, boolean setFlags) {
         switch (a.getKind().getStackKind()) {
             case Int:
                 return emitBinary(ISUB, false, a, b);
@@ -530,7 +552,7 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     }
 
     @Override
-    public Variable emitMul(Value a, Value b) {
+    public Variable emitMul(Value a, Value b, boolean setFlags) {
         switch (a.getKind().getStackKind()) {
             case Int:
                 return emitBinary(IMUL, true, a, b);
@@ -966,7 +988,7 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     public abstract void emitCCall(long address, CallingConvention nativeCallingConvention, Value[] args, int numberOfFloatingPointArguments);
 
     @Override
-    protected void emitForeignCall(ForeignCallLinkage linkage, Value result, Value[] arguments, Value[] temps, LIRFrameState info) {
+    protected void emitForeignCallOp(ForeignCallLinkage linkage, Value result, Value[] arguments, Value[] temps, LIRFrameState info) {
         long maxOffset = linkage.getMaxCallTargetOffset();
         if (maxOffset != (int) maxOffset) {
             append(new AMD64Call.DirectFarForeignCallOp(linkage, result, arguments, temps, info));
@@ -976,7 +998,7 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     }
 
     @Override
-    public Value emitBitCount(Value value) {
+    public Variable emitBitCount(Value value) {
         Variable result = newVariable(LIRKind.derive(value).changeType(Kind.Int));
         if (value.getKind().getStackKind() == Kind.Int) {
             append(new AMD64BitManipulationOp(IPOPCNT, result, asAllocatable(value)));
@@ -987,14 +1009,14 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     }
 
     @Override
-    public Value emitBitScanForward(Value value) {
+    public Variable emitBitScanForward(Value value) {
         Variable result = newVariable(LIRKind.derive(value).changeType(Kind.Int));
         append(new AMD64BitManipulationOp(BSF, result, asAllocatable(value)));
         return result;
     }
 
     @Override
-    public Value emitBitScanReverse(Value value) {
+    public Variable emitBitScanReverse(Value value) {
         Variable result = newVariable(LIRKind.derive(value).changeType(Kind.Int));
         if (value.getKind().getStackKind() == Kind.Int) {
             append(new AMD64BitManipulationOp(IBSR, result, asAllocatable(value)));
@@ -1076,14 +1098,14 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     }
 
     @Override
-    public Value emitByteSwap(Value input) {
+    public Variable emitByteSwap(Value input) {
         Variable result = newVariable(LIRKind.derive(input));
         append(new AMD64ByteSwapOp(result, input));
         return result;
     }
 
     @Override
-    public Value emitArrayEquals(Kind kind, Value array1, Value array2, Value length) {
+    public Variable emitArrayEquals(Kind kind, Value array1, Value array2, Value length) {
         Variable result = newVariable(LIRKind.value(Kind.Int));
         append(new AMD64ArrayEqualsOp(this, kind, result, array1, array2, asAllocatable(length)));
         return result;

@@ -81,6 +81,7 @@ public final class BciBlockMapping {
         public int endBci;
         public boolean isExceptionEntry;
         public boolean isLoopHeader;
+        public boolean isLastLoopEnd;
         public int loopId;
 
         /**
@@ -92,22 +93,30 @@ public final class BciBlockMapping {
         public FixedWithNextNode firstInstruction;
         public AbstractFrameStateBuilder<?, ?> entryState;
 
-        public long exits;
-
         private boolean visited;
         private boolean active;
         public long loops;
+        public JSRData jsrData;
 
-        public HashMap<JsrScope, BciBlock> jsrAlternatives;
-        public JsrScope jsrScope = JsrScope.EMPTY_SCOPE;
-        public BciBlock jsrSuccessor;
-        public int jsrReturnBci;
-        public BciBlock retSuccessor;
-        public boolean endsWithRet = false;
+        public static class JSRData implements Cloneable {
+            public HashMap<JsrScope, BciBlock> jsrAlternatives;
+            public JsrScope jsrScope = JsrScope.EMPTY_SCOPE;
+            public BciBlock jsrSuccessor;
+            public int jsrReturnBci;
+            public BciBlock retSuccessor;
+            public boolean endsWithRet = false;
+
+            public JSRData copy() {
+                try {
+                    return (JSRData) this.clone();
+                } catch (CloneNotSupportedException e) {
+                    return null;
+                }
+            }
+        }
 
         public BciBlock() {
-            this.successors = new ArrayList<>();
-            this.predecessors = new ArrayList<>();
+            this.successors = new ArrayList<>(4);
         }
 
         public BciBlock exceptionDispatchBlock() {
@@ -127,6 +136,9 @@ public final class BciBlockMapping {
         public BciBlock copy() {
             try {
                 BciBlock block = (BciBlock) super.clone();
+                if (block.jsrData != null) {
+                    block.jsrData = block.jsrData.copy();
+                }
                 block.successors = new ArrayList<>(successors);
                 return block;
             } catch (CloneNotSupportedException e) {
@@ -179,10 +191,6 @@ public final class BciBlockMapping {
             return successors.get(index);
         }
 
-        public BciBlock getPredecessor(int index) {
-            return predecessors.get(index);
-        }
-
         /**
          * Get the loop id of the inner most loop.
          *
@@ -207,17 +215,6 @@ public final class BciBlockMapping {
             return new Iterable<Integer>() {
                 public Iterator<Integer> iterator() {
                     return idIterator(loops);
-                }
-            };
-        }
-
-        /**
-         * Iterate over exit ids.
-         */
-        public Iterable<Integer> exitIdIterable() {
-            return new Iterable<Integer>() {
-                public Iterator<Integer> iterator() {
-                    return idIterator(exits);
                 }
             };
         }
@@ -251,6 +248,88 @@ public final class BciBlockMapping {
         public BciBlock getPostdominator() {
             return null;
         }
+
+        private JSRData getOrCreateJSRData() {
+            if (jsrData == null) {
+                jsrData = new JSRData();
+            }
+            return jsrData;
+        }
+
+        public void setEndsWithRet() {
+            getOrCreateJSRData().endsWithRet = true;
+        }
+
+        public JsrScope getJsrScope() {
+            if (this.jsrData == null) {
+                return JsrScope.EMPTY_SCOPE;
+            } else {
+                return jsrData.jsrScope;
+            }
+        }
+
+        public boolean endsWithRet() {
+            if (this.jsrData == null) {
+                return false;
+            } else {
+                return jsrData.endsWithRet;
+            }
+        }
+
+        public void setRetSuccessor(BciBlock bciBlock) {
+            this.getOrCreateJSRData().retSuccessor = bciBlock;
+        }
+
+        public BciBlock getRetSuccessor() {
+            if (this.jsrData == null) {
+                return null;
+            } else {
+                return jsrData.retSuccessor;
+            }
+        }
+
+        public BciBlock getJsrSuccessor() {
+            if (this.jsrData == null) {
+                return null;
+            } else {
+                return jsrData.jsrSuccessor;
+            }
+        }
+
+        public int getJsrReturnBci() {
+            if (this.jsrData == null) {
+                return -1;
+            } else {
+                return jsrData.jsrReturnBci;
+            }
+        }
+
+        public HashMap<JsrScope, BciBlock> getJsrAlternatives() {
+            if (this.jsrData == null) {
+                return null;
+            } else {
+                return jsrData.jsrAlternatives;
+            }
+        }
+
+        public void initJsrAlternatives() {
+            JSRData data = this.getOrCreateJSRData();
+            if (data.jsrAlternatives == null) {
+                data.jsrAlternatives = new HashMap<>();
+            }
+        }
+
+        public void setJsrScope(JsrScope nextScope) {
+            this.getOrCreateJSRData().jsrScope = nextScope;
+        }
+
+        public void setJsrSuccessor(BciBlock clone) {
+            this.getOrCreateJSRData().jsrSuccessor = clone;
+        }
+
+        public void setJsrReturnBci(int bci) {
+            this.getOrCreateJSRData().jsrReturnBci = bci;
+        }
     }
 
     public static class ExceptionDispatchBlock extends BciBlock {
@@ -264,7 +343,7 @@ public final class BciBlockMapping {
     /**
      * The blocks found in this method, in reverse postorder.
      */
-    public final List<BciBlock> blocks;
+    private BciBlock[] blocks;
     public final ResolvedJavaMethod method;
     public boolean hasJsrBytecodes;
     public BciBlock startBlock;
@@ -272,25 +351,33 @@ public final class BciBlockMapping {
     private final BytecodeStream stream;
     private final ExceptionHandler[] exceptionHandlers;
     private BciBlock[] blockMap;
-    public BciBlock[] loopHeaders;
+    private BciBlock[] loopHeaders;
+
+    private static final int LOOP_HEADER_MAX_CAPACITY = Long.SIZE;
+    private static final int LOOP_HEADER_INITIAL_CAPACITY = 4;
 
     private final boolean doLivenessAnalysis;
     public LocalLiveness liveness;
+    private int blocksNotYetAssignedId;
+    private final boolean consecutiveLoopBlocks;
 
     /**
      * Creates a new BlockMap instance from bytecode of the given method .
      *
      * @param method the compiler interface method containing the code
      */
-    private BciBlockMapping(ResolvedJavaMethod method, boolean doLivenessAnalysis) {
+    private BciBlockMapping(ResolvedJavaMethod method, boolean doLivenessAnalysis, boolean consecutiveLoopBlocks) {
         this.doLivenessAnalysis = doLivenessAnalysis;
+        this.consecutiveLoopBlocks = consecutiveLoopBlocks;
         this.method = method;
-        exceptionHandlers = method.getExceptionHandlers();
-        stream = new BytecodeStream(method.getCode());
+        this.exceptionHandlers = method.getExceptionHandlers();
+        this.stream = new BytecodeStream(method.getCode());
         int codeSize = method.getCodeSize();
         this.blockMap = new BciBlock[codeSize];
-        this.blocks = new ArrayList<>();
-        this.loopHeaders = new BciBlock[codeSize < 64 ? codeSize : 64];
+    }
+
+    public BciBlock[] getBlocks() {
+        return this.blocks;
     }
 
     /**
@@ -310,8 +397,6 @@ public final class BciBlockMapping {
         }
         computeBlockOrder();
         fixLoopBits();
-
-        initializeBlockIds();
 
         startBlock = blockMap[0];
 
@@ -334,7 +419,7 @@ public final class BciBlockMapping {
 
     private boolean verify() {
         for (BciBlock block : blocks) {
-            assert blocks.get(block.getId()) == block;
+            assert blocks[block.getId()] == block;
 
             for (int i = 0; i < block.getSuccessorCount(); i++) {
                 BciBlock sux = block.getSuccessor(i);
@@ -345,12 +430,6 @@ public final class BciBlockMapping {
         }
 
         return true;
-    }
-
-    private void initializeBlockIds() {
-        for (int i = 0; i < blocks.size(); i++) {
-            blocks.get(i).setId(i);
-        }
     }
 
     private void makeExceptionEntries() {
@@ -443,14 +522,14 @@ public final class BciBlockMapping {
                         throw new JsrNotSupportedBailout("jsr target bci 0 not allowed");
                     }
                     BciBlock b1 = makeBlock(target);
-                    current.jsrSuccessor = b1;
-                    current.jsrReturnBci = stream.nextBCI();
+                    current.setJsrSuccessor(b1);
+                    current.setJsrReturnBci(stream.nextBCI());
                     current = null;
                     addSuccessor(bci, b1);
                     break;
                 }
                 case RET: {
-                    current.endsWithRet = true;
+                    current.setEndsWithRet();
                     current = null;
                     break;
                 }
@@ -459,10 +538,10 @@ public final class BciBlockMapping {
                 case INVOKESTATIC:
                 case INVOKEVIRTUAL:
                 case INVOKEDYNAMIC: {
-                    current = null;
-                    addSuccessor(bci, makeBlock(stream.nextBCI()));
                     ExceptionDispatchBlock handler = handleExceptions(bci);
                     if (handler != null) {
+                        current = null;
+                        addSuccessor(bci, makeBlock(stream.nextBCI()));
                         addSuccessor(bci, handler);
                     }
                     break;
@@ -501,6 +580,7 @@ public final class BciBlockMapping {
         BciBlock oldBlock = blockMap[startBci];
         if (oldBlock == null) {
             BciBlock newBlock = new BciBlock();
+            blocksNotYetAssignedId++;
             newBlock.startBci = startBci;
             blockMap[startBci] = newBlock;
             return newBlock;
@@ -509,6 +589,7 @@ public final class BciBlockMapping {
             // Backward branch into the middle of an already processed block.
             // Add the correct fall-through successor.
             BciBlock newBlock = new BciBlock();
+            blocksNotYetAssignedId++;
             newBlock.startBci = startBci;
             newBlock.endBci = oldBlock.endBci;
             newBlock.getSuccessors().addAll(oldBlock.getSuccessors());
@@ -551,46 +632,45 @@ public final class BciBlockMapping {
 
     private void createJsrAlternatives(BciBlock block) {
         jsrVisited.add(block);
-        JsrScope scope = block.jsrScope;
+        JsrScope scope = block.getJsrScope();
 
-        if (block.endsWithRet) {
-            block.retSuccessor = blockMap[scope.nextReturnAddress()];
-            block.getSuccessors().add(block.retSuccessor);
-            assert block.retSuccessor != block.jsrSuccessor;
+        if (block.endsWithRet()) {
+            block.setRetSuccessor(blockMap[scope.nextReturnAddress()]);
+            block.getSuccessors().add(block.getRetSuccessor());
+            assert block.getRetSuccessor() != block.getJsrSuccessor();
         }
-        Debug.log("JSR alternatives block %s  sux %s  jsrSux %s  retSux %s  jsrScope %s", block, block.getSuccessors(), block.jsrSuccessor, block.retSuccessor, block.jsrScope);
+        Debug.log("JSR alternatives block %s  sux %s  jsrSux %s  retSux %s  jsrScope %s", block, block.getSuccessors(), block.getJsrSuccessor(), block.getRetSuccessor(), block.getJsrScope());
 
-        if (block.jsrSuccessor != null || !scope.isEmpty()) {
+        if (block.getJsrSuccessor() != null || !scope.isEmpty()) {
             for (int i = 0; i < block.getSuccessorCount(); i++) {
                 BciBlock successor = block.getSuccessor(i);
                 JsrScope nextScope = scope;
-                if (successor == block.jsrSuccessor) {
-                    nextScope = scope.push(block.jsrReturnBci);
+                if (successor == block.getJsrSuccessor()) {
+                    nextScope = scope.push(block.getJsrReturnBci());
                 }
-                if (successor == block.retSuccessor) {
+                if (successor == block.getRetSuccessor()) {
                     nextScope = scope.pop();
                 }
-                if (!successor.jsrScope.isPrefixOf(nextScope)) {
-                    throw new JsrNotSupportedBailout("unstructured control flow  (" + successor.jsrScope + " " + nextScope + ")");
+                if (!successor.getJsrScope().isPrefixOf(nextScope)) {
+                    throw new JsrNotSupportedBailout("unstructured control flow  (" + successor.getJsrScope() + " " + nextScope + ")");
                 }
                 if (!nextScope.isEmpty()) {
                     BciBlock clone;
-                    if (successor.jsrAlternatives != null && successor.jsrAlternatives.containsKey(nextScope)) {
-                        clone = successor.jsrAlternatives.get(nextScope);
+                    if (successor.getJsrAlternatives() != null && successor.getJsrAlternatives().containsKey(nextScope)) {
+                        clone = successor.getJsrAlternatives().get(nextScope);
                     } else {
-                        if (successor.jsrAlternatives == null) {
-                            successor.jsrAlternatives = new HashMap<>();
-                        }
+                        successor.initJsrAlternatives();
                         clone = successor.copy();
-                        clone.jsrScope = nextScope;
-                        successor.jsrAlternatives.put(nextScope, clone);
+                        blocksNotYetAssignedId++;
+                        clone.setJsrScope(nextScope);
+                        successor.getJsrAlternatives().put(nextScope, clone);
                     }
                     block.getSuccessors().set(i, clone);
-                    if (successor == block.jsrSuccessor) {
-                        block.jsrSuccessor = clone;
+                    if (successor == block.getJsrSuccessor()) {
+                        block.setJsrSuccessor(clone);
                     }
-                    if (successor == block.retSuccessor) {
-                        block.retSuccessor = clone;
+                    if (successor == block.getRetSuccessor()) {
+                        block.setRetSuccessor(clone);
                     }
                 }
             }
@@ -620,6 +700,7 @@ public final class BciBlockMapping {
                 ExceptionDispatchBlock curHandler = exceptionDispatch.get(h);
                 if (curHandler == null) {
                     curHandler = new ExceptionDispatchBlock();
+                    blocksNotYetAssignedId++;
                     curHandler.startBci = -1;
                     curHandler.endBci = -1;
                     curHandler.deoptBci = bci;
@@ -659,18 +740,72 @@ public final class BciBlockMapping {
     }
 
     private void computeBlockOrder() {
+        int maxBlocks = blocksNotYetAssignedId;
+        this.blocks = new BciBlock[blocksNotYetAssignedId];
         long loop = computeBlockOrder(blockMap[0]);
 
         if (loop != 0) {
             // There is a path from a loop end to the method entry that does not pass the loop
-            // header.
-            // Therefore, the loop is non reducible (has more than one entry).
+            // header. Therefore, the loop is non reducible (has more than one entry).
             // We don't want to compile such methods because the IR only supports structured loops.
             throw new BailoutException("Non-reducible loop");
         }
 
-        // Convert postorder to the desired reverse postorder.
-        Collections.reverse(blocks);
+        if (blocks[0] != null && this.nextLoop == 0) {
+            // No unreached blocks and no loops
+            for (int i = 0; i < blocks.length; ++i) {
+                blocks[i].setId(i);
+            }
+            return;
+        }
+
+        // Purge null entries for unreached blocks and sort blocks such that loop bodies are always
+        // consecutively in the array.
+        int blockCount = maxBlocks - blocksNotYetAssignedId;
+        BciBlock[] newBlocks = new BciBlock[blockCount];
+        int next = 0;
+        for (int i = 0; i < blocks.length; ++i) {
+            BciBlock b = blocks[i];
+            if (b != null) {
+                b.setId(next);
+                newBlocks[next++] = b;
+                if (consecutiveLoopBlocks && b.isLoopHeader) {
+                    next = handleLoopHeader(newBlocks, next, i, b);
+                }
+            }
+        }
+        blocks = newBlocks;
+
+        if (consecutiveLoopBlocks && this.nextLoop > 2) {
+            System.out.println();
+            for (int i = 0; i < blocks.length; ++i) {
+                String succ = "";
+                for (BciBlock succBlock : blocks[i].getSuccessors()) {
+                    succ += succBlock.getId() + " ";
+                }
+                System.out.printf("%3s %10s %s %s succ=[%s]\n", blocks[i].getId(), Long.toBinaryString(blocks[i].loops), blocks[i].isLoopHeader, blocks[i].isLastLoopEnd, succ);
+            }
+            System.out.println();
+        }
+    }
+
+    private int handleLoopHeader(BciBlock[] newBlocks, int nextStart, int i, BciBlock loopHeader) {
+        int next = nextStart;
+        BciBlock last = loopHeader;
+        for (int j = i + 1; j < blocks.length; ++j) {
+            BciBlock other = blocks[j];
+            if (other != null && (other.loops & (1L << loopHeader.loopId)) != 0) {
+                other.setId(next);
+                newBlocks[next++] = other;
+                last = other;
+                blocks[j] = null;
+                if (other.isLoopHeader) {
+                    next = handleLoopHeader(newBlocks, next, j, other);
+                }
+            }
+        }
+        last.isLastLoopEnd = true;
+        return next;
     }
 
     public void log(String name) {
@@ -679,10 +814,10 @@ public final class BciBlockMapping {
             StringBuilder sb = new StringBuilder(Debug.currentScope()).append("BlockMap ").append(name).append(" :");
             sb.append(n);
             Iterable<BciBlock> it;
-            if (blocks.isEmpty()) {
+            if (blocks == null) {
                 it = new HashSet<>(Arrays.asList(blockMap));
             } else {
-                it = blocks;
+                it = Arrays.asList(blocks);
             }
             for (BciBlock b : it) {
                 if (b == null) {
@@ -705,10 +840,6 @@ public final class BciBlockMapping {
                 }
                 sb.append(n).append("  Loop : ");
                 for (int pos : b.loopIdIterable()) {
-                    sb.append("B").append(loopHeaders[pos].getId()).append(" ");
-                }
-                sb.append(n).append("  Exits : ");
-                for (int pos : b.exitIdIterable()) {
                     sb.append("B").append(loopHeaders[pos].getId()).append(" ");
                 }
                 sb.append(n);
@@ -744,7 +875,7 @@ public final class BciBlockMapping {
                 // checking for correctness.
                 throw new BailoutException("Loop formed by an exception handler");
             }
-            if (nextLoop >= Long.SIZE) {
+            if (nextLoop >= LOOP_HEADER_MAX_CAPACITY) {
                 // This restriction can be removed by using a fall-back to a BitSet in case we have
                 // more than 64 loops
                 // Don't compile such methods for now, until we see a concrete case that allows
@@ -755,6 +886,11 @@ public final class BciBlockMapping {
             assert block.loops == 0;
             block.loops = 1L << nextLoop;
             Debug.log("makeLoopHeader(%s) -> %x", block, block.loops);
+            if (loopHeaders == null) {
+                loopHeaders = new BciBlock[LOOP_HEADER_INITIAL_CAPACITY];
+            } else if (nextLoop >= loopHeaders.length) {
+                loopHeaders = Arrays.copyOf(loopHeaders, LOOP_HEADER_MAX_CAPACITY);
+            }
             loopHeaders[nextLoop] = block;
             block.loopId = nextLoop;
             nextLoop++;
@@ -791,6 +927,7 @@ public final class BciBlockMapping {
             if (successor.active) {
                 // Reached block via backward branch.
                 block.isLoopEnd = true;
+                loops |= (1L << successor.loopId);
             }
         }
 
@@ -802,7 +939,8 @@ public final class BciBlockMapping {
         }
 
         block.active = false;
-        blocks.add(block);
+        blocksNotYetAssignedId--;
+        blocks[blocksNotYetAssignedId] = block;
 
         return loops;
     }
@@ -822,9 +960,6 @@ public final class BciBlockMapping {
         for (BciBlock successor : block.getSuccessors()) {
             // Recursively process successors.
             loops |= fixLoopBits(successor);
-        }
-        for (BciBlock successor : block.getSuccessors()) {
-            successor.exits = loops & ~successor.loops;
         }
         if (block.loops != loops) {
             loopChanges = true;
@@ -855,8 +990,8 @@ public final class BciBlockMapping {
             do {
                 Debug.log("Iteration %d", iteration);
                 changed = false;
-                for (int i = blocks.size() - 1; i >= 0; i--) {
-                    BciBlock block = blocks.get(i);
+                for (int i = blocks.length - 1; i >= 0; i--) {
+                    BciBlock block = blocks[i];
                     int blockID = block.getId();
                     // log statements in IFs because debugLiveX creates a new String
                     if (Debug.isLogEnabled()) {
@@ -1061,8 +1196,8 @@ public final class BciBlockMapping {
         }
     }
 
-    public static BciBlockMapping create(ResolvedJavaMethod method, boolean doLivenessAnalysis) {
-        BciBlockMapping map = new BciBlockMapping(method, doLivenessAnalysis);
+    public static BciBlockMapping create(ResolvedJavaMethod method, boolean doLivenessAnalysis, boolean consecutiveLoopBlocks) {
+        BciBlockMapping map = new BciBlockMapping(method, doLivenessAnalysis, consecutiveLoopBlocks);
         map.build();
         if (Debug.isDumpEnabled()) {
             Debug.dump(map, method.format("After block building %f %R %H.%n(%P)"));
@@ -1082,10 +1217,11 @@ public final class BciBlockMapping {
         private final long[] localsLiveKill;
 
         public SmallLocalLiveness() {
-            localsLiveIn = new long[blocks.size()];
-            localsLiveOut = new long[blocks.size()];
-            localsLiveGen = new long[blocks.size()];
-            localsLiveKill = new long[blocks.size()];
+            int blockSize = blocks.length;
+            localsLiveIn = new long[blockSize];
+            localsLiveOut = new long[blockSize];
+            localsLiveGen = new long[blockSize];
+            localsLiveKill = new long[blockSize];
         }
 
         private String debugString(long value) {
@@ -1174,11 +1310,12 @@ public final class BciBlockMapping {
         private BitSet[] localsLiveKill;
 
         public LargeLocalLiveness() {
-            localsLiveIn = new BitSet[blocks.size()];
-            localsLiveOut = new BitSet[blocks.size()];
-            localsLiveGen = new BitSet[blocks.size()];
-            localsLiveKill = new BitSet[blocks.size()];
-            for (int i = 0; i < blocks.size(); i++) {
+            int blocksSize = blocks.length;
+            localsLiveIn = new BitSet[blocksSize];
+            localsLiveOut = new BitSet[blocksSize];
+            localsLiveGen = new BitSet[blocksSize];
+            localsLiveKill = new BitSet[blocksSize];
+            for (int i = 0; i < blocksSize; i++) {
                 localsLiveIn[i] = new BitSet(method.getMaxLocals());
                 localsLiveOut[i] = new BitSet(method.getMaxLocals());
                 localsLiveGen[i] = new BitSet(method.getMaxLocals());
@@ -1248,5 +1385,9 @@ public final class BciBlockMapping {
         public boolean localIsLiveOut(BciBlock block, int local) {
             return block.getId() >= Integer.MAX_VALUE ? true : localsLiveOut[block.getId()].get(local);
         }
+    }
+
+    public BciBlock[] getLoopHeaders() {
+        return loopHeaders;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,6 @@ import com.oracle.graal.lir.gen.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.spi.*;
-import com.oracle.graal.nodes.type.*;
 
 /**
  * Location node that has a displacement and a scaled index. Can represent locations in the form of
@@ -64,15 +63,7 @@ public class IndexedLocationNode extends LocationNode implements Canonicalizable
         return indexScaling;
     }
 
-    public static IndexedLocationNode create(LocationIdentity identity, long displacement, ValueNode index, Graph graph, int indexScaling) {
-        return graph.unique(IndexedLocationNode.create(identity, displacement, index, indexScaling));
-    }
-
-    public static IndexedLocationNode create(LocationIdentity identity, long displacement, ValueNode index, int indexScaling) {
-        return new IndexedLocationNode(identity, displacement, index, indexScaling);
-    }
-
-    protected IndexedLocationNode(LocationIdentity identity, long displacement, ValueNode index, int indexScaling) {
+    public IndexedLocationNode(LocationIdentity identity, long displacement, ValueNode index, int indexScaling) {
         super(StampFactory.forVoid());
         assert index != null;
         assert indexScaling != 0;
@@ -90,7 +81,7 @@ public class IndexedLocationNode extends LocationNode implements Canonicalizable
     @Override
     public Node canonical(CanonicalizerTool tool) {
         if (index.isConstant()) {
-            return ConstantLocationNode.create(getLocationIdentity(), index.asJavaConstant().asLong() * indexScaling + displacement);
+            return new ConstantLocationNode(getLocationIdentity(), index.asJavaConstant().asLong() * indexScaling + displacement);
         }
         return this;
     }
@@ -100,7 +91,7 @@ public class IndexedLocationNode extends LocationNode implements Canonicalizable
         assert indexScaling > 0 && CodeUtil.isPowerOf2(indexScaling);
         int scale = CodeUtil.log2(indexScaling);
         return (IntegerStamp) IntegerStamp.OPS.getAdd().foldStamp(StampFactory.forInteger(64, displacement, displacement),
-                        IntegerStamp.OPS.getSignExtend().foldStamp(32, 64, StampTool.leftShift(index.stamp(), StampFactory.forInteger(64, scale, scale))));
+                        IntegerStamp.OPS.getSignExtend().foldStamp(32, 64, IntegerStamp.OPS.getShl().foldStamp(index.stamp(), StampFactory.forInteger(64, scale, scale))));
     }
 
     @Override

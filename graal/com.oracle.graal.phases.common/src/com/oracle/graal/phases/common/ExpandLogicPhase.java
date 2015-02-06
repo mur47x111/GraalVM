@@ -55,14 +55,14 @@ public class ExpandLogicPhase extends Phase {
     }
 
     private static void processIf(LogicNode x, boolean xNegated, LogicNode y, boolean yNegated, IfNode ifNode, double shortCircuitProbability) {
-        BeginNode trueTarget = ifNode.trueSuccessor();
-        BeginNode falseTarget = ifNode.falseSuccessor();
+        AbstractBeginNode trueTarget = ifNode.trueSuccessor();
+        AbstractBeginNode falseTarget = ifNode.falseSuccessor();
         double firstIfProbability = shortCircuitProbability;
         /*
          * P(Y | not(X)) = P(Y inter not(X)) / P(not(X)) = (P(X union Y) - P(X)) / (1 - P(X))
-         * 
+         *
          * P(X) = shortCircuitProbability
-         * 
+         *
          * P(X union Y) = ifNode.probability(trueTarget)
          */
         double secondIfProbability = (ifNode.probability(trueTarget) - shortCircuitProbability) / (1 - shortCircuitProbability);
@@ -72,16 +72,16 @@ public class ExpandLogicPhase extends Phase {
         }
         ifNode.clearSuccessors();
         Graph graph = ifNode.graph();
-        MergeNode trueTargetMerge = graph.add(MergeNode.create());
+        AbstractMergeNode trueTargetMerge = graph.add(new MergeNode());
         trueTargetMerge.setNext(trueTarget);
-        EndNode firstTrueEnd = graph.add(EndNode.create());
-        EndNode secondTrueEnd = graph.add(EndNode.create());
+        EndNode firstTrueEnd = graph.add(new EndNode());
+        EndNode secondTrueEnd = graph.add(new EndNode());
         trueTargetMerge.addForwardEnd(firstTrueEnd);
         trueTargetMerge.addForwardEnd(secondTrueEnd);
-        BeginNode firstTrueTarget = BeginNode.begin(firstTrueEnd);
-        BeginNode secondTrueTarget = BeginNode.begin(secondTrueEnd);
-        BeginNode secondIf = BeginNode.begin(graph.add(IfNode.create(y, yNegated ? falseTarget : secondTrueTarget, yNegated ? secondTrueTarget : falseTarget, secondIfProbability)));
-        IfNode firstIf = graph.add(IfNode.create(x, xNegated ? secondIf : firstTrueTarget, xNegated ? firstTrueTarget : secondIf, firstIfProbability));
+        AbstractBeginNode firstTrueTarget = BeginNode.begin(firstTrueEnd);
+        AbstractBeginNode secondTrueTarget = BeginNode.begin(secondTrueEnd);
+        AbstractBeginNode secondIf = BeginNode.begin(graph.add(new IfNode(y, yNegated ? falseTarget : secondTrueTarget, yNegated ? secondTrueTarget : falseTarget, secondIfProbability)));
+        IfNode firstIf = graph.add(new IfNode(x, xNegated ? secondIf : firstTrueTarget, xNegated ? firstTrueTarget : secondIf, firstIfProbability));
         ifNode.replaceAtPredecessor(firstIf);
         ifNode.safeDelete();
     }
@@ -90,8 +90,8 @@ public class ExpandLogicPhase extends Phase {
         ValueNode trueTarget = conditional.trueValue();
         ValueNode falseTarget = conditional.falseValue();
         Graph graph = conditional.graph();
-        ConditionalNode secondConditional = graph.unique(ConditionalNode.create(y, yNegated ? falseTarget : trueTarget, yNegated ? trueTarget : falseTarget));
-        ConditionalNode firstConditional = graph.unique(ConditionalNode.create(x, xNegated ? secondConditional : trueTarget, xNegated ? trueTarget : secondConditional));
+        ConditionalNode secondConditional = graph.unique(new ConditionalNode(y, yNegated ? falseTarget : trueTarget, yNegated ? trueTarget : falseTarget));
+        ConditionalNode firstConditional = graph.unique(new ConditionalNode(x, xNegated ? secondConditional : trueTarget, xNegated ? trueTarget : secondConditional));
         conditional.replaceAndDelete(firstConditional);
     }
 }

@@ -24,6 +24,7 @@ package com.oracle.truffle.dsl.processor.model;
 
 import javax.lang.model.element.*;
 
+import com.oracle.truffle.api.nodes.*;
 import com.oracle.truffle.dsl.processor.*;
 import com.oracle.truffle.dsl.processor.java.*;
 
@@ -50,7 +51,7 @@ public class ExecutableTypeData extends TemplateMethod {
     }
 
     public boolean hasUnexpectedValue(ProcessorContext context) {
-        return ElementUtils.canThrowType(getMethod().getThrownTypes(), context.getTruffleTypes().getUnexpectedValueException());
+        return ElementUtils.canThrowType(getMethod().getThrownTypes(), context.getType(UnexpectedResultException.class));
     }
 
     public boolean isFinal() {
@@ -82,6 +83,14 @@ public class ExecutableTypeData extends TemplateMethod {
             return type.equals(((ExecutableTypeData) obj).type);
         }
         return super.equals(obj);
+    }
+
+    public boolean hasFrame() {
+        return getFrame() != null;
+    }
+
+    public Parameter getFrame() {
+        return findParameter("frameValue");
     }
 
 }

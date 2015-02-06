@@ -33,7 +33,7 @@ public final class SpecializationData extends TemplateMethod {
         UNINITIALIZED,
         SPECIALIZED,
         POLYMORPHIC,
-        GENERIC
+        FALLBACK
     }
 
     private final NodeData node;
@@ -133,7 +133,11 @@ public final class SpecializationData extends TemplateMethod {
             return true;
         }
         for (Parameter parameter : getSignatureParameters()) {
-            ExecutableTypeData type = parameter.getSpecification().getExecution().getChild().findExecutableType(context, parameter.getTypeSystemType());
+            NodeChildData child = parameter.getSpecification().getExecution().getChild();
+            ExecutableTypeData type = child.findExecutableType(parameter.getTypeSystemType());
+            if (type == null) {
+                type = child.findAnyGenericExecutableType(context);
+            }
             if (type.hasUnexpectedValue(context)) {
                 return true;
             }
@@ -221,13 +225,6 @@ public final class SpecializationData extends TemplateMethod {
         return true;
     }
 
-    public String createReferenceName() {
-        if (getMethod() == null) {
-            return "-";
-        }
-        return ElementUtils.createReferenceName(getMethod());
-    }
-
     public NodeData getNode() {
         return node;
     }
@@ -240,8 +237,8 @@ public final class SpecializationData extends TemplateMethod {
         return kind == SpecializationKind.SPECIALIZED;
     }
 
-    public boolean isGeneric() {
-        return kind == SpecializationKind.GENERIC;
+    public boolean isFallback() {
+        return kind == SpecializationKind.FALLBACK;
     }
 
     public boolean isUninitialized() {
@@ -287,14 +284,14 @@ public final class SpecializationData extends TemplateMethod {
         return String.format("%s [id = %s, method = %s, guards = %s, signature = %s]", getClass().getSimpleName(), getId(), getMethod(), getGuards(), getTypeSignature());
     }
 
-    public boolean isFrameUsedByGuard(ProcessorContext context) {
+    public boolean isFrameUsedByGuard() {
         for (GuardExpression guard : getGuards()) {
             if (guard.getResolvedGuard() == null) {
                 continue;
             }
 
             for (Parameter param : guard.getResolvedGuard().getParameters()) {
-                if (ElementUtils.typeEquals(param.getType(), context.getTruffleTypes().getFrame())) {
+                if (ElementUtils.typeEquals(param.getType(), getNode().getFrameType())) {
                     return true;
                 }
             }

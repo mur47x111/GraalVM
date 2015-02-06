@@ -48,17 +48,17 @@ public class PolymorphicTest2 {
     @SuppressWarnings("unused")
     abstract static class Polymorphic1 extends BinaryNode {
 
-        @Specialization(order = 1)
+        @Specialization
         int add(int left, int right) {
             return 42;
         }
 
-        @Specialization(order = 2)
+        @Specialization
         int add(boolean left, boolean right) {
             return 21;
         }
 
-        @Specialization(order = 4)
+        @Specialization
         String add(boolean left, int right) {
             return "(boolean,int)";
         }

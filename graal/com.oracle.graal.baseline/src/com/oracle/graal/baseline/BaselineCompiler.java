@@ -32,6 +32,7 @@ import com.oracle.graal.compiler.target.*;
 import com.oracle.graal.debug.*;
 import com.oracle.graal.java.*;
 import com.oracle.graal.lir.asm.*;
+import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.phases.*;
 
 /**
@@ -50,16 +51,13 @@ public class BaselineCompiler {
     private final GraphBuilderConfiguration graphBuilderConfig;
 
     public CompilationResult generate(ResolvedJavaMethod method, int entryBCI, Backend backend, CompilationResult compilationResult, ResolvedJavaMethod installedCodeOwner,
-                    CompilationResultBuilderFactory factory, OptimisticOptimizations optimisticOpts) {
-        ProfilingInfo profilingInfo = method.getProfilingInfo();
+                    CompilationResultBuilderFactory factory, OptimisticOptimizations optimisticOpts, Replacements replacements) {
         assert method.getCode() != null : "method must contain bytecodes: " + method;
-        BytecodeStream stream = new BytecodeStream(method.getCode());
-        ConstantPool constantPool = method.getConstantPool();
         TTY.Filter filter = new TTY.Filter(PrintFilter.getValue(), method);
 
         BaselineFrameStateBuilder frameState = new BaselineFrameStateBuilder(method);
 
-        BaselineBytecodeParser parser = new BaselineBytecodeParser(metaAccess, method, graphBuilderConfig, optimisticOpts, frameState, stream, profilingInfo, constantPool, entryBCI, backend);
+        BaselineBytecodeParser parser = new BaselineBytecodeParser(metaAccess, method, graphBuilderConfig, optimisticOpts, frameState, backend);
 
         // build blocks and LIR instructions
         try {

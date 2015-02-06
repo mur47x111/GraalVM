@@ -55,7 +55,22 @@ public final class NodeNodeMap extends NodeMap<Node> implements Map<Node, Node> 
     }
 
     public Set<Node> keySet() {
-        throw new UnsupportedOperationException("Cannot get key set from this map");
+        HashSet<Node> entries = new HashSet<>();
+        for (int i = 0; i < values.length; ++i) {
+            Object v = values[i];
+            if (v != null) {
+                Node key = getKey(i);
+                if (key != null) {
+                    entries.add(key);
+                }
+            }
+        }
+        /*
+         * The normal contract for entrySet is that modifications of the set are reflected in the
+         * underlying data structure. For simplicity don't allow that but complain if someone tries
+         * to use it that way.
+         */
+        return Collections.unmodifiableSet(entries);
     }
 
     public Collection<Node> values() {
@@ -69,7 +84,16 @@ public final class NodeNodeMap extends NodeMap<Node> implements Map<Node, Node> 
         return result;
     }
 
-    public Set<java.util.Map.Entry<Node, Node>> entrySet() {
-        throw new UnsupportedOperationException("Cannot get entry set for this map");
+    public Set<Map.Entry<Node, Node>> entrySet() {
+        HashSet<Map.Entry<Node, Node>> entries = new HashSet<>();
+        for (Map.Entry<Node, Node> entry : entries()) {
+            entries.add(entry);
+        }
+        /*
+         * The normal contract for entrySet is that modifications of the set are reflected in the
+         * underlying data structure. For simplicity don't allow that but complain if someone tries
+         * to use it that way.
+         */
+        return Collections.unmodifiableSet(entries);
     }
 }

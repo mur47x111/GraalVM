@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,32 +32,21 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.util.*;
 
 @NodeInfo(shortName = "==")
-public class IntegerEqualsNode extends CompareNode {
+public final class IntegerEqualsNode extends CompareNode {
 
-    /**
-     * Constructs a new integer equality comparison node.
-     *
-     * @param x the instruction producing the first input to the instruction
-     * @param y the instruction that produces the second input to this instruction
-     */
-    public static IntegerEqualsNode create(ValueNode x, ValueNode y) {
-        return new IntegerEqualsNode(x, y);
-    }
-
-    protected IntegerEqualsNode(ValueNode x, ValueNode y) {
-        super(x, y);
+    public IntegerEqualsNode(ValueNode x, ValueNode y) {
+        super(Condition.EQ, false, x, y);
         assert !x.getKind().isNumericFloat() && x.getKind() != Kind.Object;
         assert !y.getKind().isNumericFloat() && y.getKind() != Kind.Object;
     }
 
-    @Override
-    public Condition condition() {
-        return Condition.EQ;
-    }
-
-    @Override
-    public boolean unorderedIsTrue() {
-        return false;
+    public static LogicNode create(ValueNode x, ValueNode y, ConstantReflectionProvider constantReflection) {
+        LogicNode result = CompareNode.tryConstantFold(Condition.EQ, x, y, constantReflection, false);
+        if (result != null) {
+            return result;
+        } else {
+            return new IntegerEqualsNode(x, y);
+        }
     }
 
     @Override
@@ -68,9 +57,9 @@ public class IntegerEqualsNode extends CompareNode {
             ValueNode b = mirrored ? normalizeNode.getX() : normalizeNode.getY();
 
             if (normalizeNode.getX().getKind() == Kind.Double || normalizeNode.getX().getKind() == Kind.Float) {
-                return FloatEqualsNode.create(a, b);
+                return new FloatEqualsNode(a, b);
             } else {
-                return IntegerEqualsNode.create(a, b);
+                return new IntegerEqualsNode(a, b);
             }
         }
         return this;
@@ -79,9 +68,9 @@ public class IntegerEqualsNode extends CompareNode {
     @Override
     protected CompareNode duplicateModified(ValueNode newX, ValueNode newY) {
         if (newX.stamp() instanceof FloatStamp && newY.stamp() instanceof FloatStamp) {
-            return FloatEqualsNode.create(newX, newY);
+            return new FloatEqualsNode(newX, newY);
         } else if (newX.stamp() instanceof IntegerStamp && newY.stamp() instanceof IntegerStamp) {
-            return IntegerEqualsNode.create(newX, newY);
+            return new IntegerEqualsNode(newX, newY);
         }
         throw GraalInternalError.shouldNotReachHere();
     }
@@ -101,18 +90,18 @@ public class IntegerEqualsNode extends CompareNode {
         if (constant instanceof PrimitiveConstant && ((PrimitiveConstant) constant).asLong() == 0) {
             if (nonConstant instanceof AndNode) {
                 AndNode andNode = (AndNode) nonConstant;
-                return IntegerTestNode.create(andNode.getX(), andNode.getY());
-            } else if (nonConstant instanceof ShiftNode) {
+                return new IntegerTestNode(andNode.getX(), andNode.getY());
+            } else if (nonConstant instanceof ShiftNode && nonConstant.stamp() instanceof IntegerStamp) {
                 if (nonConstant instanceof LeftShiftNode) {
                     LeftShiftNode shift = (LeftShiftNode) nonConstant;
                     if (shift.getY().isConstant()) {
                         int mask = shift.getShiftAmountMask();
                         int amount = shift.getY().asJavaConstant().asInt() & mask;
                         if (shift.getX().getKind() == Kind.Int) {
-                            return IntegerTestNode.create(shift.getX(), ConstantNode.forInt(-1 >>> amount));
+                            return new IntegerTestNode(shift.getX(), ConstantNode.forInt(-1 >>> amount));
                         } else {
                             assert shift.getX().getKind() == Kind.Long;
-                            return IntegerTestNode.create(shift.getX(), ConstantNode.forLong(-1L >>> amount));
+                            return new IntegerTestNode(shift.getX(), ConstantNode.forLong(-1L >>> amount));
                         }
                     }
                 } else if (nonConstant instanceof RightShiftNode) {
@@ -121,10 +110,10 @@ public class IntegerEqualsNode extends CompareNode {
                         int mask = shift.getShiftAmountMask();
                         int amount = shift.getY().asJavaConstant().asInt() & mask;
                         if (shift.getX().getKind() == Kind.Int) {
-                            return IntegerTestNode.create(shift.getX(), ConstantNode.forInt(-1 << amount));
+                            return new IntegerTestNode(shift.getX(), ConstantNode.forInt(-1 << amount));
                         } else {
                             assert shift.getX().getKind() == Kind.Long;
-                            return IntegerTestNode.create(shift.getX(), ConstantNode.forLong(-1L << amount));
+                            return new IntegerTestNode(shift.getX(), ConstantNode.forLong(-1L << amount));
                         }
                     }
                 } else if (nonConstant instanceof UnsignedRightShiftNode) {
@@ -133,10 +122,10 @@ public class IntegerEqualsNode extends CompareNode {
                         int mask = shift.getShiftAmountMask();
                         int amount = shift.getY().asJavaConstant().asInt() & mask;
                         if (shift.getX().getKind() == Kind.Int) {
-                            return IntegerTestNode.create(shift.getX(), ConstantNode.forInt(-1 << amount));
+                            return new IntegerTestNode(shift.getX(), ConstantNode.forInt(-1 << amount));
                         } else {
                             assert shift.getX().getKind() == Kind.Long;
-                            return IntegerTestNode.create(shift.getX(), ConstantNode.forLong(-1L << amount));
+                            return new IntegerTestNode(shift.getX(), ConstantNode.forLong(-1L << amount));
                         }
                     }
                 }

@@ -51,11 +51,7 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
     static class DummyGuardHandle extends ValueNode implements GuardedNode {
         @Input(InputType.Guard) GuardingNode guard;
 
-        public static DummyGuardHandle create(GuardingNode guard) {
-            return new DummyGuardHandle(guard);
-        }
-
-        protected DummyGuardHandle(GuardingNode guard) {
+        public DummyGuardHandle(GuardingNode guard) {
             super(StampFactory.forVoid());
             this.guard = guard;
         }
@@ -81,14 +77,12 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
         private final NodeBitMap activeGuards;
         private AnchoringNode guardAnchor;
         private FixedWithNextNode lastFixedNode;
-        private ControlFlowGraph cfg;
 
-        public LoweringToolImpl(PhaseContext context, AnchoringNode guardAnchor, NodeBitMap activeGuards, FixedWithNextNode lastFixedNode, ControlFlowGraph cfg) {
+        public LoweringToolImpl(PhaseContext context, AnchoringNode guardAnchor, NodeBitMap activeGuards, FixedWithNextNode lastFixedNode) {
             this.context = context;
             this.guardAnchor = guardAnchor;
             this.activeGuards = activeGuards;
             this.lastFixedNode = lastFixedNode;
-            this.cfg = cfg;
         }
 
         @Override
@@ -145,26 +139,21 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
                 }
             }
             StructuredGraph graph = before.graph();
-            if (condition.graph().getGuardsStage().ordinal() >= StructuredGraph.GuardsStage.FIXED_DEOPTS.ordinal()) {
-                FixedGuardNode fixedGuard = graph.add(FixedGuardNode.create(condition, deoptReason, action, negated));
+            if (!condition.graph().getGuardsStage().allowsFloatingGuards()) {
+                FixedGuardNode fixedGuard = graph.add(new FixedGuardNode(condition, deoptReason, action, negated));
                 graph.addBeforeFixed(before, fixedGuard);
-                DummyGuardHandle handle = graph.add(DummyGuardHandle.create(fixedGuard));
+                DummyGuardHandle handle = graph.add(new DummyGuardHandle(fixedGuard));
                 fixedGuard.lower(this);
                 GuardingNode result = handle.getGuard();
                 handle.safeDelete();
                 return result;
             } else {
-                GuardNode newGuard = graph.unique(GuardNode.create(condition, guardAnchor, deoptReason, action, negated, JavaConstant.NULL_POINTER));
+                GuardNode newGuard = graph.unique(new GuardNode(condition, guardAnchor, deoptReason, action, negated, JavaConstant.NULL_POINTER));
                 if (OptEliminateGuards.getValue()) {
                     activeGuards.markAndGrow(newGuard);
                 }
                 return newGuard;
             }
-        }
-
-        @Override
-        public Block getBlockFor(Node node) {
-            return cfg.blockFor(node);
         }
 
         public FixedWithNextNode lastFixedNode() {
@@ -302,10 +291,10 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
 
         private AnchoringNode process(final Block b, final NodeBitMap activeGuards, final AnchoringNode startAnchor) {
 
-            final LoweringToolImpl loweringTool = new LoweringToolImpl(context, startAnchor, activeGuards, b.getBeginNode(), schedule.getCFG());
+            final LoweringToolImpl loweringTool = new LoweringToolImpl(context, startAnchor, activeGuards, b.getBeginNode());
 
             // Lower the instructions of this block.
-            List<ScheduledNode> nodes = schedule.nodesFor(b);
+            List<ValueNode> nodes = schedule.nodesFor(b);
             for (Node node : nodes) {
 
                 if (node.isDeleted()) {
@@ -330,7 +319,7 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
                     if (loweringTool.guardAnchor.asNode().isDeleted()) {
                         // TODO nextNode could be deleted but this is not currently supported
                         assert nextNode.isAlive();
-                        loweringTool.guardAnchor = BeginNode.prevBegin(nextNode);
+                        loweringTool.guardAnchor = AbstractBeginNode.prevBegin(nextNode);
                     }
                     assert checkPostNodeLowering(node, loweringTool, preLoweringMark, unscheduledUsages);
                 }
@@ -347,7 +336,7 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
                         // FixedWithNextNode is followed by some kind of BeginNode.
                         // For example the when a FixedGuard followed by a loop exit is lowered to a
                         // control-split + deopt.
-                        BeginNode begin = node.graph().add(BeginNode.create());
+                        AbstractBeginNode begin = node.graph().add(new BeginNode());
                         nextLastFixed.replaceFirstSuccessor(nextNode, begin);
                         begin.setNext(nextNode);
                         nextLastFixed = begin;
@@ -372,7 +361,7 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
             List<Node> unscheduledUsages = new ArrayList<>();
             if (node instanceof FloatingNode) {
                 for (Node usage : node.usages()) {
-                    if (usage instanceof ScheduledNode) {
+                    if (usage instanceof ValueNode) {
                         Block usageBlock = schedule.getCFG().blockFor(usage);
                         if (usageBlock == null) {
                             unscheduledUsages.add(usage);

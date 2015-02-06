@@ -38,18 +38,14 @@ import com.oracle.graal.nodes.spi.*;
  * A call to the {@link NewArrayStub}.
  */
 @NodeInfo
-public class NewArrayStubCall extends DeoptimizingStubCall implements LIRLowerable {
+public final class NewArrayStubCall extends DeoptimizingStubCall implements LIRLowerable {
 
     private static final Stamp defaultStamp = StampFactory.objectNonNull();
 
     @Input ValueNode hub;
     @Input ValueNode length;
 
-    public static NewArrayStubCall create(ValueNode hub, ValueNode length) {
-        return new NewArrayStubCall(hub, length);
-    }
-
-    protected NewArrayStubCall(ValueNode hub, ValueNode length) {
+    public NewArrayStubCall(ValueNode hub, ValueNode length) {
         super(defaultStamp);
         this.hub = hub;
         this.length = length;

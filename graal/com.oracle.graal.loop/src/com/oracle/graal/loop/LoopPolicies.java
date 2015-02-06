@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@ import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.cfg.*;
+import com.oracle.graal.nodes.debug.*;
 
 public abstract class LoopPolicies {
 
@@ -45,7 +46,17 @@ public abstract class LoopPolicies {
         }
         LoopBeginNode loopBegin = loop.loopBegin();
         double entryProbability = probabilities.applyAsDouble(loopBegin.forwardEnd());
-        return entryProbability > MinimumPeelProbability.getValue() && loop.size() + loopBegin.graph().getNodeCount() < MaximumDesiredSize.getValue();
+        if (entryProbability > MinimumPeelProbability.getValue() && loop.size() + loopBegin.graph().getNodeCount() < MaximumDesiredSize.getValue()) {
+            // check whether we're allowed to peel this loop
+            for (Node node : loop.inside().nodes()) {
+                if (node instanceof ControlFlowAnchorNode) {
+                    return false;
+                }
+            }
+            return true;
+        } else {
+            return false;
+        }
     }
 
     public static boolean shouldFullUnroll(LoopEx loop) {
@@ -57,7 +68,17 @@ public abstract class LoopPolicies {
         int maxNodes = (counted.isExactTripCount() && counted.isConstantExactTripCount()) ? ExactFullUnrollMaxNodes.getValue() : FullUnrollMaxNodes.getValue();
         maxNodes = Math.min(maxNodes, MaximumDesiredSize.getValue() - loop.loopBegin().graph().getNodeCount());
         int size = Math.max(1, loop.size() - 1 - loop.loopBegin().phis().count());
-        return size * maxTrips <= maxNodes;
+        if (size * maxTrips <= maxNodes) {
+            // check whether we're allowed to unroll this loop
+            for (Node node : loop.inside().nodes()) {
+                if (node instanceof ControlFlowAnchorNode) {
+                    return false;
+                }
+            }
+            return true;
+        } else {
+            return false;
+        }
     }
 
     public static boolean shouldTryUnswitch(LoopEx loop) {
@@ -70,9 +91,9 @@ public abstract class LoopPolicies {
         double maxProbability = 0;
         for (ControlSplitNode controlSplit : controlSplits) {
             Block postDomBlock = loop.loopsData().controlFlowGraph().blockFor(controlSplit).getPostdominator();
-            BeginNode postDom = postDomBlock != null ? postDomBlock.getBeginNode() : null;
+            AbstractBeginNode postDom = postDomBlock != null ? postDomBlock.getBeginNode() : null;
             for (Node successor : controlSplit.successors()) {
-                BeginNode branch = (BeginNode) successor;
+                AbstractBeginNode branch = (AbstractBeginNode) successor;
                 // this may count twice because of fall-through in switches
                 inBranchTotal += loop.nodesInLoopFrom(branch, postDom).count();
                 double probability = controlSplit.probability(branch);

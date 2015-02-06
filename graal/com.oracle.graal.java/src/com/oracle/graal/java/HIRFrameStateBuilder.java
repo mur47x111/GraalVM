@@ -25,11 +25,13 @@ package com.oracle.graal.java;
 import static com.oracle.graal.graph.iterators.NodePredicates.*;
 
 import java.util.*;
+import java.util.function.*;
 
 import com.oracle.graal.api.code.*;
 import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.debug.*;
+import com.oracle.graal.java.GraphBuilderPlugins.ParameterPlugin;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
@@ -43,21 +45,57 @@ public class HIRFrameStateBuilder extends AbstractFrameStateBuilder<ValueNode, H
 
     private MonitorIdNode[] monitorIds;
     private final StructuredGraph graph;
+    private final Supplier<FrameState> outerFrameStateSupplier;
 
-    public HIRFrameStateBuilder(ResolvedJavaMethod method, StructuredGraph graph, boolean eagerResolve) {
+    /**
+     * Creates a new frame state builder for the given method and the given target graph.
+     *
+     * @param method the method whose frame is simulated
+     * @param graph the target graph of Graal nodes created by the builder
+     */
+    public HIRFrameStateBuilder(ResolvedJavaMethod method, StructuredGraph graph, Supplier<FrameState> outerFrameStateSupplier) {
         super(method);
 
         assert graph != null;
 
         this.monitorIds = EMPTY_MONITOR_ARRAY;
         this.graph = graph;
+        this.outerFrameStateSupplier = outerFrameStateSupplier;
+    }
+
+    public final void initializeFromArgumentsArray(ValueNode[] arguments) {
+
+        int javaIndex = 0;
+        int index = 0;
+        if (!method.isStatic()) {
+            // set the receiver
+            storeLocal(javaIndex, arguments[index]);
+            javaIndex = 1;
+            index = 1;
+        }
+        Signature sig = method.getSignature();
+        int max = sig.getParameterCount(false);
+        for (int i = 0; i < max; i++) {
+            storeLocal(javaIndex, arguments[index]);
+            javaIndex += arguments[index].getKind().getSlotCount();
+            index++;
+        }
+    }
+
+    public final void initializeForMethodStart(boolean eagerResolve, ParameterPlugin parameterPlugin) {
 
         int javaIndex = 0;
         int index = 0;
         if (!method.isStatic()) {
             // add the receiver
-            ParameterNode receiver = graph.unique(ParameterNode.create(javaIndex, StampFactory.declaredNonNull(method.getDeclaringClass())));
-            storeLocal(javaIndex, receiver);
+            FloatingNode receiver = null;
+            if (parameterPlugin != null) {
+                receiver = parameterPlugin.interceptParameter(index);
+            }
+            if (receiver == null) {
+                receiver = new ParameterNode(javaIndex, StampFactory.declaredNonNull(method.getDeclaringClass()));
+            }
+            storeLocal(javaIndex, graph.unique(receiver));
             javaIndex = 1;
             index = 1;
         }
@@ -76,9 +114,15 @@ public class HIRFrameStateBuilder extends AbstractFrameStateBuilder<ValueNode, H
             } else {
                 stamp = StampFactory.forKind(kind);
             }
-            ParameterNode param = graph.unique(ParameterNode.create(index, stamp));
-            storeLocal(javaIndex, param);
-            javaIndex += stackSlots(kind);
+            FloatingNode param = null;
+            if (parameterPlugin != null) {
+                param = parameterPlugin.interceptParameter(index);
+            }
+            if (param == null) {
+                param = new ParameterNode(index, stamp);
+            }
+            storeLocal(javaIndex, graph.unique(param));
+            javaIndex += kind.getSlotCount();
             index++;
         }
     }
@@ -88,6 +132,7 @@ public class HIRFrameStateBuilder extends AbstractFrameStateBuilder<ValueNode, H
         assert other.graph != null;
         graph = other.graph;
         monitorIds = other.monitorIds.length == 0 ? other.monitorIds : other.monitorIds.clone();
+        this.outerFrameStateSupplier = other.outerFrameStateSupplier;
 
         assert locals.length == method.getMaxLocals();
         assert stack.length == Math.max(1, method.getMaxStackSize());
@@ -123,7 +168,11 @@ public class HIRFrameStateBuilder extends AbstractFrameStateBuilder<ValueNode, H
     }
 
     public FrameState create(int bci) {
-        return graph.add(FrameState.create(method, bci, locals, Arrays.asList(stack).subList(0, stackSize), lockedObjects, monitorIds, rethrowException, false));
+        FrameState outerFrameState = null;
+        if (outerFrameStateSupplier != null) {
+            outerFrameState = outerFrameStateSupplier.get();
+        }
+        return graph.add(new FrameState(outerFrameState, method, bci, locals, stack, stackSize, lockedObjects, Arrays.asList(monitorIds), rethrowException, false));
     }
 
     @Override
@@ -157,7 +206,7 @@ public class HIRFrameStateBuilder extends AbstractFrameStateBuilder<ValueNode, H
         return true;
     }
 
-    public void merge(MergeNode block, HIRFrameStateBuilder other) {
+    public void merge(AbstractMergeNode block, HIRFrameStateBuilder other) {
         assert isCompatibleWith(other);
 
         for (int i = 0; i < localsSize(); i++) {
@@ -172,7 +221,7 @@ public class HIRFrameStateBuilder extends AbstractFrameStateBuilder<ValueNode, H
         }
     }
 
-    private ValueNode merge(ValueNode currentValue, ValueNode otherValue, MergeNode block) {
+    private ValueNode merge(ValueNode currentValue, ValueNode otherValue, AbstractMergeNode block) {
         if (currentValue == null || currentValue.isDeleted()) {
             return null;
 
@@ -190,7 +239,7 @@ public class HIRFrameStateBuilder extends AbstractFrameStateBuilder<ValueNode, H
                 return null;
             }
 
-            ValuePhiNode phi = graph.addWithoutUnique(ValuePhiNode.create(currentValue.stamp().unrestricted(), block));
+            ValuePhiNode phi = graph.addWithoutUnique(new ValuePhiNode(currentValue.stamp().unrestricted(), block));
             for (int i = 0; i < block.phiPredecessorCount(); i++) {
                 phi.addInput(currentValue);
             }
@@ -258,7 +307,7 @@ public class HIRFrameStateBuilder extends AbstractFrameStateBuilder<ValueNode, H
         }
     }
 
-    public void insertProxies(BeginNode begin) {
+    public void insertProxies(AbstractBeginNode begin) {
         for (int i = 0; i < localsSize(); i++) {
             ValueNode value = localAt(i);
             if (value != null) {
@@ -282,24 +331,15 @@ public class HIRFrameStateBuilder extends AbstractFrameStateBuilder<ValueNode, H
         }
     }
 
-    private ValuePhiNode createLoopPhi(MergeNode block, ValueNode value) {
+    private ValuePhiNode createLoopPhi(AbstractMergeNode block, ValueNode value) {
         if (value == null) {
             return null;
         }
         assert !block.isPhiAtMerge(value) : "phi function for this block already created";
 
-        ValuePhiNode phi = graph.addWithoutUnique(ValuePhiNode.create(value.stamp().unrestricted(), block));
+        ValuePhiNode phi = graph.addWithoutUnique(new ValuePhiNode(value.stamp().unrestricted(), block));
         phi.addInput(value);
         return phi;
-    }
-
-    public void cleanupDeletedPhis() {
-        for (int i = 0; i < localsSize(); i++) {
-            if (localAt(i) != null && localAt(i).isDeleted()) {
-                assert localAt(i) instanceof ValuePhiNode || localAt(i) instanceof ProxyNode : "Only phi and value proxies can be deleted during parsing: " + localAt(i);
-                storeLocal(i, null);
-            }
-        }
     }
 
     /**

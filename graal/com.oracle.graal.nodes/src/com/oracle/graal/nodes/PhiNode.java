@@ -32,28 +32,29 @@ import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.calc.*;
 
 /**
- * {@code PhiNode}s represent the merging of edges at a control flow merges ({@link MergeNode} or
- * {@link LoopBeginNode}). For a {@link MergeNode}, the order of the values corresponds to the order
- * of the ends. For {@link LoopBeginNode}s, the first value corresponds to the loop's predecessor,
- * while the rest of the values correspond to the {@link LoopEndNode}s.
+ * {@code PhiNode}s represent the merging of edges at a control flow merges (
+ * {@link AbstractMergeNode} or {@link LoopBeginNode}). For a {@link AbstractMergeNode}, the order
+ * of the values corresponds to the order of the ends. For {@link LoopBeginNode}s, the first value
+ * corresponds to the loop's predecessor, while the rest of the values correspond to the
+ * {@link LoopEndNode}s.
  */
 @NodeInfo
 public abstract class PhiNode extends FloatingNode implements Simplifiable {
 
-    @Input(InputType.Association) protected MergeNode merge;
+    @Input(InputType.Association) protected AbstractMergeNode merge;
 
-    protected PhiNode(Stamp stamp, MergeNode merge) {
+    protected PhiNode(Stamp stamp, AbstractMergeNode merge) {
         super(stamp);
         this.merge = merge;
     }
 
     public abstract NodeInputList<ValueNode> values();
 
-    public MergeNode merge() {
+    public AbstractMergeNode merge() {
         return merge;
     }
 
-    public void setMerge(MergeNode x) {
+    public void setMerge(AbstractMergeNode x) {
         updateUsages(merge, x);
         merge = x;
     }
@@ -143,17 +144,13 @@ public abstract class PhiNode extends FloatingNode implements Simplifiable {
     @NodeInfo
     static class MultipleValuesNode extends ValueNode {
 
-        public static MultipleValuesNode create() {
-            return new MultipleValuesNode();
-        }
-
-        protected MultipleValuesNode() {
+        public MultipleValuesNode() {
             super(null);
         }
 
     }
 
-    public static final ValueNode MULTIPLE_VALUES = MultipleValuesNode.create();
+    public static final ValueNode MULTIPLE_VALUES = new MultipleValuesNode();
 
     /**
      * If all inputs are the same value, this value is returned, otherwise {@link #MULTIPLE_VALUES}.
@@ -161,10 +158,10 @@ public abstract class PhiNode extends FloatingNode implements Simplifiable {
      * {@code null} inputs.
      */
     public ValueNode singleValue() {
-        Iterator<ValueNode> iterator = values().iterator();
-        ValueNode singleValue = iterator.next();
-        while (iterator.hasNext()) {
-            ValueNode value = iterator.next();
+        ValueNode singleValue = valueAt(0);
+        int count = valueCount();
+        for (int i = 1; i < count; ++i) {
+            ValueNode value = valueAt(i);
             if (value != this) {
                 if (value != singleValue) {
                     return MULTIPLE_VALUES;
@@ -209,8 +206,13 @@ public abstract class PhiNode extends FloatingNode implements Simplifiable {
                     graph().replaceFloating((FloatingNode) node, singleValue);
                 }
             }
-            graph().replaceFloating(this, singleValue);
-            usages().forEach(tool::addToWorkList);
+            for (Node usage : usages().snapshot()) {
+                if (usage != this) {
+                    usage.replaceFirstInput(this, singleValue);
+                }
+            }
+            clearInputs();
+            safeDelete();
         }
     }
 

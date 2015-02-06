@@ -30,7 +30,7 @@ import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo
-public class ComputeAddressNode extends FloatingNode implements LIRLowerable {
+public final class ComputeAddressNode extends FloatingNode implements LIRLowerable {
 
     @Input ValueNode object;
     @Input(InputType.Association) ValueNode location;
@@ -43,11 +43,7 @@ public class ComputeAddressNode extends FloatingNode implements LIRLowerable {
         return (LocationNode) location;
     }
 
-    public static ComputeAddressNode create(ValueNode object, ValueNode location, Stamp stamp) {
-        return new ComputeAddressNode(object, location, stamp);
-    }
-
-    protected ComputeAddressNode(ValueNode object, ValueNode location, Stamp stamp) {
+    public ComputeAddressNode(ValueNode object, ValueNode location, Stamp stamp) {
         super(stamp);
         this.object = object;
         this.location = location;

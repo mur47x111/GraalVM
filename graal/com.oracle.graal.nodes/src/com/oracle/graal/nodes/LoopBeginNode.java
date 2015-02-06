@@ -37,18 +37,14 @@ import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.util.*;
 
 @NodeInfo
-public class LoopBeginNode extends MergeNode implements IterableNodeType, LIRLowerable {
+public class LoopBeginNode extends AbstractMergeNode implements IterableNodeType, LIRLowerable {
 
     protected double loopFrequency;
     protected int nextEndIndex;
     protected int unswitches;
     @OptionalInput(InputType.Guard) GuardingNode overflowGuard;
 
-    public static LoopBeginNode create() {
-        return new LoopBeginNode();
-    }
-
-    protected LoopBeginNode() {
+    public LoopBeginNode() {
         loopFrequency = 1;
     }
 
@@ -82,9 +78,19 @@ public class LoopBeginNode extends MergeNode implements IterableNodeType, LIRLow
     }
 
     /**
-     * Returns the set of {@link LoopEndNode} that correspond to back-edges for this loop, ordered
-     * in increasing {@link #phiPredecessorIndex}. This method is suited to create new loop
-     * {@link PhiNode}.
+     * Returns the set of {@link LoopEndNode} that correspond to back-edges for this loop, in
+     * increasing {@link #phiPredecessorIndex} order. This method is suited to create new loop
+     * {@link PhiNode}.<br>
+     *
+     * For example a new PhiNode may be added as follow:
+     *
+     * <pre>
+     * PhiNode phi = new ValuePhiNode(stamp, loop);
+     * phi.addInput(forwardEdgeValue);
+     * for (LoopEndNode loopEnd : loop.orderedLoopEnds()) {
+     *     phi.addInput(backEdgeValue(loopEnd));
+     * }
+     * </pre>
      *
      * @return the set of {@code LoopEndNode} that correspond to back-edges for this loop
      */
@@ -169,7 +175,7 @@ public class LoopBeginNode extends MergeNode implements IterableNodeType, LIRLow
         return super.verify();
     }
 
-    public int nextEndIndex() {
+    int nextEndIndex() {
         return nextEndIndex++;
     }
 
@@ -187,7 +193,7 @@ public class LoopBeginNode extends MergeNode implements IterableNodeType, LIRLow
         canonicalizePhis(tool);
     }
 
-    public boolean isLoopExit(BeginNode begin) {
+    public boolean isLoopExit(AbstractBeginNode begin) {
         return begin instanceof LoopExitNode && ((LoopExitNode) begin).loopBegin() == this;
     }
 
@@ -195,8 +201,8 @@ public class LoopBeginNode extends MergeNode implements IterableNodeType, LIRLow
         for (LoopExitNode loopexit : loopExits().snapshot()) {
             loopexit.removeProxies();
             FrameState loopStateAfter = loopexit.stateAfter();
-            graph().replaceFixedWithFixed(loopexit, graph().add(BeginNode.create()));
-            if (loopStateAfter != null && loopStateAfter.isAlive() && loopStateAfter.usages().isEmpty()) {
+            graph().replaceFixedWithFixed(loopexit, graph().add(new BeginNode()));
+            if (loopStateAfter != null && loopStateAfter.isAlive() && loopStateAfter.hasNoUsages()) {
                 GraphUtil.killWithUnusedFloatingInputs(loopStateAfter);
             }
         }

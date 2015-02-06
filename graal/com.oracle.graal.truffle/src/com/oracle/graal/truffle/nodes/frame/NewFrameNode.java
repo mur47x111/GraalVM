@@ -46,26 +46,18 @@ import com.oracle.truffle.api.frame.*;
  * class.
  */
 @NodeInfo
-public class NewFrameNode extends FixedWithNextNode implements IterableNodeType, VirtualizableAllocation, Canonicalizable {
+public final class NewFrameNode extends FixedWithNextNode implements IterableNodeType, VirtualizableAllocation, Canonicalizable {
 
     @Input ValueNode descriptor;
     @Input ValueNode arguments;
 
-    public static NewFrameNode create(Stamp stamp, ValueNode descriptor, ValueNode arguments) {
-        return new NewFrameNode(stamp, descriptor, arguments);
-    }
-
-    protected NewFrameNode(Stamp stamp, ValueNode descriptor, ValueNode arguments) {
+    public NewFrameNode(Stamp stamp, ValueNode descriptor, ValueNode arguments) {
         super(stamp);
         this.descriptor = descriptor;
         this.arguments = arguments;
     }
 
-    public static NewFrameNode create(ResolvedJavaType frameType, ValueNode descriptor, ValueNode arguments) {
-        return new NewFrameNode(frameType, descriptor, arguments);
-    }
-
-    protected NewFrameNode(ResolvedJavaType frameType, ValueNode descriptor, ValueNode arguments) {
+    public NewFrameNode(ResolvedJavaType frameType, ValueNode descriptor, ValueNode arguments) {
         this(StampFactory.exactNonNull(frameType), descriptor, arguments);
     }
 
@@ -104,15 +96,11 @@ public class NewFrameNode extends FixedWithNextNode implements IterableNodeType,
     }
 
     @NodeInfo
-    public static class VirtualOnlyInstanceNode extends VirtualInstanceNode {
+    public static final class VirtualOnlyInstanceNode extends VirtualInstanceNode {
 
         protected boolean allowMaterialization;
 
-        public static VirtualOnlyInstanceNode create(ResolvedJavaType type, ResolvedJavaField[] fields) {
-            return new VirtualOnlyInstanceNode(type, fields);
-        }
-
-        protected VirtualOnlyInstanceNode(ResolvedJavaType type, ResolvedJavaField[] fields) {
+        public VirtualOnlyInstanceNode(ResolvedJavaType type, ResolvedJavaField[] fields) {
             super(type, fields, true);
         }
 
@@ -133,7 +121,7 @@ public class NewFrameNode extends FixedWithNextNode implements IterableNodeType,
         if (fixed instanceof MaterializeFrameNode || fixed instanceof AbstractEndNode || fixed instanceof ForceMaterializeNode) {
             // We need to conservatively assume that a materialization of a virtual frame can also
             // happen at a merge point.
-            return AllocatedObjectNode.create(virtualNode);
+            return new AllocatedObjectNode(virtualNode);
         }
         String escapeReason;
         if (fixed instanceof StoreFieldNode) {
@@ -166,10 +154,10 @@ public class NewFrameNode extends FixedWithNextNode implements IterableNodeType,
         ResolvedJavaField primitiveLocalsField = findField(frameFields, "primitiveLocals");
         ResolvedJavaField tagsField = findField(frameFields, "tags");
 
-        VirtualObjectNode virtualFrame = VirtualOnlyInstanceNode.create(frameType, frameFields);
-        VirtualObjectNode virtualFrameObjectArray = VirtualArrayNode.create((ResolvedJavaType) localsField.getType().getComponentType(), frameSize);
-        VirtualObjectNode virtualFramePrimitiveArray = VirtualArrayNode.create((ResolvedJavaType) primitiveLocalsField.getType().getComponentType(), frameSize);
-        VirtualObjectNode virtualFrameTagArray = VirtualArrayNode.create((ResolvedJavaType) tagsField.getType().getComponentType(), frameSize);
+        VirtualObjectNode virtualFrame = new VirtualOnlyInstanceNode(frameType, frameFields);
+        VirtualObjectNode virtualFrameObjectArray = new VirtualArrayNode((ResolvedJavaType) localsField.getType().getComponentType(), frameSize);
+        VirtualObjectNode virtualFramePrimitiveArray = new VirtualArrayNode((ResolvedJavaType) primitiveLocalsField.getType().getComponentType(), frameSize);
+        VirtualObjectNode virtualFrameTagArray = new VirtualArrayNode((ResolvedJavaType) tagsField.getType().getComponentType(), frameSize);
 
         ValueNode[] objectArrayEntryState = new ValueNode[frameSize];
         ValueNode[] primitiveArrayEntryState = new ValueNode[frameSize];
@@ -238,7 +226,7 @@ public class NewFrameNode extends FixedWithNextNode implements IterableNodeType,
 
     @Override
     public Node canonical(CanonicalizerTool tool) {
-        if (usages().isEmpty()) {
+        if (hasNoUsages()) {
             return null;
         } else {
             return this;

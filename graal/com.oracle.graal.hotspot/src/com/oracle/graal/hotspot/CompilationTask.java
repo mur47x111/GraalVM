@@ -58,6 +58,7 @@ import com.oracle.graal.lir.asm.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.phases.*;
+import com.oracle.graal.phases.OptimisticOptimizations.Optimization;
 import com.oracle.graal.phases.tiers.*;
 import com.oracle.graal.printer.*;
 
@@ -196,7 +197,7 @@ public class CompilationTask {
                     HotSpotProviders providers = backend.getProviders();
                     BaselineCompiler baselineCompiler = new BaselineCompiler(GraphBuilderConfiguration.getDefault(), providers.getMetaAccess());
                     OptimisticOptimizations optimisticOpts = OptimisticOptimizations.ALL;
-                    result = baselineCompiler.generate(method, -1, backend, new CompilationResult(), method, CompilationResultBuilderFactory.Default, optimisticOpts);
+                    result = baselineCompiler.generate(method, -1, backend, new CompilationResult(), method, CompilationResultBuilderFactory.Default, optimisticOpts, providers.getReplacements());
                 } else {
                     Map<ResolvedJavaMethod, StructuredGraph> graphCache = null;
                     if (GraalOptions.CacheGraphs.getValue()) {
@@ -224,7 +225,12 @@ public class CompilationTask {
                     Suites suites = getSuites(providers);
                     ProfilingInfo profilingInfo = getProfilingInfo();
                     OptimisticOptimizations optimisticOpts = getOptimisticOpts(profilingInfo);
-                    result = compileGraph(graph, null, cc, method, providers, backend, backend.getTarget(), graphCache, getGraphBuilderSuite(providers), optimisticOpts, profilingInfo,
+                    if (isOSR) {
+                        // In OSR compiles, we cannot rely on never executed code profiles, because
+                        // all code after the OSR loop is never executed.
+                        optimisticOpts.remove(Optimization.RemoveNeverExecutedCode);
+                    }
+                    result = compileGraph(graph, cc, method, providers, backend, backend.getTarget(), graphCache, getGraphBuilderSuite(providers), optimisticOpts, profilingInfo,
                                     method.getSpeculationLog(), suites, new CompilationResult(), CompilationResultBuilderFactory.Default);
                 }
                 result.setId(getId());

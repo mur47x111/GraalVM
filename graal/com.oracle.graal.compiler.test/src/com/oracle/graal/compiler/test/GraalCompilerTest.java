@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,6 +36,7 @@ import org.junit.internal.*;
 
 import com.oracle.graal.api.code.*;
 import com.oracle.graal.api.code.CallingConvention.Type;
+import com.oracle.graal.api.directives.*;
 import com.oracle.graal.api.meta.*;
 import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.api.runtime.*;
@@ -142,21 +143,21 @@ public abstract class GraalCompilerTest extends GraalTest {
 
             @Override
             protected void run(StructuredGraph graph) {
-                assert checkHighTierGraph(graph);
+                assert checkHighTierGraph(graph) : "failed HighTier graph check";
             }
         });
         ret.getMidTier().appendPhase(new Phase("CheckGraphPhase") {
 
             @Override
             protected void run(StructuredGraph graph) {
-                assert checkMidTierGraph(graph);
+                assert checkMidTierGraph(graph) : "failed MidTier graph check";
             }
         });
         ret.getLowTier().appendPhase(new Phase("CheckGraphPhase") {
 
             @Override
             protected void run(StructuredGraph graph) {
-                assert checkLowTierGraph(graph);
+                assert checkLowTierGraph(graph) : "failed LowTier graph check";
             }
         });
         return ret;
@@ -217,7 +218,7 @@ public abstract class GraalCompilerTest extends GraalTest {
     protected int countUnusedConstants(StructuredGraph graph) {
         int total = 0;
         for (ConstantNode node : getConstantNodes(graph)) {
-            if (node.usages().isEmpty()) {
+            if (node.hasNoUsages()) {
                 total++;
             }
         }
@@ -231,7 +232,7 @@ public abstract class GraalCompilerTest extends GraalTest {
     protected void assertEquals(StructuredGraph expected, StructuredGraph graph, boolean excludeVirtual, boolean checkConstants) {
         String expectedString = getCanonicalGraphString(expected, excludeVirtual, checkConstants);
         String actualString = getCanonicalGraphString(graph, excludeVirtual, checkConstants);
-        String mismatchString = "mismatch in graphs:\n========= expected (" + expected + ") =========\n" + expectedString + "\n\n========= actual (" + graph + ") =========\n" + actualString;
+        String mismatchString = compareGraphStrings(expected, expectedString, graph, actualString);
 
         if (!excludeVirtual && getNodeCountExcludingUnusedConstants(expected) != getNodeCountExcludingUnusedConstants(graph)) {
             Debug.dump(expected, "Node count not matching - expected");
@@ -242,6 +243,42 @@ public abstract class GraalCompilerTest extends GraalTest {
             Debug.dump(expected, "mismatching graphs - expected");
             Debug.dump(graph, "mismatching graphs - actual");
             Assert.fail(mismatchString);
+        }
+    }
+
+    private static String compareGraphStrings(StructuredGraph expectedGraph, String expectedString, StructuredGraph actualGraph, String actualString) {
+        if (!expectedString.equals(actualString)) {
+            String[] expectedLines = expectedString.split("\n");
+            String[] actualLines = actualString.split("\n");
+            int diffIndex = -1;
+            int limit = Math.min(actualLines.length, expectedLines.length);
+            String marker = " <<<";
+            for (int i = 0; i < limit; i++) {
+                if (!expectedLines[i].equals(actualLines[i])) {
+                    diffIndex = i;
+                    break;
+                }
+            }
+            if (diffIndex == -1) {
+                // Prefix is the same so add some space after the prefix
+                diffIndex = limit;
+                if (actualLines.length == limit) {
+                    actualLines = Arrays.copyOf(actualLines, limit + 1);
+                    actualLines[diffIndex] = "";
+                } else {
+                    assert expectedLines.length == limit;
+                    expectedLines = Arrays.copyOf(expectedLines, limit + 1);
+                    expectedLines[diffIndex] = "";
+                }
+            }
+            // Place a marker next to the first line that differs
+            expectedLines[diffIndex] = expectedLines[diffIndex] + marker;
+            actualLines[diffIndex] = actualLines[diffIndex] + marker;
+            String ediff = String.join("\n", expectedLines);
+            String adiff = String.join("\n", actualLines);
+            return "mismatch in graphs:\n========= expected (" + expectedGraph + ") =========\n" + ediff + "\n\n========= actual (" + actualGraph + ") =========\n" + adiff;
+        } else {
+            return "mismatch in graphs";
         }
     }
 
@@ -261,6 +298,8 @@ public abstract class GraalCompilerTest extends GraalTest {
         NodeMap<Integer> canonicalId = graph.createNodeMap();
         int nextId = 0;
 
+        List<String> constantsLines = new ArrayList<>();
+
         StringBuilder result = new StringBuilder();
         for (Block block : schedule.getCFG().getBlocks()) {
             result.append("Block " + block + " ");
@@ -275,20 +314,36 @@ public abstract class GraalCompilerTest extends GraalTest {
             for (Node node : schedule.getBlockToNodesMap().get(block)) {
                 if (node.isAlive()) {
                     if (!excludeVirtual || !(node instanceof VirtualObjectNode || node instanceof ProxyNode)) {
-                        int id;
-                        if (canonicalId.get(node) != null) {
-                            id = canonicalId.get(node);
+                        if (node instanceof ConstantNode) {
+                            String name = checkConstants ? node.toString(Verbosity.Name) : node.getClass().getSimpleName();
+                            String str = name + (excludeVirtual ? "\n" : "    (" + node.getUsageCount() + ")\n");
+                            constantsLines.add(str);
                         } else {
-                            id = nextId++;
-                            canonicalId.set(node, id);
+                            int id;
+                            if (canonicalId.get(node) != null) {
+                                id = canonicalId.get(node);
+                            } else {
+                                id = nextId++;
+                                canonicalId.set(node, id);
+                            }
+                            String name = node.getClass().getSimpleName();
+                            String str = "  " + id + "|" + name + (excludeVirtual ? "\n" : "    (" + node.getUsageCount() + ")\n");
+                            result.append(str);
                         }
-                        String name = node instanceof ConstantNode && checkConstants ? node.toString(Verbosity.Name) : node.getClass().getSimpleName();
-                        result.append("  " + id + "|" + name + (excludeVirtual ? "\n" : "    (" + node.usages().count() + ")\n"));
                     }
                 }
             }
         }
-        return result.toString();
+
+        StringBuilder constantsLinesResult = new StringBuilder();
+        constantsLinesResult.append(constantsLines.size() + " constants:\n");
+        Collections.sort(constantsLines);
+        for (String s : constantsLines) {
+            constantsLinesResult.append(s);
+            constantsLinesResult.append("\n");
+        }
+
+        return constantsLines.toString() + result.toString();
     }
 
     protected Backend getBackend() {
@@ -488,7 +543,7 @@ public abstract class GraalCompilerTest extends GraalTest {
         try (Scope bds = Debug.scope("CompileBaseline", javaMethod, providers.getCodeCache())) {
             BaselineCompiler baselineCompiler = new BaselineCompiler(GraphBuilderConfiguration.getDefault(), providers.getMetaAccess());
             OptimisticOptimizations optimisticOpts = OptimisticOptimizations.ALL;
-            return baselineCompiler.generate(javaMethod, -1, getBackend(), new CompilationResult(), javaMethod, CompilationResultBuilderFactory.Default, optimisticOpts);
+            return baselineCompiler.generate(javaMethod, -1, getBackend(), new CompilationResult(), javaMethod, CompilationResultBuilderFactory.Default, optimisticOpts, getReplacements());
         } catch (Throwable e) {
             throw Debug.handle(e);
         }
@@ -684,7 +739,7 @@ public abstract class GraalCompilerTest extends GraalTest {
         StructuredGraph graphToCompile = graph == null ? parseForCompile(installedCodeOwner) : graph;
         lastCompiledGraph = graphToCompile;
         CallingConvention cc = getCallingConvention(getCodeCache(), Type.JavaCallee, graphToCompile.method(), false);
-        Request<CompilationResult> request = new Request<>(graphToCompile, null, cc, installedCodeOwner, getProviders(), getBackend(), getCodeCache().getTarget(), null, getDefaultGraphBuilderSuite(),
+        Request<CompilationResult> request = new Request<>(graphToCompile, cc, installedCodeOwner, getProviders(), getBackend(), getCodeCache().getTarget(), null, getDefaultGraphBuilderSuite(),
                         OptimisticOptimizations.ALL, getProfilingInfo(graphToCompile), getSpeculationLog(), getSuites(), new CompilationResult(), CompilationResultBuilderFactory.Default);
         return GraalCompiler.compile(request);
     }
@@ -802,8 +857,9 @@ public abstract class GraalCompilerTest extends GraalTest {
     protected PhaseSuite<HighTierContext> getCustomGraphBuilderSuite(GraphBuilderConfiguration gbConf) {
         PhaseSuite<HighTierContext> suite = getDefaultGraphBuilderSuite().copy();
         ListIterator<BasePhase<? super HighTierContext>> iterator = suite.findPhase(GraphBuilderPhase.class);
+        GraphBuilderPhase graphBuilderPhase = (GraphBuilderPhase) iterator.previous();
         iterator.remove();
-        iterator.add(new GraphBuilderPhase(gbConf));
+        iterator.add(new GraphBuilderPhase(gbConf, graphBuilderPhase.getGraphBuilderPlugins()));
         return suite;
     }
 
@@ -819,7 +875,7 @@ public abstract class GraalCompilerTest extends GraalTest {
      * @return cond
      */
     protected static boolean branchProbability(double p, boolean cond) {
-        return cond;
+        return GraalDirectives.injectBranchProbability(p, cond);
     }
 
     /**
@@ -831,7 +887,7 @@ public abstract class GraalCompilerTest extends GraalTest {
      * @return cond
      */
     protected static boolean iterationCount(double i, boolean cond) {
-        return cond;
+        return GraalDirectives.injectIterationCount(i, cond);
     }
 
     /**

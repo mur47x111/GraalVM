@@ -44,6 +44,9 @@ public class TruffleCompilerOptions {
     @Option(help = "Restrict compilation to comma-separated list of includes (or excludes prefixed with tilde)", type = OptionType.Debug)
     public static final OptionValue<String> TruffleCompileOnly = new OptionValue<>(null);
 
+    @Option(help = "Exclude assertion code from Truffle compilations", type = OptionType.Debug)
+    public static final StableOptionValue<Boolean> TruffleExcludeAssertions = new StableOptionValue<>(true);
+
     @Option(help = "Compile call target when call count exceeds this threshold", type = OptionType.User)
     public static final OptionValue<Integer> TruffleCompilationThreshold = new OptionValue<>(1000);
 
@@ -100,6 +103,9 @@ public class TruffleCompilerOptions {
 
     @Option(help = "Enable asynchronous truffle compilation in background thread", type = OptionType.Expert)
     public static final OptionValue<Boolean> TruffleBackgroundCompilation = new OptionValue<>(true);
+
+    @Option(help = "Enable inlining across Truffle boundary", type = OptionType.Expert)
+    public static final OptionValue<Boolean> TruffleInlineAcrossTruffleBoundary = new OptionValue<>(false);
 
     @Option(help = "", type = OptionType.Debug)
     public static final OptionValue<Integer> TruffleCompilationDecisionTime = new OptionValue<>(100);
@@ -173,5 +179,8 @@ public class TruffleCompilerOptions {
 
     @Option(help = "Print additional more verbose Truffle compilation statistics at the end of a run.", type = OptionType.Debug)
     public static final OptionValue<Boolean> TruffleCompilationStatisticDetails = new OptionValue<>(false);
+
+    @Option(help = "Experimental new version of the partial evaluator.", type = OptionType.Debug)
+    public static final OptionValue<Boolean> FastPE = new OptionValue<>(false);
     // @formatter:on
 }

@@ -844,6 +844,7 @@ public class ElementUtils {
         PrintWriter writer = new PrintWriter(string);
         e.printStackTrace(writer);
         writer.flush();
+        string.flush();
         return e.getMessage() + "\r\n" + string.toString();
     }
 
@@ -953,6 +954,14 @@ public class ElementUtils {
         }
     }
 
+    public static List<String> getUniqueIdentifiers(List<TypeMirror> typeMirror) {
+        List<String> ids = new ArrayList<>();
+        for (TypeMirror type : typeMirror) {
+            ids.add(getUniqueIdentifier(type));
+        }
+        return ids;
+    }
+
     public static String getUniqueIdentifier(TypeMirror typeMirror) {
         if (typeMirror.getKind() == TypeKind.ARRAY) {
             return getUniqueIdentifier(((ArrayType) typeMirror).getComponentType()) + "[]";
@@ -987,15 +996,25 @@ public class ElementUtils {
         }
 
         // search for any super types
-        TypeElement exceptionTypeElement = fromTypeMirror(exceptionType);
-        List<TypeElement> superTypes = getSuperTypes(exceptionTypeElement);
-        for (TypeElement typeElement : superTypes) {
+        for (TypeElement typeElement : getSuperTypes(fromTypeMirror(exceptionType))) {
             if (ElementUtils.containsType(thrownTypes, typeElement.asType())) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    public static void setVisibility(Set<Modifier> modifiers, Modifier visibility) {
+        Modifier current = getVisibility(modifiers);
+        if (current != visibility) {
+            if (current != null) {
+                modifiers.remove(current);
+            }
+            if (visibility != null) {
+                modifiers.add(visibility);
+            }
+        }
     }
 
     public static Modifier getVisibility(Set<Modifier> modifier) {
@@ -1009,11 +1028,7 @@ public class ElementUtils {
 
     private static boolean isRuntimeException(TypeMirror type) {
         Set<String> typeSuperSet = new HashSet<>(getQualifiedSuperTypeNames(fromTypeMirror(type)));
-        String typeName = getQualifiedName(type);
-        if (!typeSuperSet.contains(Throwable.class.getCanonicalName()) && !typeName.equals(Throwable.class.getCanonicalName())) {
-            throw new IllegalArgumentException("Given type does not extend Throwable.");
-        }
-        return typeSuperSet.contains(RuntimeException.class.getCanonicalName()) || typeName.equals(RuntimeException.class.getCanonicalName());
+        return typeSuperSet.contains(RuntimeException.class.getCanonicalName()) || getQualifiedName(type).equals(RuntimeException.class.getCanonicalName());
     }
 
     private static boolean containsType(Collection<? extends TypeMirror> collection, TypeMirror type) {
@@ -1062,6 +1077,44 @@ public class ElementUtils {
             return type;
         }
         return new DeclaredCodeTypeMirror((TypeElement) declaredType.asElement());
+    }
+
+    public static ExecutableElement findMethod(TypeElement type, Set<Modifier> includeModifiers, Set<Modifier> excludeModifiers, String methodName, List<TypeMirror> types) {
+        outer: for (ExecutableElement executable : ElementFilter.methodsIn(type.getEnclosedElements())) {
+            if (includeModifiers != null) {
+                if (!executable.getModifiers().containsAll(includeModifiers)) {
+                    continue;
+                }
+            }
+            if (excludeModifiers != null) {
+                if (executable.getModifiers().containsAll(excludeModifiers)) {
+                    continue;
+                }
+            }
+            if (!executable.getSimpleName().toString().equals(methodName)) {
+                continue;
+            }
+            if (types.size() != executable.getParameters().size()) {
+                continue;
+            }
+            for (int i = 0; i < types.size(); i++) {
+                TypeMirror var1 = types.get(i);
+                VariableElement var2 = executable.getParameters().get(i);
+                if (ElementUtils.typeEquals(var1, var2.asType())) {
+                    continue outer;
+                }
+            }
+            return executable;
+        }
+        return null;
+    }
+
+    public static List<TypeMirror> asTypes(List<? extends Element> elements) {
+        List<TypeMirror> types = new ArrayList<>(elements.size());
+        for (Element element : elements) {
+            types.add(element.asType());
+        }
+        return types;
     }
 
 }

@@ -38,12 +38,12 @@ public class ImplicitCastTest {
     static class ImplicitCast0Types {
 
         @ImplicitCast
-        boolean castInt(int intvalue) {
+        static boolean castInt(int intvalue) {
             return intvalue == 1 ? true : false;
         }
 
         @ImplicitCast
-        boolean castString(String strvalue) {
+        static boolean castString(String strvalue) {
             return strvalue.equals("1");
         }
 
@@ -160,7 +160,18 @@ public class ImplicitCastTest {
 
         @ImplicitCast
         @ExpectError("Target type and source type of an @ImplicitCast must not be the same type.")
-        String castInvalid(@SuppressWarnings("unused") String value) {
+        static String castInvalid(@SuppressWarnings("unused") String value) {
+            throw new AssertionError();
+        }
+
+    }
+
+    @TypeSystem({String.class, boolean.class})
+    static class ImplicitCastError2 {
+
+        @ImplicitCast
+        @ExpectError("Target type and source type of an @ImplicitCast must not be the same type.")
+        static String castInvalid(@SuppressWarnings("unused") String value) {
             throw new AssertionError();
         }
 

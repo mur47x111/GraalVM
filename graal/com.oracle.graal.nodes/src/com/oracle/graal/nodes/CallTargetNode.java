@@ -33,13 +33,31 @@ import com.oracle.graal.nodes.spi.*;
 @NodeInfo(allowedUsageTypes = {InputType.Extension})
 public abstract class CallTargetNode extends ValueNode implements LIRLowerable {
     public enum InvokeKind {
-        Interface,
-        Special,
-        Static,
-        Virtual;
+        Interface(false),
+        Special(true),
+        Static(true),
+        Virtual(false);
+
+        private InvokeKind(boolean direct) {
+            this.direct = direct;
+        }
+
+        private final boolean direct;
 
         public boolean hasReceiver() {
             return this != Static;
+        }
+
+        public boolean isDirect() {
+            return direct;
+        }
+
+        public boolean isIndirect() {
+            return !direct;
+        }
+
+        public boolean isInterface() {
+            return this == InvokeKind.Interface;
         }
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -58,6 +58,11 @@ public final class SLExpressionWrapperNode extends SLExpressionNode implements W
     }
 
     @Override
+    public boolean isInstrumentable() {
+        return false;
+    }
+
+    @Override
     public SLExpressionNode getNonWrapperNode() {
         return child;
     }
@@ -96,22 +101,22 @@ public final class SLExpressionWrapperNode extends SLExpressionNode implements W
 
     @Override
     public long executeLong(VirtualFrame frame) throws UnexpectedResultException {
-        return SLTypesGen.SLTYPES.expectLong(executeGeneric(frame));
+        return SLTypesGen.expectLong(executeGeneric(frame));
     }
 
     @Override
     public BigInteger executeBigInteger(VirtualFrame frame) throws UnexpectedResultException {
-        return SLTypesGen.SLTYPES.expectBigInteger(executeGeneric(frame));
+        return SLTypesGen.expectBigInteger(executeGeneric(frame));
     }
 
     @Override
     public boolean executeBoolean(VirtualFrame frame) throws UnexpectedResultException {
-        return SLTypesGen.SLTYPES.expectBoolean(executeGeneric(frame));
+        return SLTypesGen.expectBoolean(executeGeneric(frame));
     }
 
     @Override
     public String executeString(VirtualFrame frame) throws UnexpectedResultException {
-        return SLTypesGen.SLTYPES.expectString(executeGeneric(frame));
+        return SLTypesGen.expectString(executeGeneric(frame));
     }
 
     @Override
@@ -131,16 +136,6 @@ public final class SLExpressionWrapperNode extends SLExpressionNode implements W
 
     @Override
     public SLNull executeNull(VirtualFrame frame) throws UnexpectedResultException {
-        return SLTypesGen.SLTYPES.expectSLNull(executeGeneric(frame));
-    }
-
-    @Override
-    public Probe probe() {
-        throw new IllegalStateException("Cannot call probe() on a wrapper.");
-    }
-
-    @Override
-    public void probeLite(TruffleEventReceiver eventReceiver) {
-        throw new IllegalStateException("Cannot call probeLite() on a wrapper.");
+        return SLTypesGen.expectSLNull(executeGeneric(frame));
     }
 }
