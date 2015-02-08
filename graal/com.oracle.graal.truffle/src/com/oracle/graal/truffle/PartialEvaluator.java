@@ -58,6 +58,7 @@ import com.oracle.graal.truffle.nodes.asserts.*;
 import com.oracle.graal.truffle.nodes.frame.*;
 import com.oracle.graal.truffle.nodes.frame.NewFrameNode.VirtualOnlyInstanceNode;
 import com.oracle.graal.truffle.phases.*;
+import com.oracle.graal.truffle.substitutions.*;
 import com.oracle.graal.virtual.phases.ea.*;
 import com.oracle.truffle.api.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -148,12 +149,17 @@ public class PartialEvaluator {
         public boolean apply(GraphBuilderContext builder, ValueNode receiver, ResolvedJavaField field) {
             if (receiver.isConstant()) {
                 JavaConstant asJavaConstant = receiver.asJavaConstant();
-                JavaConstant result = providers.getConstantReflection().readConstantFieldValue(field, asJavaConstant);
-                if (result != null) {
-                    ConstantNode constantNode = builder.append(ConstantNode.forConstant(result, providers.getMetaAccess()));
-                    builder.push(constantNode.getKind().getStackKind(), constantNode);
-                    return true;
-                }
+                return tryConstantFold(builder, field, asJavaConstant);
+            }
+            return false;
+        }
+
+        private boolean tryConstantFold(GraphBuilderContext builder, ResolvedJavaField field, JavaConstant asJavaConstant) {
+            JavaConstant result = providers.getConstantReflection().readConstantFieldValue(field, asJavaConstant);
+            if (result != null) {
+                ConstantNode constantNode = builder.append(ConstantNode.forConstant(result, providers.getMetaAccess()));
+                builder.push(constantNode.getKind().getStackKind(), constantNode);
+                return true;
             }
             return false;
         }
@@ -164,7 +170,7 @@ public class PartialEvaluator {
                 builder.push(trueNode.getKind().getStackKind(), trueNode);
                 return true;
             }
-            return false;
+            return tryConstantFold(builder, staticField, null);
         }
     }
 
@@ -212,6 +218,7 @@ public class PartialEvaluator {
         for (GraphBuilderPluginsProvider p : sl) {
             p.registerPlugins(providers.getMetaAccess(), plugins);
         }
+        TruffleGraphBuilderPlugins.registerPlugins(providers.getMetaAccess(), plugins);
         new GraphBuilderPhase.Instance(providers.getMetaAccess(), providers.getStampProvider(), new Assumptions(false), providers.getConstantReflection(), newConfig, plugins,
                         TruffleCompilerImpl.Optimizations).apply(graph);
         Debug.dump(graph, "After FastPE");
