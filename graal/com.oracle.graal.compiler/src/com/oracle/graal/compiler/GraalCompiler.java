@@ -53,6 +53,7 @@ import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.options.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
+import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.schedule.*;
 import com.oracle.graal.phases.tiers.*;
 import com.oracle.graal.phases.util.*;
@@ -246,6 +247,7 @@ public class GraalCompiler {
             HighTierContext highTierContext = new HighTierContext(providers, assumptions, cache, graphBuilderSuite, optimisticOpts);
             if (graph.start().next() == null) {
                 graphBuilderSuite.apply(graph, highTierContext);
+                new ExtractICGPhase().apply(graph, highTierContext);
                 new DeadCodeEliminationPhase(Optional).apply(graph);
             } else {
                 Debug.dump(graph, "initial state");

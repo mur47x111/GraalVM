@@ -35,6 +35,7 @@ import com.oracle.graal.api.code.*;
 import com.oracle.graal.api.meta.*;
 import com.oracle.graal.api.meta.ProfilingInfo.TriState;
 import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.external.*;
 import com.oracle.graal.hotspot.*;
 import com.oracle.graal.hotspot.debug.*;
 import com.oracle.graal.nodes.*;
@@ -545,6 +546,9 @@ public final class HotSpotResolvedJavaMethodImpl extends HotSpotMethod implement
     @Override
     public boolean canBeInlined() {
         if (isDontInline()) {
+            return false;
+        }
+        if (getAnnotation(DontInline.class) != null) {
             return false;
         }
         return runtime().getCompilerToVM().canInlineMethod(metaspaceMethod);
