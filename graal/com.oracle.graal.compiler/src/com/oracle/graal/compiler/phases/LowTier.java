@@ -25,10 +25,12 @@ package com.oracle.graal.compiler.phases;
 import static com.oracle.graal.compiler.common.GraalOptions.*;
 import static com.oracle.graal.phases.common.DeadCodeEliminationPhase.Optionality.*;
 
+import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.options.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
+import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.tiers.*;
 
 public class LowTier extends PhaseSuite<LowTierContext> {
@@ -47,6 +49,10 @@ public class LowTier extends PhaseSuite<LowTierContext> {
 
         if (Options.ProfileCompiledMethods.getValue()) {
             appendPhase(new ProfileCompiledMethodsPhase());
+        }
+
+        if (GraalOptions.UseCompilerDecision.getValue()) {
+            appendPhase(new InlineICGPhase());
         }
 
         appendPhase(new LoweringPhase(canonicalizer, LoweringTool.StandardLoweringStage.LOW_TIER));

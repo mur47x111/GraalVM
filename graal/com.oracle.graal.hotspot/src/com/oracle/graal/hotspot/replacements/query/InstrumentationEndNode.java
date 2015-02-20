@@ -2,7 +2,7 @@ package com.oracle.graal.hotspot.replacements.query;
 
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.phases.common.query.ExtractICGPhase.CompilerDecisionQuery;
+import com.oracle.graal.phases.common.query.ExtractICGPhase.*;
 import com.oracle.graal.replacements.nodes.*;
 
 @NodeInfo

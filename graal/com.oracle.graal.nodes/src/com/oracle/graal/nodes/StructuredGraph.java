@@ -206,6 +206,15 @@ public class StructuredGraph extends Graph {
         return copy;
     }
 
+    public Map<Node, Node> copyTo(StructuredGraph copy) {
+        copy.setGuardsStage(getGuardsStage());
+        copy.isAfterFloatingReadPhase = isAfterFloatingReadPhase;
+        copy.hasValueProxies = hasValueProxies;
+        Map<Node, Node> replacements = Node.newMap();
+        replacements.put(start, copy.start);
+        return copy.addDuplicates(getNodes(), this, this.getNodeCount(), replacements);
+    }
+
     @Override
     public StructuredGraph copy(String newName) {
         return copy(newName, method);
