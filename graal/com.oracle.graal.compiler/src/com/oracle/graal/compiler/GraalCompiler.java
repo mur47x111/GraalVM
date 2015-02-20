@@ -34,6 +34,7 @@ import com.oracle.graal.api.code.CompilationResult.ConstantReference;
 import com.oracle.graal.api.code.CompilationResult.DataPatch;
 import com.oracle.graal.api.meta.*;
 import com.oracle.graal.api.meta.ProfilingInfo.TriState;
+import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.alloc.*;
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.compiler.target.*;
@@ -247,7 +248,9 @@ public class GraalCompiler {
             HighTierContext highTierContext = new HighTierContext(providers, assumptions, cache, graphBuilderSuite, optimisticOpts);
             if (graph.start().next() == null) {
                 graphBuilderSuite.apply(graph, highTierContext);
-                new ExtractICGPhase().apply(graph, highTierContext);
+                if (GraalOptions.UseCompilerDecision.getValue()) {
+                    new ExtractICGPhase().apply(graph, highTierContext);
+                }
                 new DeadCodeEliminationPhase(Optional).apply(graph);
             } else {
                 Debug.dump(graph, "initial state");
