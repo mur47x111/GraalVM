@@ -7,9 +7,9 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo
-public class InstrumentationNode extends FixedWithNextNode implements LIRLowerable {
+public class InstrumentationNode extends FixedWithNextNode implements Virtualizable {
 
-    @Input protected NodeInputList<ValueNode> weakDependencies;
+    @OptionalInput protected NodeInputList<ValueNode> weakDependencies;
     protected StructuredGraph icg;
 
     public InstrumentationNode(StructuredGraph icg) {
@@ -23,9 +23,18 @@ public class InstrumentationNode extends FixedWithNextNode implements LIRLowerab
         return weakDependencies.add(node);
     }
 
-    public void generate(NodeLIRBuilderTool generator) {
-        // TODO Auto-generated method stub
+    public void virtualize(VirtualizerTool tool) {
+        for (int i = 0; i < weakDependencies.count(); i++) {
+            ValueNode input = weakDependencies.get(i);
+            State state = tool.getObjectState(input);
 
+            if (state != null && state.getState() == EscapeState.Virtual) {
+                weakDependencies.set(i, state.getVirtualObject());
+                // TODO (yz) this is for bypassing PEA
+                // a more elegant way should be creating another edge type
+                tool.setDeleted();
+            }
+        }
     }
 
 }

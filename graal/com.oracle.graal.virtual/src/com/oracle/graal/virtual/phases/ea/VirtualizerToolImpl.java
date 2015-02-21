@@ -145,6 +145,11 @@ class VirtualizerToolImpl implements VirtualizerTool {
     }
 
     @Override
+    public void setDeleted() {
+        deleted = true;
+    }
+
+    @Override
     public void replaceFirstInput(Node oldInput, Node replacement) {
         effects.replaceFirstInput(current, oldInput, replacement);
     }
