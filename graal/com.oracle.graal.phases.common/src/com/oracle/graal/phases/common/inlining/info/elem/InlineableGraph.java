@@ -34,6 +34,7 @@ import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.inlining.*;
+import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.tiers.*;
 
@@ -204,6 +205,7 @@ public class InlineableGraph implements Inlineable {
             assert newGraph.start().next() != null : "graph needs to be populated by the GraphBuilderSuite";
 
             new DeadCodeEliminationPhase(Optional).apply(newGraph);
+            new ExtractICGPhase().apply(newGraph, context);
 
             if (OptCanonicalizer.getValue()) {
                 canonicalizer.apply(newGraph, context);

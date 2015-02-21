@@ -19,23 +19,28 @@ import com.oracle.graal.phases.tiers.*;
 @NodeInfo
 public class InstrumentationNode extends FixedWithNextNode implements Lowerable, Virtualizable {
 
+    @OptionalInput protected FixedNode target;
     @OptionalInput protected NodeInputList<ValueNode> weakDependencies;
+
     protected StructuredGraph icg;
 
-    public InstrumentationNode(StructuredGraph icg) {
+    public InstrumentationNode(FixedNode target, StructuredGraph icg) {
         super(StampFactory.forVoid());
 
-        this.weakDependencies = new NodeInputList<>(this);
+        this.target = target;
         this.icg = icg;
+        this.weakDependencies = new NodeInputList<>(this);
     }
 
     public boolean addInput(Node node) {
         return weakDependencies.add(node);
     }
 
-    public void inline() {
-        new FrameStateAssignmentPhase().apply(icg);
+    public StructuredGraph getICG() {
+        return icg;
+    }
 
+    public void inline() {
         ArrayList<Node> nodes = new ArrayList<>(icg.getNodes().count());
         final StartNode entryPointNode = icg.start();
         FixedNode firstCFGNode = entryPointNode.next();
@@ -82,10 +87,10 @@ public class InstrumentationNode extends FixedWithNextNode implements Lowerable,
     }
 
     public void lower(LoweringTool tool) {
-        // propagate lowering to ICG
         CanonicalizerPhase canonicalizer = new CanonicalizerPhase(!GraalOptions.ImmutableCode.getValue());
         PhaseContext context = new PhaseContext(tool.getMetaAccess(), tool.getConstantReflection(), tool.getLowerer(), tool.getReplacements(), tool.assumptions(), tool.getStampProvider());
 
+        // propagate lowering to ICG
         canonicalizer.apply(icg, context);
         new LoweringPhase(canonicalizer, tool.getLoweringStage()).apply(icg, context);
         new DeadCodeEliminationPhase().apply(icg);

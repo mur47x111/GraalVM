@@ -10,9 +10,9 @@ import com.oracle.graal.phases.tiers.*;
 
 public class ExtractICGPhase extends BasePhase<HighTierContext> {
 
-    public interface CompilerDecisionQuery {
+    public interface ICGBoundary {
 
-        default void resolve() {
+        default void extract() {
         }
 
     }
@@ -21,6 +21,7 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
     protected void run(StructuredGraph graph, HighTierContext context) {
         Replacements cr = context.getReplacements();
 
+        // first iteration: replace query invocation with macro nodes
         for (InvokeNode invokeNode : graph.getNodes().filter(InvokeNode.class)) {
             ResolvedJavaMethod targetMethod = invokeNode.callTarget().targetMethod();
             Class<? extends FixedWithNextNode> macroNodeClass = InliningUtil.getMacroNodeClass(cr, targetMethod);
@@ -30,9 +31,21 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
             }
         }
 
+        // second iteration: resolve if possible
         for (Node node : graph.getNodes()) {
             if (node instanceof CompilerDecisionQuery) {
-                ((CompilerDecisionQuery) node).resolve();
+                ConstantNode c = ((CompilerDecisionQuery) node).resolve();
+
+                if (c != null) {
+                    graph.replaceFixedWithFloating((FixedWithNextNode) node, c);
+                }
+            }
+        }
+
+        // third iteration: extract ICG
+        for (Node node : graph.getNodes()) {
+            if (node instanceof ICGBoundary) {
+                ((ICGBoundary) node).extract();
             }
         }
     }

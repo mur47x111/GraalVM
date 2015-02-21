@@ -3,14 +3,17 @@ package com.oracle.graal.hotspot.replacements.query;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
-import com.oracle.graal.phases.common.query.ExtractICGPhase.ICGBoundary;
 import com.oracle.graal.replacements.nodes.*;
 
 @NodeInfo
-public class InstrumentationEndNode extends MacroNode implements CompilerDecisionQuery, ICGBoundary {
+public class MethodNameNode extends MacroNode implements CompilerDecisionQuery {
 
-    public InstrumentationEndNode(Invoke invoke) {
+    public MethodNameNode(Invoke invoke) {
         super(invoke);
+    }
+
+    public ConstantNode resolve() {
+        return graph().unique(CompilerDecisionUtil.getMethodFullName(graph().method()));
     }
 
 }

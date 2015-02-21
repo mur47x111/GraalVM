@@ -2,6 +2,7 @@ package com.oracle.graal.hotspot.replacements.query;
 
 import java.util.*;
 
+import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
@@ -9,12 +10,12 @@ import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.util.*;
-import com.oracle.graal.phases.common.query.ExtractICGPhase.CompilerDecisionQuery;
 import com.oracle.graal.phases.common.query.*;
+import com.oracle.graal.phases.common.query.ExtractICGPhase.ICGBoundary;
 import com.oracle.graal.replacements.nodes.*;
 
 @NodeInfo
-public class InstrumentationBeginNode extends MacroNode implements CompilerDecisionQuery {
+public class InstrumentationBeginNode extends MacroNode implements CompilerDecisionQuery, ICGBoundary {
 
     public InstrumentationBeginNode(Invoke invoke) {
         super(invoke);
@@ -41,7 +42,20 @@ public class InstrumentationBeginNode extends MacroNode implements CompilerDecis
         }
     }
 
-    public void resolve() {
+    private boolean getDirection() {
+        Node input = inputs().first();
+        if (input != null && input instanceof ConstantNode) {
+            Constant c = ((ConstantNode) input).getValue();
+
+            if (c instanceof PrimitiveConstant) {
+                return ((PrimitiveConstant) c).asBoolean();
+            }
+        }
+
+        return false;
+    }
+
+    public void extract() {
         StructuredGraph graph = graph();
         InstrumentationEndNode originICGEnd = null;
 
@@ -73,7 +87,7 @@ public class InstrumentationBeginNode extends MacroNode implements CompilerDecis
             }
         }
 
-        InstrumentationNode instrumentation = graph().addWithoutUnique(new InstrumentationNode(icg));
+        InstrumentationNode instrumentation = graph().addWithoutUnique(new InstrumentationNode(getDirection() ? next() : (FixedNode) predecessor(), icg));
 
         // extract icg
         InstrumentationBeginNode icgBegin = (InstrumentationBeginNode) mapping.get(this);

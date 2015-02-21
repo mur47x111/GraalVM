@@ -38,6 +38,7 @@ import com.oracle.graal.nodes.cfg.*;
 import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
+import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.schedule.*;
 import com.oracle.graal.phases.schedule.SchedulePhase.SchedulingStrategy;
@@ -156,7 +157,10 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
                 } else {
                     lowerToIf(guard);
                 }
+            } else if (node instanceof InstrumentationNode) {
+                new GuardLoweringPhase().apply(((InstrumentationNode) node).getICG(), null);
             }
+
         }
 
         private void lowerToIf(GuardNode guard) {

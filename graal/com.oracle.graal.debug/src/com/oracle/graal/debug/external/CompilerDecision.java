@@ -28,4 +28,11 @@ public final class CompilerDecision {
         return false;
     }
 
+    /**
+     * @return the method name after InliningPhase
+     */
+    public static String getMethodName() {
+        return "UNKNOWN";
+    }
+
 }

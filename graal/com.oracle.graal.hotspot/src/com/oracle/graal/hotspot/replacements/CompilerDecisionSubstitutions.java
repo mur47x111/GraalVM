@@ -17,4 +17,7 @@ public class CompilerDecisionSubstitutions {
     @MacroSubstitution(forced = true, isStatic = true, macro = IsMethodCompiledNode.class)
     public static native boolean isMethodCompiled();
 
+    @MacroSubstitution(forced = true, isStatic = true, macro = MethodNameNode.class)
+    public static native String getMethodName();
+
 }

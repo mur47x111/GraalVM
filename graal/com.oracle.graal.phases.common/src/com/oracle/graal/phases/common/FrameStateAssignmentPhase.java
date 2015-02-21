@@ -31,6 +31,7 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.GuardsStage;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
+import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.graph.ReentrantNodeIterator.NodeIteratorClosure;
 
@@ -82,6 +83,10 @@ public class FrameStateAssignmentPhase extends Phase {
                     GraalInternalError.guarantee(currentState != null, "no FrameState at DeoptimizingNode %s", deopt);
                     deopt.setStateAfter(currentState);
                 }
+            }
+
+            if (node instanceof InstrumentationNode) {
+                new FrameStateAssignmentPhase().apply(((InstrumentationNode) node).getICG());
             }
 
             return currentState;
