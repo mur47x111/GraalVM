@@ -34,6 +34,8 @@ public class InstrumentationNode extends FixedWithNextNode implements Lowerable,
     }
 
     public void inline() {
+        new FrameStateAssignmentPhase().apply(icg);
+
         ArrayList<Node> nodes = new ArrayList<>(icg.getNodes().count());
         final StartNode entryPointNode = icg.start();
         FixedNode firstCFGNode = entryPointNode.next();
