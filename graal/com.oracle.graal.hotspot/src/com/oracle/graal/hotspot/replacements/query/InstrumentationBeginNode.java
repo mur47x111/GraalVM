@@ -35,7 +35,7 @@ public class InstrumentationBeginNode extends MacroNode implements CompilerDecis
                 TempInputNode tempInput = icg.addWithoutUnique(new TempInputNode(((ValueNode) input).stamp()));
                 tempInputs.put(tempInput, input);
                 mapping.get(node).replaceFirstInput(mapping.get(input), tempInput);
-            } else if (input instanceof FloatingNode || input instanceof CallTargetNode) {
+            } else if (input instanceof FloatingNode || input instanceof CallTargetNode || input instanceof FrameState) {
                 redirectInput(icg, input, mapping, tempInputs);
             }
         }
@@ -51,6 +51,7 @@ public class InstrumentationBeginNode extends MacroNode implements CompilerDecis
         Map<TempInputNode, Node> tempInputs = new HashMap<>();
 
         // iterate icg
+        redirectInput(icg, graph().start(), mapping, tempInputs);
         NodeFlood flood = graph().createNodeFlood();
         flood.add(this);
 
@@ -91,21 +92,28 @@ public class InstrumentationBeginNode extends MacroNode implements CompilerDecis
         GraphUtil.killCFG(icgEnd);
 
         int index = 0;
+        Map<Node, ParameterNode> parameters = new HashMap<>();
         // replace temporary nodes with either FixedNode or ParameterNode
         for (TempInputNode tempInput : tempInputs.keySet()) {
             Node input = tempInputs.get(tempInput);
             Node mapInput = mapping.get(input);
 
             if (input instanceof ParameterNode || mapInput.isDeleted()) {
-                instrumentation.addInput(input);
-                ParameterNode parameter = icg.addWithoutUnique(new ParameterNode(index++, tempInput.stamp()));
+                ParameterNode parameter = parameters.get(input);
+
+                if (parameter == null) {
+                    instrumentation.addInput(input);
+                    parameter = icg.addWithoutUnique(new ParameterNode(index++, tempInput.stamp()));
+                    parameters.put(input, parameter);
+                }
+
                 tempInput.replaceAtUsages(parameter);
             } else {
                 tempInput.replaceAtUsages(mapInput);
             }
         }
 
-        Debug.dump(icg, "Extracted ICG starting from " + this);
+        Debug.dump(icg, "After extracted ICG starting from " + this);
 
         // remove icg from original graph
         graph().addBeforeFixed(this, instrumentation);

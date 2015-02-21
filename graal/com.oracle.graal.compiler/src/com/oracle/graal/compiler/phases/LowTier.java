@@ -51,11 +51,11 @@ public class LowTier extends PhaseSuite<LowTierContext> {
             appendPhase(new ProfileCompiledMethodsPhase());
         }
 
+        appendPhase(new LoweringPhase(canonicalizer, LoweringTool.StandardLoweringStage.LOW_TIER));
+
         if (GraalOptions.UseCompilerDecision.getValue()) {
             appendPhase(new InlineICGPhase());
         }
-
-        appendPhase(new LoweringPhase(canonicalizer, LoweringTool.StandardLoweringStage.LOW_TIER));
 
         appendPhase(new RemoveValueProxyPhase());
 
