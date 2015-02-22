@@ -20,6 +20,9 @@ public class CompilerDecisionSubstitutions {
     @MacroSubstitution(forced = true, isStatic = true, macro = IsMethodInlinedNode.class)
     public static native boolean isMethodInlined();
 
+    @MacroSubstitution(forced = true, isStatic = true, macro = IsCallsiteInlinedNode.class)
+    public static native boolean isCallsiteInlined();
+
     @MacroSubstitution(forced = true, isStatic = true, macro = MethodNameNode.class)
     public static native String getMethodName();
 

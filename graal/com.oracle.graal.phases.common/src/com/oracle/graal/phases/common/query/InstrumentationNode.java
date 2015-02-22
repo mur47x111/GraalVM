@@ -36,6 +36,10 @@ public class InstrumentationNode extends FixedWithNextNode implements Lowerable,
         return weakDependencies.add(node);
     }
 
+    public FixedNode target() {
+        return target;
+    }
+
     public StructuredGraph getICG() {
         return icg;
     }
@@ -114,7 +118,6 @@ public class InstrumentationNode extends FixedWithNextNode implements Lowerable,
             }
         }
 
-// ((ReturnNode) duplicates.get(returnNode)).replaceAndDelete(n);
         GraphUtil.killCFG(this);
     }
 
