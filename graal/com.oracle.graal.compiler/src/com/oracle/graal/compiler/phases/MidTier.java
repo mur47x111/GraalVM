@@ -28,6 +28,7 @@ import com.oracle.graal.loop.phases.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
+import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.tiers.*;
 import com.oracle.graal.virtual.phases.ea.*;
 
@@ -86,6 +87,10 @@ public class MidTier extends PhaseSuite<MidTierContext> {
         }
 
         appendPhase(new LoweringPhase(canonicalizer, LoweringTool.StandardLoweringStage.MID_TIER));
+
+        if (UseCompilerDecision.getValue()) {
+            appendPhase(new LoweringICGPhase(canonicalizer, LoweringTool.StandardLoweringStage.MID_TIER));
+        }
 
         appendPhase(new FrameStateAssignmentPhase());
 

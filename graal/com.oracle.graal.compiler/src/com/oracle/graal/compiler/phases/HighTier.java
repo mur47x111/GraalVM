@@ -32,6 +32,7 @@ import com.oracle.graal.options.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.inlining.*;
+import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.tiers.*;
 import com.oracle.graal.virtual.phases.ea.*;
 
@@ -99,5 +100,9 @@ public class HighTier extends PhaseSuite<HighTierContext> {
         }
 
         appendPhase(new LoweringPhase(canonicalizer, LoweringTool.StandardLoweringStage.HIGH_TIER));
+
+        if (UseCompilerDecision.getValue()) {
+            appendPhase(new LoweringICGPhase(canonicalizer, LoweringTool.StandardLoweringStage.HIGH_TIER));
+        }
     }
 }
