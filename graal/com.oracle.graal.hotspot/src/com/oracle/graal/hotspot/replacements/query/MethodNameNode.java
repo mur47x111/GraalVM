@@ -12,7 +12,8 @@ public class MethodNameNode extends ICGMacroNode implements CompilerDecisionQuer
     }
 
     public ConstantNode resolve() {
-        return graph().unique(CompilerDecisionUtil.getMethodFullName(graph().method()));
+        String methodName = CompilerDecisionUtil.getMethodFullName(graph().method());
+        return graph().unique(CompilerDecisionUtil.createStringConstant(methodName));
     }
 
 }

@@ -12,7 +12,9 @@ public class RootNameNode extends ICGMacroNode implements CompilerDecisionQuery 
     }
 
     public void inline(InstrumentationNode instrumentation) {
-        graph().replaceFixedWithFloating(this, graph().unique(CompilerDecisionUtil.getMethodFullName(instrumentation.graph().method())));
+        String methodName = CompilerDecisionUtil.getMethodFullName(instrumentation.graph().method());
+        ConstantNode c = CompilerDecisionUtil.createStringConstant(methodName);
+        graph().replaceFixedWithFloating(this, graph().unique(c));
     }
 
 }

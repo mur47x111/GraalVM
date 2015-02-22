@@ -35,7 +35,7 @@ public class CompilerDecisionUtil {
 // return HotSpotObjectConstantImpl.forBoxedValue(Kind.Object, builder.toString());
 // }
 
-    public static ConstantNode getMethodFullName(ResolvedJavaMethod method) {
+    public static String getMethodFullName(ResolvedJavaMethod method) {
         // Class name format "L" + full_class_name + ";"
         String className = method.getDeclaringClass().getName();
         String methodname = method.getName();
@@ -49,7 +49,11 @@ public class CompilerDecisionUtil {
         builder.append(methodname);
         builder.append(methodDesc.substring(methodDesc.indexOf('<') + 1, methodDesc.length() - 1));
 
-        return new ConstantNode(HotSpotObjectConstantImpl.forBoxedValue(Kind.Object, builder.toString()), STAMP_STRING);
+        return builder.toString();
+    }
+
+    public static ConstantNode createStringConstant(String str) {
+        return new ConstantNode(HotSpotObjectConstantImpl.forBoxedValue(Kind.Object, str), STAMP_STRING);
     }
 
 // public static ConstantNode getNull(StructuredGraph graph, Stamp stamp) {

@@ -55,6 +55,7 @@ public class LowTier extends PhaseSuite<LowTierContext> {
 
         if (GraalOptions.UseCompilerDecision.getValue()) {
             appendPhase(new InlineICGPhase());
+            appendPhase(canonicalizer);
         }
 
         appendPhase(new RemoveValueProxyPhase());

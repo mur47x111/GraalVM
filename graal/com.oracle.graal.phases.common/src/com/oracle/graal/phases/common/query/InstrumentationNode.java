@@ -54,7 +54,7 @@ public class InstrumentationNode extends FixedWithNextNode implements Lowerable,
         ArrayList<Node> nodes = new ArrayList<>(icg.getNodes().count());
         final StartNode entryPointNode = icg.start();
         FixedNode firstCFGNode = entryPointNode.next();
-        ReturnNode returnNode = null;
+        ArrayList<ReturnNode> returnNodes = new ArrayList<>(4);
 
         for (Node node : icg.getNodes()) {
             if (node == entryPointNode || node == entryPointNode.stateAfter() || node instanceof ParameterNode) {
@@ -62,7 +62,7 @@ public class InstrumentationNode extends FixedWithNextNode implements Lowerable,
             } else {
                 nodes.add(node);
                 if (node instanceof ReturnNode) {
-                    returnNode = (ReturnNode) node;
+                    returnNodes.add((ReturnNode) node);
                 }
             }
         }
@@ -92,7 +92,29 @@ public class InstrumentationNode extends FixedWithNextNode implements Lowerable,
 
         FixedNode n = next();
         setNext(null);
-        ((ReturnNode) duplicates.get(returnNode)).replaceAndDelete(n);
+
+        if (!returnNodes.isEmpty()) {
+            if (returnNodes.size() == 1) {
+                ReturnNode returnNode = (ReturnNode) duplicates.get(returnNodes.get(0));
+                returnNode.replaceAndDelete(n);
+            } else {
+                ArrayList<ReturnNode> returnDuplicates = new ArrayList<>(returnNodes.size());
+                for (ReturnNode returnNode : returnNodes) {
+                    returnDuplicates.add((ReturnNode) duplicates.get(returnNode));
+                }
+                AbstractMergeNode merge = graph().add(new MergeNode());
+
+                for (ReturnNode returnNode : returnDuplicates) {
+                    EndNode endNode = graph().add(new EndNode());
+                    merge.addForwardEnd(endNode);
+                    returnNode.replaceAndDelete(endNode);
+                }
+
+                merge.setNext(n);
+            }
+        }
+
+// ((ReturnNode) duplicates.get(returnNode)).replaceAndDelete(n);
         GraphUtil.killCFG(this);
     }
 
