@@ -40,7 +40,17 @@ public class InstrumentationNode extends FixedWithNextNode implements Lowerable,
         return icg;
     }
 
+    public void resolveQueries() {
+        for (Node node : icg.getNodes()) {
+            if (node instanceof CompilerDecisionQuery) {
+                ((CompilerDecisionQuery) node).inline(this);
+            }
+        }
+    }
+
     public void inline() {
+        resolveQueries();
+
         ArrayList<Node> nodes = new ArrayList<>(icg.getNodes().count());
         final StartNode entryPointNode = icg.start();
         FixedNode firstCFGNode = entryPointNode.next();

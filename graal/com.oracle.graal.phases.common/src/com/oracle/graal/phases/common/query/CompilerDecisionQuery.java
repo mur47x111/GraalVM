@@ -10,4 +10,5 @@ public interface CompilerDecisionQuery {
 
     default void inline(@SuppressWarnings("unused") InstrumentationNode instrumentation) {
     }
+
 }

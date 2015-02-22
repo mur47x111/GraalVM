@@ -12,10 +12,9 @@ import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.common.query.ExtractICGPhase.ICGBoundary;
-import com.oracle.graal.replacements.nodes.*;
 
 @NodeInfo
-public class InstrumentationBeginNode extends MacroNode implements CompilerDecisionQuery, ICGBoundary {
+public class InstrumentationBeginNode extends ICGMacroNode implements CompilerDecisionQuery, ICGBoundary {
 
     public InstrumentationBeginNode(Invoke invoke) {
         super(invoke);

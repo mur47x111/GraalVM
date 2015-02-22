@@ -20,4 +20,7 @@ public class CompilerDecisionSubstitutions {
     @MacroSubstitution(forced = true, isStatic = true, macro = MethodNameNode.class)
     public static native String getMethodName();
 
+    @MacroSubstitution(forced = true, isStatic = true, macro = RootNameNode.class)
+    public static native String getRootName();
+
 }
