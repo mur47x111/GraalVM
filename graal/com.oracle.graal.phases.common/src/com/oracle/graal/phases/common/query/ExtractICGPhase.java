@@ -13,6 +13,7 @@ import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.inlining.*;
+import com.oracle.graal.phases.query.*;
 import com.oracle.graal.phases.tiers.*;
 
 public class ExtractICGPhase extends BasePhase<HighTierContext> {

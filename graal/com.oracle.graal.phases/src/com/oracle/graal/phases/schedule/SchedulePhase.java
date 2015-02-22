@@ -43,6 +43,7 @@ import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.graph.ReentrantBlockIterator.BlockIteratorClosure;
 import com.oracle.graal.phases.graph.ReentrantBlockIterator.LoopInfo;
+import com.oracle.graal.phases.query.*;
 import com.oracle.graal.phases.util.*;
 
 public final class SchedulePhase extends Phase {
@@ -1083,13 +1084,15 @@ public final class SchedulePhase extends Phase {
             stateAfter = ((StateSplit) i).stateAfter();
         }
 
-        for (Node input : i.inputs()) {
-            if (input instanceof FrameState) {
-                if (input != stateAfter) {
-                    addUnscheduledToLatestSorting((FrameState) input, state);
+        if (!(i instanceof InstrumentationNode)) {
+            for (Node input : i.inputs()) {
+                if (input instanceof FrameState) {
+                    if (input != stateAfter) {
+                        addUnscheduledToLatestSorting((FrameState) input, state);
+                    }
+                } else {
+                    addToLatestSorting((ValueNode) input, state);
                 }
-            } else {
-                addToLatestSorting((ValueNode) input, state);
             }
         }
 

@@ -6,6 +6,7 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
+import com.oracle.graal.phases.query.*;
 import com.oracle.graal.phases.tiers.*;
 
 public class LoweringICGPhase extends BasePhase<PhaseContext> {

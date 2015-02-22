@@ -3,6 +3,7 @@ package com.oracle.graal.hotspot.replacements.query;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
+import com.oracle.graal.phases.query.*;
 
 @NodeInfo
 public class IsMethodInlinedNode extends ICGMacroNode implements CompilerDecisionQuery {

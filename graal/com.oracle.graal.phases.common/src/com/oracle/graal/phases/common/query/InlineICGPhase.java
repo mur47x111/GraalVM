@@ -12,6 +12,7 @@ import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.nodes.virtual.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
+import com.oracle.graal.phases.query.*;
 import com.oracle.graal.phases.tiers.*;
 
 public class InlineICGPhase extends BasePhase<LowTierContext> {

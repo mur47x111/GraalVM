@@ -1,4 +1,4 @@
-package com.oracle.graal.phases.common.query;
+package com.oracle.graal.phases.query;
 
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;

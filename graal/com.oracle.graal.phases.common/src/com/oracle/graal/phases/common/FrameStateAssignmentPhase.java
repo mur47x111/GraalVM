@@ -31,9 +31,9 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.GuardsStage;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
-import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.graph.ReentrantNodeIterator.NodeIteratorClosure;
+import com.oracle.graal.phases.query.*;
 
 /**
  * This phase transfers {@link FrameState} nodes from {@link StateSplit} nodes to

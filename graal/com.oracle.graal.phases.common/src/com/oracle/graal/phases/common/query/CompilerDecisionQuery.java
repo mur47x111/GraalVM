@@ -1,6 +1,7 @@
 package com.oracle.graal.phases.common.query;
 
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.phases.query.*;
 
 public interface CompilerDecisionQuery {
 
