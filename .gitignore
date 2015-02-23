@@ -18,3 +18,5 @@
 /graal/*/src_gen
 /graal/*/*iml
 /graal/*/ap/
+/src/share/tools/IdealGraphVisualizer/*
+/.ideal_graph_visualizer.log
