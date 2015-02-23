@@ -9,7 +9,7 @@ import com.oracle.graal.nodes.spi.*;
 @NodeInfo
 public class InstrumentationNode extends FixedWithNextNode implements Virtualizable {
 
-    @OptionalInput(value = InputType.Association) protected ValueNode target;
+    @OptionalInput protected ValueNode target;
     @OptionalInput protected NodeInputList<ValueNode> weakDependencies;
 
     protected InsertedCodeGraph icg;

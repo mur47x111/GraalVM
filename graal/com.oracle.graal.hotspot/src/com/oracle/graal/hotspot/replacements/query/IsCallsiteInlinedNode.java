@@ -14,7 +14,7 @@ public class IsCallsiteInlinedNode extends ICGMacroNode implements CompilerDecis
 
     public void inline(InstrumentationNode instrumentation) {
         ValueNode target = instrumentation.target();
-        boolean isCallsiteInlined = target == null || target.isDeleted();
+        boolean isCallsiteInlined = target == null || target.isDeleted() || !(target instanceof Invoke);
         graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(isCallsiteInlined, graph()));
     }
 

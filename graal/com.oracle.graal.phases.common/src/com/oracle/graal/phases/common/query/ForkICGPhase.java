@@ -49,7 +49,12 @@ public class ForkICGPhase extends BasePhase<HighTierContext> {
                                         AllocatedObjectNode allocated = (AllocatedObjectNode) target;
 
                                         if (allocated.getCommit() == alloc && allocated.getVirtualObject() == virtual) {
-                                            clone.setTarget(allocated);
+                                            for (Node input : clone.inputs()) {
+                                                if (input == virtual) {
+                                                    clone.replaceFirstInput(virtual, allocated);
+                                                }
+                                            }
+
                                             break;
                                         }
                                     }
@@ -60,6 +65,16 @@ public class ForkICGPhase extends BasePhase<HighTierContext> {
                 }
             }
         }
-    }
 
+        for (Node node : graph.getNodes()) {
+            if (node instanceof InstrumentationNode) {
+                InstrumentationNode instrumentation = (InstrumentationNode) node;
+                ValueNode target = instrumentation.target();
+
+                if (target instanceof VirtualObjectNode) {
+                    instrumentation.replaceFirstInput(target, null);
+                }
+            }
+        }
+    }
 }
