@@ -15,4 +15,5 @@ public class InstrumentationBeginNode extends ICGMacroNode implements CompilerDe
     public FixedWithNextNode asFixedWithNextNode() {
         return this;
     }
+
 }

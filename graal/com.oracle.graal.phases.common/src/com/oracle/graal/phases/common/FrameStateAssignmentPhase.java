@@ -86,7 +86,12 @@ public class FrameStateAssignmentPhase extends Phase {
             }
 
             if (node instanceof InstrumentationNode) {
-                new FrameStateAssignmentPhase().apply(((InstrumentationNode) node).getICG());
+                InsertedCodeGraph icg = ((InstrumentationNode) node).getICG();
+
+                if (!icg.passFrameStateAssignent()) {
+                    new FrameStateAssignmentPhase().apply(icg.graph());
+                    icg.setPassFrameStateAssignent();
+                }
             }
 
             return currentState;

@@ -3,6 +3,7 @@ package com.oracle.graal.hotspot.replacements.query;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
+import com.oracle.graal.phases.query.*;
 
 @NodeInfo
 public class IsAllocationVirtualNode extends ICGMacroNode implements CompilerDecisionQuery {
@@ -11,8 +12,10 @@ public class IsAllocationVirtualNode extends ICGMacroNode implements CompilerDec
         super(invoke);
     }
 
-    public ConstantNode resolve() {
-        return ConstantNode.forBoolean(true, graph());
+    public void inline(InstrumentationNode instrumentation) {
+        ValueNode target = instrumentation.target();
+        boolean isAllocationVirtual = target == null || target.isDeleted();
+        graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(isAllocationVirtual, graph()));
     }
 
 }

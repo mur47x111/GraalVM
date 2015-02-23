@@ -24,7 +24,7 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
         for (Node node : graph.getNodes()) {
             if (node instanceof InstrumentationNode) {
                 InstrumentationNode instrumentation = (InstrumentationNode) node;
-                StructuredGraph icg = instrumentation.getICG();
+                StructuredGraph icg = instrumentation.getICG().graph();
 
                 canonicalizer.apply(icg, context);
                 new DeadCodeEliminationPhase().apply(icg);

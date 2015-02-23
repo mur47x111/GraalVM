@@ -25,9 +25,13 @@ public class LoweringICGPhase extends BasePhase<PhaseContext> {
         for (Node node : graph.getNodes()) {
             if (node instanceof InstrumentationNode) {
                 InstrumentationNode instrumentation = (InstrumentationNode) node;
-                StructuredGraph icg = instrumentation.getICG();
-                new LoweringPhase(canonicalizer, loweringStage).apply(icg, context);
-                Debug.dump(icg, "After lowering ICG at " + loweringStage);
+                InsertedCodeGraph icg = instrumentation.getICG();
+
+                if (!icg.lowered(loweringStage)) {
+                    new LoweringPhase(canonicalizer, loweringStage).apply(icg.graph(), context);
+                    icg.addLoweringStage(loweringStage);
+                    Debug.dump(icg, "After lowering ICG at " + loweringStage);
+                }
             }
         }
     }

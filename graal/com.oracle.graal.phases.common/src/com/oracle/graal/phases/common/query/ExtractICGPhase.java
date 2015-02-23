@@ -51,17 +51,53 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
         }
     }
 
-    private static boolean getDirection(FixedWithNextNode begin) {
+    private static int getDirection(FixedWithNextNode begin) {
         Node input = begin.inputs().first();
         if (input != null && input instanceof ConstantNode) {
             Constant c = ((ConstantNode) input).getValue();
 
             if (c instanceof PrimitiveConstant) {
-                return ((PrimitiveConstant) c).asBoolean();
+                return ((PrimitiveConstant) c).asInt();
             }
         }
 
-        return false;
+        return 0;
+    }
+
+    private static FixedNode getTarget(FixedWithNextNode begin, FixedWithNextNode end) {
+        int direction = getDirection(begin);
+
+        if (direction < 0) {
+            Node pred = begin;
+
+            while (direction < 0) {
+                pred = pred.predecessor();
+
+                if (pred == null || !(pred instanceof FixedNode)) {
+                    return null;
+                }
+
+                direction++;
+            }
+
+            return (FixedNode) pred;
+        } else if (direction > 0) {
+            FixedNode next = end;
+
+            while (direction > 0) {
+                next = ((FixedWithNextNode) next).next();
+
+                if (next == null || !(next instanceof FixedWithNextNode)) {
+                    return null;
+                }
+
+                direction--;
+            }
+
+            return next;
+        }
+
+        return null;
     }
 
     @Override
@@ -123,7 +159,7 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                     }
                 }
 
-                FixedNode target = getDirection(originICGBegin) ? originICGEnd.next() : (FixedNode) originICGBegin.predecessor();
+                FixedNode target = getTarget(originICGBegin, originICGEnd);
                 InstrumentationNode instrumentation = graph.addWithoutUnique(new InstrumentationNode(target, icg));
 
                 // extract icg

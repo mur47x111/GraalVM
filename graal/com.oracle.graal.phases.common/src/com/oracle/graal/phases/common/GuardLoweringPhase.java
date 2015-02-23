@@ -158,7 +158,12 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
                     lowerToIf(guard);
                 }
             } else if (node instanceof InstrumentationNode) {
-                new GuardLoweringPhase().apply(((InstrumentationNode) node).getICG(), null);
+                InsertedCodeGraph icg = ((InstrumentationNode) node).getICG();
+
+                if (!icg.passGuardLowering()) {
+                    new GuardLoweringPhase().apply(icg.graph(), null);
+                    icg.setPassGuardLowering();
+                }
             }
 
         }

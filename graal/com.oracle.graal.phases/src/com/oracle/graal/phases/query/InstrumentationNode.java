@@ -9,16 +9,16 @@ import com.oracle.graal.nodes.spi.*;
 @NodeInfo
 public class InstrumentationNode extends FixedWithNextNode implements Virtualizable {
 
-    @OptionalInput(value = InputType.Association) protected FixedNode target;
+    @OptionalInput(value = InputType.Association) protected ValueNode target;
     @OptionalInput protected NodeInputList<ValueNode> weakDependencies;
 
-    protected StructuredGraph icg;
+    protected InsertedCodeGraph icg;
 
     public InstrumentationNode(FixedNode target, StructuredGraph icg) {
         super(StampFactory.forVoid());
 
         this.target = target;
-        this.icg = icg;
+        this.icg = new InsertedCodeGraph(icg);
         this.weakDependencies = new NodeInputList<>(this);
     }
 
@@ -26,12 +26,16 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
         return weakDependencies.add(node);
     }
 
-    public FixedNode target() {
+    public ValueNode target() {
         return target;
     }
 
-    public StructuredGraph getICG() {
+    public InsertedCodeGraph getICG() {
         return icg;
+    }
+
+    public void setTarget(ValueNode target) {
+        this.target = target;
     }
 
     public NodeInputList<ValueNode> getWeakDependencies() {
@@ -39,17 +43,26 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
     }
 
     public void virtualize(VirtualizerTool tool) {
+        if (target != null) {
+            State state = tool.getObjectState(target);
+
+            if (state != null && state.getState() == EscapeState.Virtual) {
+                target = state.getVirtualObject();
+            }
+        }
+
         for (int i = 0; i < weakDependencies.count(); i++) {
             ValueNode input = weakDependencies.get(i);
             State state = tool.getObjectState(input);
 
             if (state != null && state.getState() == EscapeState.Virtual) {
                 weakDependencies.set(i, state.getVirtualObject());
-                // TODO (yz) for bypassing PEA
-                // a more elegant way should be creating another edge type
-                tool.setDeleted();
             }
         }
+
+        // TODO (yz) for bypassing PEA
+        // a more elegant way should be creating another edge type
+        tool.setDeleted();
     }
 
 }

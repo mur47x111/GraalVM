@@ -20,9 +20,9 @@ public final class CompilerDecision {
     /**
      * Marks the beginning of the instrumentation boundary. - The target parameter indicates whether
      * to associate the instrumentation with the preceding or the following base program IR node.
-     * Supported values are false(predecessor), true (successor)}.
+     * Supported values are -1 (predecessor), 1 (successor)}.
      */
-    public static void instrumentationBegin(boolean target) {
+    public static void instrumentationBegin(int target) {
     }
 
     /**

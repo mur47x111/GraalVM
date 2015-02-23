@@ -9,7 +9,7 @@ import com.oracle.graal.nodes.spi.*;
 public class CompilerDecisionSubstitutions {
 
     @MacroSubstitution(forced = true, isStatic = true, macro = InstrumentationBeginNode.class)
-    public static native void instrumentationBegin(boolean target);
+    public static native void instrumentationBegin(int target);
 
     @MacroSubstitution(forced = true, isStatic = true, macro = InstrumentationEndNode.class)
     public static native void instrumentationEnd();
