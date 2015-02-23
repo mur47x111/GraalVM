@@ -14,6 +14,9 @@ public class CompilerDecisionSubstitutions {
     @MacroSubstitution(forced = true, isStatic = true, macro = InstrumentationEndNode.class)
     public static native void instrumentationEnd();
 
+    @MacroSubstitution(forced = true, isStatic = true, macro = ObservedReferenceNode.class)
+    public static native Object observedReference(Object object);
+
     @MacroSubstitution(forced = true, isStatic = true, macro = IsMethodCompiledNode.class)
     public static native boolean isMethodCompiled();
 
