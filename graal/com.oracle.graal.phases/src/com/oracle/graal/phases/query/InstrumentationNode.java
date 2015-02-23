@@ -4,12 +4,13 @@ import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo
 public class InstrumentationNode extends FixedWithNextNode implements Virtualizable {
 
-    @OptionalInput protected ValueNode target;
+    @OptionalInput(value = InputType.Association) protected ValueNode target;
     @OptionalInput protected NodeInputList<ValueNode> weakDependencies;
 
     protected InsertedCodeGraph icg;
@@ -43,11 +44,17 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
     }
 
     public void virtualize(VirtualizerTool tool) {
-        if (target != null) {
-            State state = tool.getObjectState(target);
+        if (target instanceof MonitorEnterNode) {
+            replaceFirstInput(target, ((MonitorEnterNode) target).getMonitorId());
+        } else {
+            tool.setDeleted();
 
-            if (state != null && state.getState() == EscapeState.Virtual) {
-                target = state.getVirtualObject();
+            if (target != null) {
+                State state = tool.getObjectState(target);
+
+                if (state != null && state.getState() == EscapeState.Virtual) {
+                    replaceFirstInput(target, state.getVirtualObject());
+                }
             }
         }
 
@@ -60,9 +67,8 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
             }
         }
 
-        // TODO (yz) for bypassing PEA
+        // TODO (yz) the following statement is for cheating PEA
         // a more elegant way should be creating another edge type
-        tool.setDeleted();
     }
 
 }

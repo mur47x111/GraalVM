@@ -98,7 +98,7 @@ public final class CompilerDecision {
      *         returns a special error value.
      */
     public static int getAllocationType() {
-        return 0;
+        return -1;
     }
 
     /**
@@ -106,7 +106,7 @@ public final class CompilerDecision {
      *         are {BIASED, RECURSIVE, CAS, ...}, representing the different locking strategies.
      */
     public static int getLockType() {
-        return 0;
+        return -1;
     }
 
 }

@@ -58,6 +58,7 @@ import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.FloatingReadPhase.MemoryMapImpl;
 import com.oracle.graal.phases.common.inlining.*;
+import com.oracle.graal.phases.query.*;
 import com.oracle.graal.phases.tiers.*;
 import com.oracle.graal.phases.util.*;
 import com.oracle.graal.replacements.Snippet.ConstantParameter;
@@ -1166,6 +1167,18 @@ public class SnippetTemplate {
             }
 
             updateStamps(replacee, duplicates);
+
+            for (Node node : replaceeGraph.getNodes()) {
+                if (node instanceof InstrumentationNode) {
+                    InstrumentationNode instrumentation = (InstrumentationNode) node;
+
+                    if (instrumentation.target() == replacee) {
+                        ReturnNode returnDuplicate = (ReturnNode) duplicates.get(returnNode);
+                        FixedWithNextNode pred = (FixedWithNextNode) returnDuplicate.predecessor();
+                        instrumentation.replaceFirstInput(replacee, pred);
+                    }
+                }
+            }
 
             // Replace all usages of the replacee with the value returned by the snippet
             ValueNode returnValue = null;

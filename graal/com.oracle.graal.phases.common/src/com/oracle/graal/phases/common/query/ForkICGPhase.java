@@ -21,41 +21,44 @@ public class ForkICGPhase extends BasePhase<HighTierContext> {
                 for (int index = virtualObjects.size() - 1; index >= 0; index--) {
                     VirtualObjectNode virtual = virtualObjects.get(index);
 
-                    for (Node usage : virtual.usages()) {
+                    for (Node usage : graph.getNodes()) {
                         if (usage instanceof InstrumentationNode) {
                             InstrumentationNode instrumentation = (InstrumentationNode) usage;
-                            NodeFlood flood = graph.createNodeFlood();
-                            flood.add(usage);
 
-                            for (Node current : flood) {
-                                if (current instanceof LoopEndNode) {
-                                    continue;
-                                } else if (current instanceof AbstractEndNode) {
-                                    AbstractEndNode end = (AbstractEndNode) current;
-                                    flood.add(end.merge());
-                                } else {
-                                    for (Node successor : current.successors()) {
-                                        flood.add(successor);
+                            if (instrumentation.target() == virtual) {
+                                NodeFlood flood = graph.createNodeFlood();
+                                flood.add(usage);
+
+                                for (Node current : flood) {
+                                    if (current instanceof LoopEndNode) {
+                                        continue;
+                                    } else if (current instanceof AbstractEndNode) {
+                                        AbstractEndNode end = (AbstractEndNode) current;
+                                        flood.add(end.merge());
+                                    } else {
+                                        for (Node successor : current.successors()) {
+                                            flood.add(successor);
+                                        }
                                     }
                                 }
-                            }
 
-                            if (flood.isMarked(alloc)) {
-                                InstrumentationNode clone = (InstrumentationNode) instrumentation.copyWithInputs();
-                                graph.addAfterFixed(alloc, clone);
+                                if (flood.isMarked(alloc)) {
+                                    InstrumentationNode clone = (InstrumentationNode) instrumentation.copyWithInputs();
+                                    graph.addAfterFixed(alloc, clone);
 
-                                for (Node target : graph.getNodes()) {
-                                    if (target instanceof AllocatedObjectNode) {
-                                        AllocatedObjectNode allocated = (AllocatedObjectNode) target;
+                                    for (Node target : graph.getNodes()) {
+                                        if (target instanceof AllocatedObjectNode) {
+                                            AllocatedObjectNode allocated = (AllocatedObjectNode) target;
 
-                                        if (allocated.getCommit() == alloc && allocated.getVirtualObject() == virtual) {
-                                            for (Node input : clone.inputs()) {
-                                                if (input == virtual) {
-                                                    clone.replaceFirstInput(virtual, allocated);
+                                            if (allocated.getCommit() == alloc && allocated.getVirtualObject() == virtual) {
+                                                for (Node input : clone.inputs()) {
+                                                    if (input == virtual) {
+                                                        clone.replaceFirstInput(virtual, allocated);
+                                                    }
                                                 }
-                                            }
 
-                                            break;
+                                                break;
+                                            }
                                         }
                                     }
                                 }

@@ -35,4 +35,10 @@ public class CompilerDecisionSubstitutions {
     @MacroSubstitution(forced = true, isStatic = true, macro = RootNameNode.class)
     public static native String getRootName();
 
+    @MacroSubstitution(forced = true, isStatic = true, macro = AllocationTypeNode.class)
+    public static native int getAllocationType();
+
+    @MacroSubstitution(forced = true, isStatic = true, macro = LockTypeNode.class)
+    public static native int getLockType();
+
 }
