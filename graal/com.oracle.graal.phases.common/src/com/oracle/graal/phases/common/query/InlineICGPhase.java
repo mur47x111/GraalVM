@@ -29,15 +29,6 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
                 canonicalizer.apply(icg, context);
                 new DeadCodeEliminationPhase().apply(icg);
 
-                for (Node icgnode : icg.getNodes()) {
-                    if (icgnode instanceof CompilerDecisionQuery) {
-                        ((CompilerDecisionQuery) icgnode).inline(instrumentation);
-                    }
-                }
-
-                canonicalizer.apply(icg, context);
-                Debug.dump(icg, "After resolving queries");
-
                 ArrayList<Node> nodes = new ArrayList<>(icg.getNodes().count());
                 final StartNode entryPointNode = icg.start();
                 FixedNode firstCFGNode = entryPointNode.next();
@@ -74,6 +65,7 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
                 };
 
                 Map<Node, Node> duplicates = graph.addDuplicates(nodes, icg, icg.getNodeCount(), localReplacement);
+
                 FixedNode firstCFGNodeDuplicate = (FixedNode) duplicates.get(firstCFGNode);
                 instrumentation.replaceAtPredecessor(firstCFGNodeDuplicate);
 
@@ -101,9 +93,20 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
                     }
                 }
 
+                for (Node icgnode : icg.getNodes()) {
+                    if (icgnode instanceof CompilerDecisionQuery) {
+                        ((CompilerDecisionQuery) duplicates.get(icgnode)).inline(instrumentation);
+                    }
+                }
+
+                String message = instrumentation.toString();
                 GraphUtil.killCFG(instrumentation);
+
+                Debug.dump(graph, "After inlining instrumentation " + message);
             }
         }
+
+        canonicalizer.apply(graph, context);
     }
 
 }

@@ -20,7 +20,7 @@ public class IsMethodInlinedNode extends ICGMacroNode implements CompilerDecisio
     }
 
     public void inline(InstrumentationNode instrumentation) {
-        String root = CompilerDecisionUtil.getMethodFullName(instrumentation.graph().method());
+        String root = CompilerDecisionUtil.getMethodFullName(graph().method());
         graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(!root.equals(original), graph()));
     }
 

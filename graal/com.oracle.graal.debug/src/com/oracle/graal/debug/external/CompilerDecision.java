@@ -45,6 +45,15 @@ public final class CompilerDecision {
     // Static query intrinsics
 
     /**
+     * @return true if an allocation is virtual, i.e., replaced by a stack allocation. If an
+     *         allocation site is cloned, the corresponding ICG is cloned as well, and the result of
+     *         the query refers to the cloned allocation.
+     */
+    public static boolean isAllocationVirtual() {
+        return false;
+    }
+
+    /**
      * @return true if the enclosing method has been compiled by the dynamic compiler.
      */
     public static boolean isMethodCompiled() {

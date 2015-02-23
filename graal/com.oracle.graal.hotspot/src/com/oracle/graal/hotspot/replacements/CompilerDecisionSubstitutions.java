@@ -17,6 +17,9 @@ public class CompilerDecisionSubstitutions {
     @MacroSubstitution(forced = true, isStatic = true, macro = ObservedReferenceNode.class)
     public static native Object observedReference(Object object);
 
+    @MacroSubstitution(forced = true, isStatic = true, macro = IsAllocationVirtualNode.class)
+    public static native boolean isAllocationVirtual();
+
     @MacroSubstitution(forced = true, isStatic = true, macro = IsMethodCompiledNode.class)
     public static native boolean isMethodCompiled();
 

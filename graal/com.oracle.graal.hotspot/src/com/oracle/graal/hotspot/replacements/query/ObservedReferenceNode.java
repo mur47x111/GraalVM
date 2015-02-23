@@ -16,7 +16,7 @@ public class ObservedReferenceNode extends ICGMacroNode implements CompilerDecis
     public void inline(InstrumentationNode instrumentation) {
         GraphUtil.unlinkFixedNode(this);
         replaceAtUsages(inputs().first());
-        this.safeDelete();
+        safeDelete();
     }
 
 }
