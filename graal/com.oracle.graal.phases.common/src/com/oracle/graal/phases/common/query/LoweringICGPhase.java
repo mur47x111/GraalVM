@@ -3,9 +3,7 @@ package com.oracle.graal.phases.common.query;
 import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
-import com.oracle.graal.nodes.spi.LoweringTool.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.query.*;
@@ -27,17 +25,6 @@ public class LoweringICGPhase extends BasePhase<PhaseContext> {
         for (Node node : graph.getNodes()) {
             if (node instanceof InstrumentationNode) {
                 InstrumentationNode instrumentation = (InstrumentationNode) node;
-
-                if (loweringStage == StandardLoweringStage.MID_TIER && (instrumentation.target() instanceof MonitorIdNode)) {
-                    MonitorIdNode id = (MonitorIdNode) instrumentation.target();
-
-                    MonitorEnterNode enter = id.usages().filter(MonitorEnterNode.class).first();
-
-                    if (enter != null) {
-                        instrumentation.replaceFirstInput(id, enter);
-                    }
-                }
-
                 InsertedCodeGraph icg = instrumentation.getICG();
 
                 if (!icg.lowered(loweringStage)) {

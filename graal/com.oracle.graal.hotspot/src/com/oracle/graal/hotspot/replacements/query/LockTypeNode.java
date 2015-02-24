@@ -15,13 +15,7 @@ public class LockTypeNode extends ICGMacroNode implements CompilerDecisionQuery 
     public void inline(InstrumentationNode instrumentation) {
         if (instrumentation.target() instanceof AbstractMergeNode) {
             AbstractMergeNode merge = (AbstractMergeNode) instrumentation.target();
-            ValuePhiNode path = graph().addWithoutUnique(new ValuePhiNode(stamp(), merge));
-
-            for (int i = 0; i < merge.cfgPredecessors().count(); i++) {
-                path.addInput(ConstantNode.forInt(i, graph()));
-            }
-
-            graph().replaceFixedWithFloating(this, path);
+            graph().replaceFixedWithFloating(this, graph().addWithoutUnique(CompilerDecisionUtil.createValuePhi(merge)));
         } else {
             graph().replaceFixedWithFloating(this, ConstantNode.forInt(-1, graph()));
         }

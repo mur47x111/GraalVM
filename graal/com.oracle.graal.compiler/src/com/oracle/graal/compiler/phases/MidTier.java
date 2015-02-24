@@ -90,6 +90,7 @@ public class MidTier extends PhaseSuite<MidTierContext> {
 
         if (UseCompilerDecision.getValue()) {
             appendPhase(new LoweringICGPhase(canonicalizer, LoweringTool.StandardLoweringStage.MID_TIER));
+            appendPhase(new RedirectICGPhase());
         }
 
         appendPhase(new FrameStateAssignmentPhase());

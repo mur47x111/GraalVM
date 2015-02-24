@@ -2,7 +2,6 @@ package com.oracle.graal.hotspot.replacements.query;
 
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.query.*;
 
@@ -14,18 +13,9 @@ public class AllocationTypeNode extends ICGMacroNode implements CompilerDecision
     }
 
     public void inline(InstrumentationNode instrumentation) {
-        ValueNode value = GraphUtil.unproxify(instrumentation.target());
-
-        if (value instanceof ValuePhiNode) {
-            ValuePhiNode phi = (ValuePhiNode) value;
-            AbstractMergeNode merge = phi.merge();
-            ValuePhiNode path = graph().addWithoutUnique(new ValuePhiNode(stamp(), merge));
-
-            for (int i = 0; i < merge.cfgPredecessors().count(); i++) {
-                path.addInput(ConstantNode.forInt(i, graph()));
-            }
-
-            graph().replaceFixedWithFloating(this, path);
+        if (instrumentation.target() instanceof AbstractMergeNode) {
+            AbstractMergeNode merge = (AbstractMergeNode) instrumentation.target();
+            graph().replaceFixedWithFloating(this, graph().addWithoutUnique(CompilerDecisionUtil.createValuePhi(merge)));
         } else {
             graph().replaceFixedWithFloating(this, ConstantNode.forInt(-1, graph()));
         }
