@@ -3,6 +3,7 @@ package com.oracle.graal.phases.common.query;
 import java.util.*;
 
 import com.oracle.graal.api.meta.*;
+import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
@@ -12,6 +13,7 @@ import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
+import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.inlining.*;
 import com.oracle.graal.phases.query.*;
 import com.oracle.graal.phases.tiers.*;
@@ -39,14 +41,16 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
     }
 
     private static void redirectInput(StructuredGraph icg, Node node, Map<Node, Node> mapping, Map<TempInputNode, Node> tempInputs) {
-        // redirect data dependency to FixedNode or ParameterNode to temporary nodes
+        // redirect data dependency to FixedNode or AbstractLocalNode to temporary nodes
         for (Node input : node.inputs()) {
-            if (input instanceof FixedNode || input instanceof ParameterNode) {
+            if (input instanceof FixedNode || input instanceof AbstractLocalNode) {
                 TempInputNode tempInput = icg.addWithoutUnique(new TempInputNode(((ValueNode) input).stamp()));
                 tempInputs.put(tempInput, input);
                 mapping.get(node).replaceFirstInput(mapping.get(input), tempInput);
             } else if (input instanceof FloatingNode || input instanceof CallTargetNode || input instanceof FrameState) {
-                redirectInput(icg, input, mapping, tempInputs);
+                if (!(node instanceof FrameState)) {
+                    redirectInput(icg, input, mapping, tempInputs);
+                }
             }
         }
     }
@@ -178,17 +182,29 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                 GraphUtil.killCFG(icgPred);
                 GraphUtil.killCFG(icgEnd);
 
+                // disconnect existing local nodes
+                for (Node icgnode : icg.getNodes()) {
+                    if (icgnode instanceof AbstractLocalNode) {
+                        icgnode.replaceAtUsages(null);
+                    }
+                }
+
                 int index = 0;
                 Map<Node, ParameterNode> parameters = new HashMap<>();
-                // replace temporary nodes with either FixedNode or ParameterNode
+                // replace temporary nodes with either FixedNode or AbstractLocalNode
                 for (TempInputNode tempInput : tempInputs.keySet()) {
                     Node input = tempInputs.get(tempInput);
                     Node mapInput = mapping.get(input);
+                    Node usage = tempInput.usages().first();
 
-                    if (input instanceof ParameterNode || mapInput.isDeleted()) {
+                    if (usage == null) {
+                        // do nothing
+                    } else if (input instanceof AbstractLocalNode || mapInput.isDeleted()) {
+                        // replace with parameter to InstrumentationNode
                         ParameterNode parameter = parameters.get(input);
 
-                        if (parameter == null) {
+                        // no need to create new parameter for FrameState
+                        if (parameter == null && !(usage instanceof FrameState)) {
                             instrumentation.addInput(input);
                             parameter = icg.addWithoutUnique(new ParameterNode(index++, tempInput.stamp()));
                             parameters.put(input, parameter);
@@ -200,6 +216,8 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                     }
                 }
 
+                new CanonicalizerPhase(!GraalOptions.ImmutableCode.getValue()).apply(icg, context, false);
+                new DeadCodeEliminationPhase().apply(icg, false);
                 Debug.dump(icg, "After extracted ICG starting from " + node);
 
                 // remove icg from original graph
@@ -213,5 +231,4 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
             }
         }
     }
-
 }

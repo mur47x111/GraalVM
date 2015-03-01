@@ -45,7 +45,7 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
 
     public void virtualize(VirtualizerTool tool) {
         if (target instanceof MonitorEnterNode) {
-            replaceFirstInput(target, ((MonitorEnterNode) target).getMonitorId());
+            tool.replaceFirstInput(target, ((MonitorEnterNode) target).getMonitorId());
         } else {
             tool.setDeleted();
 
@@ -53,7 +53,7 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
                 State state = tool.getObjectState(target);
 
                 if (state != null && state.getState() == EscapeState.Virtual) {
-                    replaceFirstInput(target, state.getVirtualObject());
+                    tool.replaceFirstInput(target, state.getVirtualObject());
                 }
             }
         }
@@ -63,7 +63,8 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
             State state = tool.getObjectState(input);
 
             if (state != null && state.getState() == EscapeState.Virtual) {
-                weakDependencies.set(i, state.getVirtualObject());
+                // TODO (yz) check if in order
+                tool.replaceFirstInput(input, state.getVirtualObject());
             }
         }
 

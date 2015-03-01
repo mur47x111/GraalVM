@@ -28,7 +28,7 @@ public class LoweringICGPhase extends BasePhase<PhaseContext> {
                 InsertedCodeGraph icg = instrumentation.getICG();
 
                 if (!icg.lowered(loweringStage)) {
-                    new LoweringPhase(canonicalizer, loweringStage).apply(icg.graph(), context);
+                    new LoweringPhase(canonicalizer, loweringStage).apply(icg.graph(), context, false);
                     icg.addLoweringStage(loweringStage);
                     Debug.dump(icg, "After lowering ICG at " + loweringStage);
                 }

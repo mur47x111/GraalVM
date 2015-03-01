@@ -26,8 +26,8 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
                 InstrumentationNode instrumentation = (InstrumentationNode) node;
                 StructuredGraph icg = instrumentation.getICG().graph();
 
-                canonicalizer.apply(icg, context);
-                new DeadCodeEliminationPhase().apply(icg);
+                canonicalizer.apply(icg, context, false);
+                new DeadCodeEliminationPhase().apply(icg, false);
 
                 ArrayList<Node> nodes = new ArrayList<>(icg.getNodes().count());
                 final StartNode entryPointNode = icg.start();
