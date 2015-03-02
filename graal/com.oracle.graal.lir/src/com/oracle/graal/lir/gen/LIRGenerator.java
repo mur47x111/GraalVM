@@ -60,7 +60,7 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
     private final CodeGenProviders providers;
     private final CallingConvention cc;
 
-    private AbstractBlock<?> currentBlock;
+    private AbstractBlockBase<?> currentBlock;
 
     private LIRGenerationResult res;
 
@@ -69,14 +69,6 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
         this.res = res;
         this.providers = providers;
         this.cc = cc;
-    }
-
-    /**
-     * Returns true if the redundant move elimination optimization should be done after register
-     * allocation.
-     */
-    public boolean canEliminateRedundantMoves() {
-        return true;
     }
 
     @Override
@@ -194,7 +186,7 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
         res.getLIR().getLIRforBlock(currentBlock).add(op);
     }
 
-    public boolean hasBlockEnd(AbstractBlock<?> block) {
+    public boolean hasBlockEnd(AbstractBlockBase<?> block) {
         List<LIRInstruction> ops = getResult().getLIR().getLIRforBlock(block);
         if (ops.size() == 0) {
             return false;
@@ -202,7 +194,7 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
         return ops.get(ops.size() - 1) instanceof BlockEndOp;
     }
 
-    public final void doBlockStart(AbstractBlock<?> block) {
+    public final void doBlockStart(AbstractBlockBase<?> block) {
         if (Options.PrintIRWithLIR.getValue()) {
             TTY.print(block.toString());
         }
@@ -220,7 +212,7 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
         }
     }
 
-    public final void doBlockEnd(AbstractBlock<?> block) {
+    public final void doBlockEnd(AbstractBlockBase<?> block) {
 
         if (Options.TraceLIRGeneratorLevel.getValue() >= 1) {
             TTY.println("END Generating LIR for block B" + block.getId());
@@ -234,7 +226,7 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
     }
 
     public void emitIncomingValues(Value[] params) {
-        ((LabelOp) res.getLIR().getLIRforBlock(currentBlock).get(0)).setIncomingValues(params);
+        ((LabelOp) res.getLIR().getLIRforBlock(getCurrentBlock()).get(0)).setIncomingValues(params);
     }
 
     public abstract void emitJump(LabelRef label);
@@ -387,12 +379,8 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
         }
     }
 
-    public AbstractBlock<?> getCurrentBlock() {
+    public AbstractBlockBase<?> getCurrentBlock() {
         return currentBlock;
-    }
-
-    void setCurrentBlock(AbstractBlock<?> block) {
-        currentBlock = block;
     }
 
     public LIRGenerationResult getResult() {

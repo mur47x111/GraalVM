@@ -44,9 +44,9 @@ import com.oracle.graal.graph.*;
 import com.oracle.graal.java.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.VerifyPhase.VerificationError;
-import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.tiers.*;
 import com.oracle.graal.phases.util.*;
 import com.oracle.graal.phases.verify.*;
@@ -69,7 +69,7 @@ public class CheckGraalInvariants extends GraalTest {
 
         PhaseSuite<HighTierContext> graphBuilderSuite = new PhaseSuite<>();
         graphBuilderSuite.appendPhase(new GraphBuilderPhase(GraphBuilderConfiguration.getEagerDefault()));
-        HighTierContext context = new HighTierContext(providers, new Assumptions(false), null, graphBuilderSuite, OptimisticOptimizations.NONE);
+        HighTierContext context = new HighTierContext(providers, null, graphBuilderSuite, OptimisticOptimizations.NONE);
 
         Assume.assumeTrue(VerifyPhase.class.desiredAssertionStatus());
 
@@ -138,7 +138,7 @@ public class CheckGraalInvariants extends GraalTest {
                         if (matches(filters, methodName)) {
                             executor.execute(() -> {
                                 ResolvedJavaMethod method = metaAccess.lookupJavaMethod(m);
-                                StructuredGraph graph = new StructuredGraph(method);
+                                StructuredGraph graph = new StructuredGraph(method, AllowAssumptions.NO);
                                 try (DebugConfigScope s = Debug.setConfig(new DelegatingDebugConfig().disable(INTERCEPT)); Debug.Scope ds = Debug.scope("CheckingGraph", graph, method)) {
                                     graphBuilderSuite.apply(graph, context);
                                     // update phi stamps
@@ -198,7 +198,6 @@ public class CheckGraalInvariants extends GraalTest {
      * Checks the invariants for a single graph.
      */
     private static void checkGraph(HighTierContext context, StructuredGraph graph, boolean verifyEquals) {
-        InferStamps.inferStamps(graph);
         if (verifyEquals) {
             new VerifyUsageWithEquals(Value.class).apply(graph, context);
             new VerifyUsageWithEquals(Register.class).apply(graph, context);

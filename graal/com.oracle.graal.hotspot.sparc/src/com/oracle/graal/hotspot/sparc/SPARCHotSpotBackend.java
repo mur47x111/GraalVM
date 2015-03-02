@@ -68,11 +68,6 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
     }
 
     @Override
-    public boolean shouldAllocateRegisters() {
-        return true;
-    }
-
-    @Override
     public FrameMapBuilder newFrameMapBuilder(RegisterConfig registerConfig) {
         RegisterConfig registerConfigNonNull = registerConfig == null ? getCodeCache().getRegisterConfig() : registerConfig;
         return new SPARCFrameMapBuilder(newFrameMap(registerConfigNonNull), getCodeCache(), registerConfigNonNull);
@@ -278,7 +273,7 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
     }
 
     private static void resetDelayedControlTransfers(LIR lir) {
-        for (AbstractBlock<?> block : lir.codeEmittingOrder()) {
+        for (AbstractBlockBase<?> block : lir.codeEmittingOrder()) {
             for (LIRInstruction inst : lir.getLIRforBlock(block)) {
                 if (inst instanceof SPARCDelayedControlTransfer) {
                     ((SPARCDelayedControlTransfer) inst).resetState();
@@ -290,11 +285,11 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
     /**
      * Fix-up over whole LIR.
      *
-     * @see #stuffDelayedControlTransfers(LIR, AbstractBlock)
+     * @see #stuffDelayedControlTransfers(LIR, AbstractBlockBase)
      * @param l
      */
     private static void stuffDelayedControlTransfers(LIR l) {
-        for (AbstractBlock<?> b : l.codeEmittingOrder()) {
+        for (AbstractBlockBase<?> b : l.codeEmittingOrder()) {
             stuffDelayedControlTransfers(l, b);
         }
     }
@@ -304,7 +299,7 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
      * it tries to move the DelayedLIRInstruction to the DelayedControlTransfer instruction, if
      * possible.
      */
-    private static void stuffDelayedControlTransfers(LIR l, AbstractBlock<?> block) {
+    private static void stuffDelayedControlTransfers(LIR l, AbstractBlockBase<?> block) {
         List<LIRInstruction> instructions = l.getLIRforBlock(block);
         if (instructions.size() >= 2) {
             LIRDependencyAccumulator acc = new LIRDependencyAccumulator();

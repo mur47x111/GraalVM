@@ -82,9 +82,10 @@ void graal_compute_offsets();
   end_class                                                                                                                                                    \
   start_class(HotSpotCompiledNmethod)                                                                                                                          \
     oop_field(HotSpotCompiledNmethod, method, "Lcom/oracle/graal/hotspot/meta/HotSpotResolvedJavaMethod;")                                                     \
+    oop_field(HotSpotCompiledNmethod, installationFailureMessage, "Ljava/lang/String;")                                                                        \
     int_field(HotSpotCompiledNmethod, entryBCI)                                                                                                                \
     int_field(HotSpotCompiledNmethod, id)                                                                                                                      \
-    long_field(HotSpotCompiledNmethod, ctask)                                                                                                                  \
+    long_field(HotSpotCompiledNmethod, graalEnv)                                                                                                               \
   end_class                                                                                                                                                    \
   start_class(HotSpotCompiledRuntimeStub)                                                                                                                      \
     oop_field(HotSpotCompiledRuntimeStub, stubName, "Ljava/lang/String;")                                                                                      \
@@ -96,14 +97,9 @@ void graal_compute_offsets();
     int_field(CompilationResult, totalFrameSize)                                                                                                               \
     int_field(CompilationResult, customStackAreaOffset)                                                                                                        \
     typeArrayOop_field(CompilationResult, targetCode, "[B")                                                                                                    \
-    oop_field(CompilationResult, assumptions, "Lcom/oracle/graal/api/code/Assumptions;")                                                                       \
+    objArrayOop_field(CompilationResult, assumptions, "[Lcom/oracle/graal/api/code/Assumptions$Assumption;")                                                   \
+    objArrayOop_field(CompilationResult, methods, "[Lcom/oracle/graal/api/meta/ResolvedJavaMethod;")                                                           \
     int_field(CompilationResult, targetCodeSize)                                                                                                               \
-  end_class                                                                                                                                                    \
-  start_class(Assumptions)                                                                                                                                     \
-    objArrayOop_field(Assumptions, list, "[Lcom/oracle/graal/api/code/Assumptions$Assumption;")                                                                \
-  end_class                                                                                                                                                    \
-  start_class(Assumptions_MethodContents)                                                                                                                      \
-    oop_field(Assumptions_MethodContents, method, "Lcom/oracle/graal/api/meta/ResolvedJavaMethod;")                                                            \
   end_class                                                                                                                                                    \
   start_class(Assumptions_NoFinalizableSubclass)                                                                                                               \
     oop_field(Assumptions_NoFinalizableSubclass, receiverType, "Lcom/oracle/graal/api/meta/ResolvedJavaType;")                                                 \
@@ -247,10 +243,10 @@ void graal_compute_offsets();
     oop_field(VirtualObject, type, "Lcom/oracle/graal/api/meta/ResolvedJavaType;")                                                                             \
     objArrayOop_field(VirtualObject, values, "[Lcom/oracle/graal/api/meta/JavaValue;")                                                                         \
   end_class                                                                                                                                                    \
-  start_class(HotSpotMonitorValue)                                                                                                                             \
-    oop_field(HotSpotMonitorValue, owner, "Lcom/oracle/graal/api/meta/JavaValue;")                                                                             \
-    oop_field(HotSpotMonitorValue, slot, "Lcom/oracle/graal/api/code/StackSlotValue;")                                                                              \
-    boolean_field(HotSpotMonitorValue, eliminated)                                                                                                             \
+  start_class(StackLockValue)                                                                                                                                 \
+    oop_field(StackLockValue, owner, "Lcom/oracle/graal/api/meta/JavaValue;")                                                                                  \
+    oop_field(StackLockValue, slot, "Lcom/oracle/graal/api/code/StackSlotValue;")                                                                              \
+    boolean_field(StackLockValue, eliminated)                                                                                                                  \
   end_class                                                                                                                                                    \
   start_class(SpeculationLog)                                                                                                                                  \
     oop_field(SpeculationLog, lastFailed, "Ljava/lang/Object;")                                                                                                \

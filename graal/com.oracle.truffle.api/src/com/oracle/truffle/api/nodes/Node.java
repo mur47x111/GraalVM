@@ -41,7 +41,6 @@ import com.oracle.truffle.api.utilities.*;
 public abstract class Node implements NodeInterface, Cloneable {
 
     @CompilationFinal private Node parent;
-
     @CompilationFinal private SourceSection sourceSection;
 
     /**
@@ -504,16 +503,16 @@ public abstract class Node implements NodeInterface, Cloneable {
      * its parent; the wrapper node must be provided by implementations of
      * {@link #createWrapperNode()}.
      * <p>
-     * Unlike {@link #probe()}, once {@link #probeLite(TruffleEventReceiver)} is called at a node,
+     * Unlike {@link #probe()}, once {@link #probeLite(TruffleEventListener)} is called at a node,
      * no additional probing can be added and no additional instrumentation can be attached.
      * <p>
      * This restricted form of instrumentation is intended for special cases where only one kind of
      * instrumentation is desired, and for which performance is a concern
      *
-     * @param eventReceiver
+     * @param eventListener
      * @throws ProbeException (unchecked) when a probe cannot be created, leaving the AST unchanged
      */
-    public final void probeLite(TruffleEventReceiver eventReceiver) {
+    public final void probeLite(TruffleEventListener eventListener) {
 
         if (this instanceof WrapperNode) {
             throw new ProbeException(ProbeFailure.Reason.WRAPPER_NODE, null, this, null);
@@ -545,7 +544,7 @@ public abstract class Node implements NodeInterface, Cloneable {
         }
 
         // Connect it to a Probe
-        ProbeNode.insertProbeLite(wrapper, eventReceiver);
+        ProbeNode.insertProbeLite(wrapper, eventListener);
 
         // Replace this node in the AST with the wrapper
         this.replace(wrapperNode);
@@ -573,11 +572,7 @@ public abstract class Node implements NodeInterface, Cloneable {
 
     public final void atomic(Runnable closure) {
         RootNode rootNode = getRootNode();
-        if (rootNode != null) {
-            synchronized (rootNode) {
-                closure.run();
-            }
-        } else {
+        synchronized (rootNode != null ? rootNode : GIL) {
             closure.run();
         }
     }
@@ -585,14 +580,10 @@ public abstract class Node implements NodeInterface, Cloneable {
     public final <T> T atomic(Callable<T> closure) {
         try {
             RootNode rootNode = getRootNode();
-            if (rootNode != null) {
-                synchronized (rootNode) {
-                    return closure.call();
-                }
-            } else {
+            synchronized (rootNode != null ? rootNode : GIL) {
                 return closure.call();
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -625,4 +616,6 @@ public abstract class Node implements NodeInterface, Cloneable {
         }
         return "";
     }
+
+    private static final Object GIL = new Object();
 }

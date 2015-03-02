@@ -24,22 +24,24 @@ package com.oracle.graal.lir;
 
 import java.util.*;
 
+import com.oracle.graal.api.code.*;
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.lir.StandardOp.ImplicitNullCheck;
 import com.oracle.graal.lir.StandardOp.NullCheck;
+import com.oracle.graal.lir.gen.*;
+import com.oracle.graal.lir.phases.*;
 
-public final class NullCheckOptimizer {
+public final class NullCheckOptimizer extends PostAllocationOptimizationPhase {
 
-    public static void optimize(LIR ir, int implicitNullCheckLimit) {
-        List<? extends AbstractBlock<?>> blocks = ir.codeEmittingOrder();
-        NullCheckOptimizer.foldNullChecks(ir, blocks, implicitNullCheckLimit);
+    @Override
+    protected <B extends AbstractBlockBase<B>> void run(TargetDescription target, LIRGenerationResult lirGenRes, List<B> codeEmittingOrder, List<B> linearScanOrder) {
+        LIR ir = lirGenRes.getLIR();
+        List<? extends AbstractBlockBase<?>> blocks = ir.codeEmittingOrder();
+        NullCheckOptimizer.foldNullChecks(ir, blocks, target.implicitNullCheckLimit);
     }
 
-    private NullCheckOptimizer() {
-    }
-
-    private static void foldNullChecks(LIR ir, List<? extends AbstractBlock<?>> blocks, int implicitNullCheckLimit) {
-        for (AbstractBlock<?> block : blocks) {
+    private static void foldNullChecks(LIR ir, List<? extends AbstractBlockBase<?>> blocks, int implicitNullCheckLimit) {
+        for (AbstractBlockBase<?> block : blocks) {
             List<LIRInstruction> list = ir.getLIRforBlock(block);
 
             if (!list.isEmpty()) {
@@ -63,4 +65,5 @@ public final class NullCheckOptimizer {
             }
         }
     }
+
 }

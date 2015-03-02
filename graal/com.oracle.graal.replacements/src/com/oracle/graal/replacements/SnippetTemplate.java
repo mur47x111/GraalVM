@@ -45,10 +45,12 @@ import com.oracle.graal.debug.*;
 import com.oracle.graal.debug.Debug.Scope;
 import com.oracle.graal.debug.internal.*;
 import com.oracle.graal.graph.Graph.Mark;
+import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.Node;
 import com.oracle.graal.loop.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
 import com.oracle.graal.nodes.StructuredGraph.GuardsStage;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.extended.*;
@@ -392,12 +394,13 @@ public class SnippetTemplate {
     }
 
     @NodeInfo
-    static class VarargsPlaceholderNode extends FloatingNode implements ArrayLengthProvider {
+    static final class VarargsPlaceholderNode extends FloatingNode implements ArrayLengthProvider {
 
+        public static final NodeClass<VarargsPlaceholderNode> TYPE = NodeClass.create(VarargsPlaceholderNode.class);
         protected final Varargs varargs;
 
         public VarargsPlaceholderNode(Varargs varargs, MetaAccessProvider metaAccess) {
-            super(StampFactory.exactNonNull(metaAccess.lookupJavaType(varargs.componentType).getArrayClass()));
+            super(TYPE, StampFactory.exactNonNull(metaAccess.lookupJavaType(varargs.componentType).getArrayClass()));
             this.varargs = varargs;
         }
 
@@ -562,10 +565,14 @@ public class SnippetTemplate {
         ResolvedJavaMethod method = snippetGraph.method();
         Signature signature = method.getSignature();
 
-        PhaseContext phaseContext = new PhaseContext(providers, new Assumptions(false));
+        PhaseContext phaseContext = new PhaseContext(providers);
 
         // Copy snippet graph, replacing constant parameters with given arguments
-        final StructuredGraph snippetCopy = new StructuredGraph(snippetGraph.name, snippetGraph.method());
+        final StructuredGraph snippetCopy = new StructuredGraph(snippetGraph.name, snippetGraph.method(), AllowAssumptions.NO);
+        if (!snippetGraph.isInlinedMethodRecordingEnabled()) {
+            snippetCopy.disableInlinedMethodRecording();
+        }
+
         Map<Node, Node> nodeReplacements = Node.newIdentityMap();
         nodeReplacements.put(snippetGraph.start(), snippetCopy.start());
 
@@ -717,7 +724,7 @@ public class SnippetTemplate {
 
         assert checkAllVarargPlaceholdersAreDeleted(parameterCount, placeholders);
 
-        new FloatingReadPhase(false, true, false).apply(snippetCopy);
+        new FloatingReadPhase(false, true).apply(snippetCopy);
 
         MemoryAnchorNode memoryAnchor = snippetCopy.add(new MemoryAnchorNode());
         snippetCopy.start().replaceAtUsages(InputType.Memory, memoryAnchor);
@@ -732,7 +739,7 @@ public class SnippetTemplate {
         } else {
             snippetCopy.addAfterFixed(snippetCopy.start(), memoryAnchor);
         }
-        List<ReturnNode> returnNodes = snippet.getNodes(ReturnNode.class).snapshot();
+        List<ReturnNode> returnNodes = snippet.getNodes(ReturnNode.TYPE).snapshot();
         if (returnNodes.isEmpty()) {
             this.returnNode = null;
         } else if (returnNodes.size() == 1) {
@@ -742,7 +749,7 @@ public class SnippetTemplate {
             List<MemoryMapNode> memMaps = returnNodes.stream().map(n -> n.getMemoryMap()).collect(Collectors.toList());
             ValueNode returnValue = InliningUtil.mergeReturns(merge, returnNodes, null);
             this.returnNode = snippet.add(new ReturnNode(returnValue));
-            MemoryMapImpl mmap = FloatingReadPhase.mergeMemoryMaps(merge, memMaps, false);
+            MemoryMapImpl mmap = FloatingReadPhase.mergeMemoryMaps(merge, memMaps);
             MemoryMapNode memoryMap = snippet.unique(new MemoryMapNode(mmap.getMap()));
             this.returnNode.setMemoryMap(memoryMap);
             for (MemoryMapNode mm : memMaps) {
@@ -1227,7 +1234,7 @@ public class SnippetTemplate {
             Node stampDup = duplicates.get(stampNode);
             ((ValueNode) stampDup).setStamp(replacee.stamp());
         }
-        for (ParameterNode paramNode : snippet.getNodes(ParameterNode.class)) {
+        for (ParameterNode paramNode : snippet.getNodes(ParameterNode.TYPE)) {
             for (Node usage : paramNode.usages()) {
                 Node usageDup = duplicates.get(usage);
                 propagateStamp(usageDup);
@@ -1258,7 +1265,7 @@ public class SnippetTemplate {
 
             // Inline the snippet nodes, replacing parameters with the given args in the process
             String name = snippet.name == null ? "{copy}" : snippet.name + "{copy}";
-            StructuredGraph snippetCopy = new StructuredGraph(name, snippet.method());
+            StructuredGraph snippetCopy = new StructuredGraph(name, snippet.method(), AllowAssumptions.NO);
             StartNode entryPointNode = snippet.start();
             FixedNode firstCFGNode = entryPointNode.next();
             StructuredGraph replaceeGraph = replacee.graph();

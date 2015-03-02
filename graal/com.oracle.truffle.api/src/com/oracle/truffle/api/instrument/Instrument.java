@@ -24,46 +24,48 @@
  */
 package com.oracle.truffle.api.instrument;
 
-import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.*;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.*;
 import com.oracle.truffle.api.instrument.impl.*;
 import com.oracle.truffle.api.nodes.*;
 
 // TODO (mlvdv) migrate some of this to external documentation.
+// TODO (mlvdv) move all this to a factory implemented in .impl (together with Probe),
+// then break out some of the nested classes into package privates.
 /**
  * A dynamically added/removed binding between a {@link Probe}, which provides notification of
- * {@linkplain TruffleEventReceiver execution events} taking place at a {@link Node} in a Guest
- * Language (GL) Truffle AST, and a {@linkplain TruffleEventReceiver receiver}, which consumes
+ * {@linkplain TruffleEventListener execution events} taking place at a {@link Node} in a Guest
+ * Language (GL) Truffle AST, and a {@linkplain TruffleEventListener listener}, which consumes
  * notifications on behalf of an external tool.
  * <p>
  * <h4>Summary: How to "instrument" an AST location:</h4>
  * <ol>
- * <li>Create an implementation of {@link TruffleEventReceiver} that responds to events on behalf of
+ * <li>Create an implementation of {@link TruffleEventListener} that responds to events on behalf of
  * a tool.</li>
- * <li>Create an Instrument via factory method {@link Instrument#create(TruffleEventReceiver)}.</li>
+ * <li>Create an Instrument via factory method {@link Instrument#create(TruffleEventListener)}.</li>
  * <li>"Attach" the Instrument to a Probe via {@link Probe#attach(Instrument)}, at which point event
- * notifications begin to arrive at the receiver.</li>
- * <li>When no longer needed, "detach" the Instrument via {@link Instrument#dispose()}, at which
- * point event notifications to the receiver cease, and the Instrument becomes unusable.</li>
+ * notifications begin to arrive at the listener.</li>
+ * <li>When no longer needed, "detach" the Instrument via {@link TruffleEventInstrument#dispose()},
+ * at which point event notifications to the listener cease, and the Instrument becomes unusable.</li>
  * </ol>
  * <p>
- * <h4>Options for creating receivers:</h4>
+ * <h4>Options for creating listeners:</h4>
  * <p>
  * <ol>
- * <li>Implement the interface {@link TruffleEventReceiver}. The event handling methods account for
+ * <li>Implement the interface {@link TruffleEventListener}. The event handling methods account for
  * both the entry into an AST node (about to call) and several possible kinds of exit from an AST
  * node (just returned).</li>
- * <li>Extend {@link DefaultEventReceiver}, which provides a no-op implementation of every
- * {@link TruffleEventReceiver} method; override the methods of interest.</li>
- * <li>Extend {@link SimpleEventReceiver}, where return values are ignored so only two methods (for
+ * <li>Extend {@link DefaultEventListener}, which provides a no-op implementation of every
+ * {@link TruffleEventListener} method; override the methods of interest.</li>
+ * <li>Extend {@link SimpleEventListener}, where return values are ignored so only two methods (for
  * "enter" and "return") will notify all events.</li>
  * </ol>
  * <p>
- * <h4>General guidelines for receiver implementation:</h4>
+ * <h4>General guidelines for listener implementation:</h4>
  * <p>
- * When an Instrument is attached to a Probe, the receiver effectively becomes part of the executing
- * GL program; performance can be affected by the receiver's implementation.
+ * When an Instrument is attached to a Probe, the listener effectively becomes part of the executing
+ * GL program; performance can be affected by the listener's implementation.
  * <ul>
  * <li>Do not store {@link Frame} or {@link Node} references in fields.</li>
  * <li>Prefer {@code final} fields and (where performance is important) short methods.</li>
@@ -71,7 +73,7 @@ import com.oracle.truffle.api.nodes.*;
  * possible through code that is expected to be inlined, since this incurs no runtime overhead. When
  * access to frame data is needed, substitute a more expensive {@linkplain Frame#materialize()
  * materialized} representation of the frame.</li>
- * <li>If a receiver calls back to its tool during event handling, and if performance is an issue,
+ * <li>If a listener calls back to its tool during event handling, and if performance is an issue,
  * then this should be through a final "callback" field in the instrument, and the called methods
  * should be minimal.</li>
  * <li>On the other hand, implementations should prevent Truffle from inlining beyond a reasonable
@@ -85,14 +87,14 @@ import com.oracle.truffle.api.nodes.*;
  * <p>
  * <h4>Allowing for AST cloning:</h4>
  * <p>
- * Truffle routinely <em>clones</em> ASTs, which has consequences for receiver implementation.
+ * Truffle routinely <em>clones</em> ASTs, which has consequences for listener implementation.
  * <ul>
  * <li>Even though a {@link Probe} is uniquely associated with a particular location in the
  * executing Guest Language program, execution events at that location will in general be
  * implemented by different {@link Node} instances, i.e. <em>clones</em> of the originally probed
  * node.</li>
  * <li>Because of <em>cloning</em> the {@link Node} supplied with notifications to a particular
- * receiver will vary, but because they all represent the same GL program location the events should
+ * listener will vary, but because they all represent the same GL program location the events should
  * be treated as equivalent for most purposes.</li>
  * </ul>
  * <p>
@@ -107,8 +109,8 @@ import com.oracle.truffle.api.nodes.*;
  * </ul>
  * <li>Some global information is available, for example the execution
  * {@linkplain TruffleRuntime#iterateFrames(FrameInstanceVisitor) stack}.</li>
- * <li>Additional information needed by a receiver could be stored when created, preferably
- * {@code final} of course. For example, a reference to the {@link Probe} to which the receiver's
+ * <li>Additional information needed by a listener could be stored when created, preferably
+ * {@code final} of course. For example, a reference to the {@link Probe} to which the listener's
  * Instrument has been attached would give access to its corresponding
  * {@linkplain Probe#getProbedSourceSection() source location} or to the collection of
  * {@linkplain SyntaxTag tags} currently applied to the Probe.</li>
@@ -123,54 +125,52 @@ import com.oracle.truffle.api.nodes.*;
  * error to attempt attaching a previously attached instrument.</li>
  * <li>Attaching an instrument modifies every existing clone of the AST to which it is being
  * attached, which can trigger deoptimization.</li>
- * <li>The method {@link Instrument#dispose()} makes an instrument inactive by removing it from the
- * Probe to which it was attached and rendering it permanently inert.</li>
+ * <li>The method {@link TruffleEventInstrument#dispose()} makes an instrument inactive by removing
+ * it from the Probe to which it was attached and rendering it permanently inert.</li>
  * <li>Disposal removes the implementation of an instrument from all ASTs to which it was attached,
  * which can trigger deoptimization.</li>
  * </ul>
  * <p>
- * <h4>Sharing receivers:</h4>
+ * <h4>Sharing listeners:</h4>
  * <p>
- * Although an Instrument may only be attached to a single Probe, a receiver can be shared among
+ * Although an Instrument may only be attached to a single Probe, a listener can be shared among
  * multiple Instruments. This can be useful for observing events that might happen at different
  * locations in a single AST, for example all assignments to a particular variable. In this case a
  * new Instrument would be created and attached at each assignment node, but all the Instruments
- * would be created with the same receiver.
+ * would be created with the same listener.
  * <p>
  * <strong>Disclaimer:</strong> experimental; under development.
  *
  * @see Probe
- * @see TruffleEventReceiver
+ * @see TruffleEventListener
  */
-public final class Instrument {
+public abstract class Instrument {
 
     /**
-     * Creates an instrument that will route execution events to a receiver.
+     * Creates an instrument that will route execution events to a listener.
      *
-     * @param receiver a receiver for event generated by the instrument
+     * @param listener a listener for event generated by the instrument
      * @param instrumentInfo optional description of the instrument's role
      * @return a new instrument, ready for attachment at a probe
      */
-    public static Instrument create(TruffleEventReceiver receiver, String instrumentInfo) {
-        return new Instrument(receiver, instrumentInfo);
+    public static Instrument create(TruffleEventListener listener, String instrumentInfo) {
+        return new TruffleEventInstrument(listener, instrumentInfo);
     }
 
     /**
-     * Creates an instrument that will route execution events to a receiver.
+     * Creates an instrument that will route execution events to a listener.
      */
-    public static Instrument create(TruffleEventReceiver receiver) {
-        return new Instrument(receiver, null);
+    public static Instrument create(TruffleEventListener listener) {
+        return new TruffleEventInstrument(listener, null);
     }
 
+    // TODO (mlvdv) experimental
     /**
-     * Tool-supplied receiver of events.
+     * For implementation testing.
      */
-    private final TruffleEventReceiver toolEventreceiver;
-
-    /**
-     * Optional documentation, mainly for debugging.
-     */
-    private final String instrumentInfo;
+    public static Instrument create(TruffleOptListener listener) {
+        return new TruffleOptInstrument(listener, null);
+    }
 
     /**
      * Has this instrument been disposed? stays true once set.
@@ -179,8 +179,12 @@ public final class Instrument {
 
     private Probe probe = null;
 
-    private Instrument(TruffleEventReceiver receiver, String instrumentInfo) {
-        this.toolEventreceiver = receiver;
+    /**
+     * Optional documentation, mainly for debugging.
+     */
+    private final String instrumentInfo;
+
+    private Instrument(String instrumentInfo) {
         this.instrumentInfo = instrumentInfo;
     }
 
@@ -216,35 +220,176 @@ public final class Instrument {
         return isDisposed;
     }
 
-    InstrumentNode addToChain(InstrumentNode nextNode) {
-        return new InstrumentNode(nextNode);
-    }
+    abstract InstrumentNode addToChain(InstrumentNode nextNode);
 
     /**
      * Removes this instrument from an instrument chain.
      */
-    InstrumentNode removeFromChain(InstrumentNode instrumentNode) {
-        boolean found = false;
-        if (instrumentNode != null) {
-            if (instrumentNode.getInstrument() == this) {
-                // Found the match at the head of the chain
-                return instrumentNode.nextInstrument;
+    abstract InstrumentNode removeFromChain(InstrumentNode instrumentNode);
+
+    private static final class TruffleEventInstrument extends Instrument {
+
+        /**
+         * Tool-supplied listener for events.
+         */
+        private final TruffleEventListener toolEventListener;
+
+        private TruffleEventInstrument(TruffleEventListener listener, String instrumentInfo) {
+            super(instrumentInfo);
+            this.toolEventListener = listener;
+        }
+
+        @Override
+        InstrumentNode addToChain(InstrumentNode nextNode) {
+            return new TruffleEventInstrumentNode(nextNode);
+        }
+
+        @Override
+        InstrumentNode removeFromChain(InstrumentNode instrumentNode) {
+            boolean found = false;
+            if (instrumentNode != null) {
+                if (instrumentNode.getInstrument() == this) {
+                    // Found the match at the head of the chain
+                    return instrumentNode.nextInstrument;
+                }
+                // Match not at the head of the chain; remove it.
+                found = instrumentNode.removeFromChain(TruffleEventInstrument.this);
             }
-            // Match not at the head of the chain; remove it.
-            found = instrumentNode.removeFromChain(Instrument.this);
+            if (!found) {
+                throw new IllegalStateException("Couldn't find instrument node to remove: " + this);
+            }
+            return instrumentNode;
         }
-        if (!found) {
-            throw new IllegalStateException("Couldn't find instrument node to remove: " + this);
+
+        @NodeInfo(cost = NodeCost.NONE)
+        private final class TruffleEventInstrumentNode extends InstrumentNode {
+
+            private TruffleEventInstrumentNode(InstrumentNode nextNode) {
+                super(nextNode);
+            }
+
+            public void enter(Node node, VirtualFrame vFrame) {
+                TruffleEventInstrument.this.toolEventListener.enter(node, vFrame);
+                if (nextInstrument != null) {
+                    nextInstrument.enter(node, vFrame);
+                }
+            }
+
+            public void returnVoid(Node node, VirtualFrame vFrame) {
+                TruffleEventInstrument.this.toolEventListener.returnVoid(node, vFrame);
+                if (nextInstrument != null) {
+                    nextInstrument.returnVoid(node, vFrame);
+                }
+            }
+
+            public void returnValue(Node node, VirtualFrame vFrame, Object result) {
+                TruffleEventInstrument.this.toolEventListener.returnValue(node, vFrame, result);
+                if (nextInstrument != null) {
+                    nextInstrument.returnValue(node, vFrame, result);
+                }
+            }
+
+            public void returnExceptional(Node node, VirtualFrame vFrame, Exception exception) {
+                TruffleEventInstrument.this.toolEventListener.returnExceptional(node, vFrame, exception);
+                if (nextInstrument != null) {
+                    nextInstrument.returnExceptional(node, vFrame, exception);
+                }
+            }
+
+            public String instrumentationInfo() {
+                final String info = getInstrumentInfo();
+                return info != null ? info : toolEventListener.getClass().getSimpleName();
+            }
         }
-        return instrumentNode;
+
+    }
+
+    public interface TruffleOptListener {
+        void notifyIsCompiled(boolean isCompiled);
+    }
+
+    private static final class TruffleOptInstrument extends Instrument {
+
+        private final TruffleOptListener toolOptListener;
+
+        private TruffleOptInstrument(TruffleOptListener listener, String instrumentInfo) {
+            super(instrumentInfo);
+            this.toolOptListener = listener;
+        }
+
+        @Override
+        InstrumentNode addToChain(InstrumentNode nextNode) {
+            return new TruffleOptInstrumentNode(nextNode);
+        }
+
+        @Override
+        InstrumentNode removeFromChain(InstrumentNode instrumentNode) {
+            boolean found = false;
+            if (instrumentNode != null) {
+                if (instrumentNode.getInstrument() == this) {
+                    // Found the match at the head of the chain
+                    return instrumentNode.nextInstrument;
+                }
+                // Match not at the head of the chain; remove it.
+                found = instrumentNode.removeFromChain(TruffleOptInstrument.this);
+            }
+            if (!found) {
+                throw new IllegalStateException("Couldn't find instrument node to remove: " + this);
+            }
+            return instrumentNode;
+        }
+
+        @NodeInfo(cost = NodeCost.NONE)
+        private final class TruffleOptInstrumentNode extends InstrumentNode {
+
+            private boolean isCompiled;
+
+            private TruffleOptInstrumentNode(InstrumentNode nextNode) {
+                super(nextNode);
+                this.isCompiled = CompilerDirectives.inCompiledCode();
+            }
+
+            public void enter(Node node, VirtualFrame vFrame) {
+                if (this.isCompiled != CompilerDirectives.inCompiledCode()) {
+                    this.isCompiled = CompilerDirectives.inCompiledCode();
+                    TruffleOptInstrument.this.toolOptListener.notifyIsCompiled(this.isCompiled);
+                }
+                if (nextInstrument != null) {
+                    nextInstrument.enter(node, vFrame);
+                }
+            }
+
+            public void returnVoid(Node node, VirtualFrame vFrame) {
+                if (nextInstrument != null) {
+                    nextInstrument.returnVoid(node, vFrame);
+                }
+            }
+
+            public void returnValue(Node node, VirtualFrame vFrame, Object result) {
+                if (nextInstrument != null) {
+                    nextInstrument.returnValue(node, vFrame, result);
+                }
+            }
+
+            public void returnExceptional(Node node, VirtualFrame vFrame, Exception exception) {
+                if (nextInstrument != null) {
+                    nextInstrument.returnExceptional(node, vFrame, exception);
+                }
+            }
+
+            public String instrumentationInfo() {
+                final String info = getInstrumentInfo();
+                return info != null ? info : toolOptListener.getClass().getSimpleName();
+            }
+        }
+
     }
 
     @NodeInfo(cost = NodeCost.NONE)
-    final class InstrumentNode extends Node implements TruffleEventReceiver, InstrumentationNode {
+    abstract class InstrumentNode extends Node implements TruffleEventListener, InstrumentationNode {
+        @Child protected InstrumentNode nextInstrument;
 
-        @Child private InstrumentNode nextInstrument;
-
-        private InstrumentNode(InstrumentNode nextNode) {
+        protected InstrumentNode(InstrumentNode nextNode) {
             this.nextInstrument = nextNode;
         }
 
@@ -286,40 +431,10 @@ public final class Instrument {
             return nextInstrument.removeFromChain(instrument);
         }
 
-        public void enter(Node node, VirtualFrame frame) {
-            Instrument.this.toolEventreceiver.enter(node, frame);
-            if (nextInstrument != null) {
-                nextInstrument.enter(node, frame);
-            }
+        protected String getInstrumentInfo() {
+            return Instrument.this.instrumentInfo;
         }
 
-        public void returnVoid(Node node, VirtualFrame frame) {
-            Instrument.this.toolEventreceiver.returnVoid(node, frame);
-            if (nextInstrument != null) {
-                nextInstrument.returnVoid(node, frame);
-            }
-        }
-
-        public void returnValue(Node node, VirtualFrame frame, Object result) {
-            Instrument.this.toolEventreceiver.returnValue(node, frame, result);
-            if (nextInstrument != null) {
-                nextInstrument.returnValue(node, frame, result);
-            }
-        }
-
-        public void returnExceptional(Node node, VirtualFrame frame, Exception exception) {
-            Instrument.this.toolEventreceiver.returnExceptional(node, frame, exception);
-            if (nextInstrument != null) {
-                nextInstrument.returnExceptional(node, frame, exception);
-            }
-        }
-
-        public String instrumentationInfo() {
-            if (Instrument.this.instrumentInfo != null) {
-                return Instrument.this.instrumentInfo;
-            }
-            return toolEventreceiver.getClass().getSimpleName();
-        }
     }
 
 }

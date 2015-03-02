@@ -22,11 +22,14 @@
  */
 package com.oracle.graal.loop;
 
+import static com.oracle.graal.graph.Node.*;
+
 import java.util.*;
 
 import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.cfg.*;
+import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.iterators.*;
@@ -44,7 +47,7 @@ public class LoopEx {
     private LoopFragmentWhole whole;
     private CountedLoopInfo counted; // TODO (gd) detect
     private LoopsData data;
-    private InductionVariables ivs;
+    private Map<Node, InductionVariable> ivs;
 
     LoopEx(Loop<Block> loop, LoopsData data) {
         this.loop = loop;
@@ -172,13 +175,13 @@ public class LoopEx {
                 negated = true;
             }
             LogicNode ifTest = ifNode.condition();
-            if (!(ifTest instanceof IntegerLessThanNode)) {
+            if (!(ifTest instanceof IntegerLessThanNode) && !(ifTest instanceof IntegerEqualsNode)) {
                 if (ifTest instanceof IntegerBelowNode) {
                     Debug.log("Ignored potential Counted loop at %s with |<|", loopBegin);
                 }
                 return false;
             }
-            IntegerLessThanNode lessThan = (IntegerLessThanNode) ifTest;
+            CompareNode lessThan = (CompareNode) ifTest;
             Condition condition = null;
             InductionVariable iv = null;
             ValueNode limit = null;
@@ -195,6 +198,9 @@ public class LoopEx {
                     limit = lessThan.getY();
                 }
             }
+            if (iv != null && iv.isConstantStride() && iv.constantStride() != 1 && !(ifTest instanceof IntegerLessThanNode)) {
+                return false;
+            }
             if (condition == null) {
                 return false;
             }
@@ -203,6 +209,24 @@ public class LoopEx {
             }
             boolean oneOff = false;
             switch (condition) {
+                case EQ:
+                    return false;
+                case NE: {
+                    IntegerStamp initStamp = (IntegerStamp) iv.initNode().stamp();
+                    IntegerStamp limitStamp = (IntegerStamp) limit.stamp();
+                    if (iv.direction() == Direction.Up) {
+                        if (initStamp.upperBound() > limitStamp.lowerBound()) {
+                            return false;
+                        }
+                    } else {
+                        assert iv.direction() == Direction.Down;
+                        if (initStamp.lowerBound() < limitStamp.upperBound()) {
+                            return false;
+                        }
+                    }
+                    oneOff = true;
+                    break;
+                }
                 case LE:
                     oneOff = true; // fall through
                 case LT:
@@ -230,33 +254,120 @@ public class LoopEx {
         return data;
     }
 
-    public NodeBitMap nodesInLoopFrom(AbstractBeginNode point, AbstractBeginNode until) {
+    public NodeBitMap nodesInLoopBranch(AbstractBeginNode branch) {
         Collection<AbstractBeginNode> blocks = new LinkedList<>();
         Collection<LoopExitNode> exits = new LinkedList<>();
         Queue<Block> work = new LinkedList<>();
         ControlFlowGraph cfg = loopsData().controlFlowGraph();
-        work.add(cfg.blockFor(point));
-        Block untilBlock = until != null ? cfg.blockFor(until) : null;
+        work.add(cfg.blockFor(branch));
         while (!work.isEmpty()) {
             Block b = work.remove();
-            if (b == untilBlock) {
-                continue;
-            }
             if (loop().getExits().contains(b)) {
                 exits.add((LoopExitNode) b.getBeginNode());
-            } else if (loop().getBlocks().contains(b)) {
+            } else {
+                assert loop().getBlocks().contains(b);
                 blocks.add(b.getBeginNode());
                 work.addAll(b.getDominated());
             }
         }
-        return LoopFragment.computeNodes(point.graph(), blocks, exits);
+        return LoopFragment.computeNodes(branch.graph(), blocks, exits);
     }
 
-    public InductionVariables getInductionVariables() {
+    public Map<Node, InductionVariable> getInductionVariables() {
         if (ivs == null) {
-            ivs = new InductionVariables(this);
+            ivs = findInductionVariables(this);
         }
         return ivs;
+    }
+
+    /**
+     * Collect all the basic induction variables for the loop and the find any induction variables
+     * which are derived from the basic ones.
+     *
+     * @param loop
+     * @return a map from node to induction variable
+     */
+    private static Map<Node, InductionVariable> findInductionVariables(LoopEx loop) {
+        Map<Node, InductionVariable> ivs = newIdentityMap();
+
+        Queue<InductionVariable> scanQueue = new LinkedList<>();
+        LoopBeginNode loopBegin = loop.loopBegin();
+        AbstractEndNode forwardEnd = loopBegin.forwardEnd();
+        for (PhiNode phi : loopBegin.phis().filter(ValuePhiNode.class)) {
+            ValueNode backValue = phi.singleBackValue();
+            if (backValue == PhiNode.MULTIPLE_VALUES) {
+                continue;
+            }
+            ValueNode stride = addSub(loop, backValue, phi);
+            if (stride != null) {
+                BasicInductionVariable biv = new BasicInductionVariable(loop, (ValuePhiNode) phi, phi.valueAt(forwardEnd), stride, (BinaryArithmeticNode<?>) backValue);
+                ivs.put(phi, biv);
+                scanQueue.add(biv);
+            }
+        }
+
+        while (!scanQueue.isEmpty()) {
+            InductionVariable baseIv = scanQueue.remove();
+            ValueNode baseIvNode = baseIv.valueNode();
+            for (ValueNode op : baseIvNode.usages().filter(ValueNode.class)) {
+                if (loop.isOutsideLoop(op)) {
+                    continue;
+                }
+                if (op.usages().count() == 1 && op.usages().first() == baseIvNode) {
+                    /*
+                     * This is just the base induction variable increment with no other uses so
+                     * don't bother reporting it.
+                     */
+                    continue;
+                }
+                InductionVariable iv = null;
+                ValueNode offset = addSub(loop, op, baseIvNode);
+                ValueNode scale;
+                if (offset != null) {
+                    iv = new DerivedOffsetInductionVariable(loop, baseIv, offset, (BinaryArithmeticNode<?>) op);
+                } else if (op instanceof NegateNode) {
+                    iv = new DerivedScaledInductionVariable(loop, baseIv, (NegateNode) op);
+                } else if ((scale = mul(loop, op, baseIvNode)) != null) {
+                    iv = new DerivedScaledInductionVariable(loop, baseIv, scale, op);
+                }
+
+                if (iv != null) {
+                    ivs.put(op, iv);
+                    scanQueue.offer(iv);
+                }
+            }
+        }
+        return Collections.unmodifiableMap(ivs);
+    }
+
+    private static ValueNode addSub(LoopEx loop, ValueNode op, ValueNode base) {
+        if (op.stamp() instanceof IntegerStamp && (op instanceof AddNode || op instanceof SubNode)) {
+            BinaryArithmeticNode<?> aritOp = (BinaryArithmeticNode<?>) op;
+            if (aritOp.getX() == base && loop.isOutsideLoop(aritOp.getY())) {
+                return aritOp.getY();
+            } else if (aritOp.getY() == base && loop.isOutsideLoop(aritOp.getX())) {
+                return aritOp.getX();
+            }
+        }
+        return null;
+    }
+
+    private static ValueNode mul(LoopEx loop, ValueNode op, ValueNode base) {
+        if (op instanceof MulNode) {
+            MulNode mul = (MulNode) op;
+            if (mul.getX() == base && loop.isOutsideLoop(mul.getY())) {
+                return mul.getY();
+            } else if (mul.getY() == base && loop.isOutsideLoop(mul.getX())) {
+                return mul.getX();
+            }
+        }
+        if (op instanceof LeftShiftNode) {
+            LeftShiftNode shift = (LeftShiftNode) op;
+            if (shift.getX() == base && shift.getY().isConstant()) {
+                return ConstantNode.forInt(1 << shift.getY().asJavaConstant().asInt(), base.graph());
+            }
+        }
+        return null;
     }
 
     /**
@@ -264,7 +375,9 @@ public class LoopEx {
      */
     public void deleteUnusedNodes() {
         if (ivs != null) {
-            ivs.deleteUnusedNodes();
+            for (InductionVariable iv : ivs.values()) {
+                iv.deleteUnusedNodes();
+            }
         }
     }
 }
