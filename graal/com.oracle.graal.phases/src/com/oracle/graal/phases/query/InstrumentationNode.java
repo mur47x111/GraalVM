@@ -10,13 +10,15 @@ import com.oracle.graal.nodes.spi.*;
 @NodeInfo
 public class InstrumentationNode extends FixedWithNextNode implements Virtualizable {
 
+    public static final NodeClass<InstrumentationNode> TYPE = NodeClass.create(InstrumentationNode.class);
+
     @OptionalInput(value = InputType.Association) protected ValueNode target;
     @OptionalInput protected NodeInputList<ValueNode> weakDependencies;
 
     protected InsertedCodeGraph icg;
 
     public InstrumentationNode(FixedNode target, StructuredGraph icg) {
-        super(StampFactory.forVoid());
+        super(TYPE, StampFactory.forVoid());
 
         this.target = target;
         this.icg = new InsertedCodeGraph(icg);

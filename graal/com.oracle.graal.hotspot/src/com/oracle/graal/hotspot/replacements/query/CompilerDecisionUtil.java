@@ -30,12 +30,12 @@ public class CompilerDecisionUtil {
         return builder.toString();
     }
 
-    public static ConstantNode createStringConstant(String str) {
-        return new ConstantNode(HotSpotObjectConstantImpl.forBoxedValue(Kind.Object, str), STAMP_STRING);
+    public static ConstantNode createStringConstant(StructuredGraph graph, String str) {
+        return graph.unique(new ConstantNode(HotSpotObjectConstantImpl.forBoxedValue(Kind.Object, str), STAMP_STRING));
     }
 
-    public static ValuePhiNode createValuePhi(AbstractMergeNode merge) {
-        ValuePhiNode path = new ValuePhiNode(StampFactory.intValue(), merge);
+    public static ValuePhiNode createValuePhi(StructuredGraph graph, AbstractMergeNode merge) {
+        ValuePhiNode path = graph.addWithoutUnique(new ValuePhiNode(StampFactory.intValue(), merge));
 
         for (int i = 0; i < merge.cfgPredecessors().count(); i++) {
             path.addInput(ConstantNode.forInt(i, merge.graph()));

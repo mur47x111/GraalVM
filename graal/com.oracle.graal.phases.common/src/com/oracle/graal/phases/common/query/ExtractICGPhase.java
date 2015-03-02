@@ -9,6 +9,7 @@ import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.StructuredGraph.*;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.util.*;
@@ -35,8 +36,10 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
     @NodeInfo
     static final class TempInputNode extends ValueNode {
 
+        public static final NodeClass<TempInputNode> TYPE = NodeClass.create(TempInputNode.class);
+
         public TempInputNode(Stamp stamp) {
-            super(stamp);
+            super(TYPE, stamp);
         }
     }
 
@@ -136,7 +139,7 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                 FixedWithNextNode originICGEnd = null;
 
                 // duplicate graph
-                StructuredGraph icg = new StructuredGraph();
+                StructuredGraph icg = new StructuredGraph(AllowAssumptions.YES);
                 Map<Node, Node> mapping = graph.copyTo(icg);
                 Map<TempInputNode, Node> tempInputs = new HashMap<>();
 
@@ -187,6 +190,12 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                     if (icgnode instanceof AbstractLocalNode) {
                         icgnode.replaceAtUsages(null);
                     }
+
+                    for (Node input : icgnode.inputs()) {
+                        if (input instanceof FrameState && input.isDeleted()) {
+                            icgnode.replaceFirstInput(input, null);
+                        }
+                    }
                 }
 
                 int index = 0;
@@ -216,8 +225,8 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                     }
                 }
 
-                new CanonicalizerPhase(!GraalOptions.ImmutableCode.getValue()).apply(icg, context, false);
                 new DeadCodeEliminationPhase().apply(icg, false);
+                new CanonicalizerPhase(!GraalOptions.ImmutableCode.getValue()).apply(icg, context, false);
                 Debug.dump(icg, "After extracted ICG starting from " + node);
 
                 // remove icg from original graph
@@ -231,4 +240,5 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
             }
         }
     }
+
 }

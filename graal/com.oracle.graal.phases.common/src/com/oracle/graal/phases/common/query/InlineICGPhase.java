@@ -99,6 +99,7 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
                     }
                 }
 
+                instrumentation.clearInputs();
                 String message = instrumentation.toString();
                 GraphUtil.killCFG(instrumentation);
 
