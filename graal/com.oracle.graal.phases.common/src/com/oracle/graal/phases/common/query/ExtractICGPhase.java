@@ -43,7 +43,7 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
     private static void redirectInput(StructuredGraph icg, Node node, Map<Node, Node> mapping, Map<TempInputNode, Node> tempInputs) {
         // redirect data dependency to FixedNode or AbstractLocalNode to temporary nodes
         for (Node input : node.inputs()) {
-            if (input instanceof FixedNode || input instanceof AbstractLocalNode) {
+            if (input instanceof FixedNode || input instanceof AbstractLocalNode || ((node instanceof FrameState) && (input instanceof ValueNode))) {
                 TempInputNode tempInput = icg.addWithoutUnique(new TempInputNode(((ValueNode) input).stamp()));
                 tempInputs.put(tempInput, input);
                 mapping.get(node).replaceFirstInput(mapping.get(input), tempInput);
