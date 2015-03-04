@@ -46,14 +46,12 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
     private static void redirectInput(StructuredGraph icg, Node node, Map<Node, Node> mapping, Map<TempInputNode, Node> tempInputs) {
         // redirect data dependency to FixedNode or AbstractLocalNode to temporary nodes
         for (Node input : node.inputs()) {
-            if (input instanceof FixedNode || input instanceof AbstractLocalNode || ((node instanceof FrameState) && (input instanceof ValueNode))) {
+            if (input instanceof FixedNode || input instanceof AbstractLocalNode) {
                 TempInputNode tempInput = icg.addWithoutUnique(new TempInputNode(((ValueNode) input).stamp()));
                 tempInputs.put(tempInput, input);
                 mapping.get(node).replaceFirstInput(mapping.get(input), tempInput);
-            } else if (input instanceof FloatingNode || input instanceof CallTargetNode || input instanceof FrameState) {
-                if (!(node instanceof FrameState)) {
-                    redirectInput(icg, input, mapping, tempInputs);
-                }
+            } else if (input instanceof FloatingNode || input instanceof CallTargetNode) {
+                redirectInput(icg, input, mapping, tempInputs);
             }
         }
     }
@@ -190,6 +188,9 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                     if (icgnode instanceof AbstractLocalNode) {
                         icgnode.replaceAtUsages(null);
                     }
+                    if (icgnode instanceof FrameState) {
+                        icgnode.clearInputs();
+                    }
 
                     for (Node input : icgnode.inputs()) {
                         if (input instanceof FrameState && input.isDeleted()) {
@@ -240,5 +241,4 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
             }
         }
     }
-
 }

@@ -227,8 +227,11 @@ public class MultiTypeGuardInlineInfo extends AbstractInlineInfo {
         invoke.setNext(null);
         returnMerge.setNext(continuation);
         if (returnValuePhi != null) {
+            InliningUtil.removeAttachedInstrumentation(invoke);
             invoke.asNode().replaceAtUsages(returnValuePhi);
         }
+
+        invoke.asNode().replaceAtUsages(null);
         invoke.asNode().safeDelete();
 
         ArrayList<GuardedValueNode> replacementNodes = new ArrayList<>();

@@ -48,6 +48,7 @@ import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.type.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.common.inlining.info.*;
+import com.oracle.graal.phases.query.*;
 
 public class InliningUtil {
 
@@ -225,6 +226,20 @@ public class InliningUtil {
         return null;
     }
 
+    public static void removeAttachedInstrumentation(Invoke invoke) {
+        FixedNode invokeNode = invoke.asNode();
+
+        for (Node usage : invokeNode.usages()) {
+            if (usage instanceof InstrumentationNode) {
+                InstrumentationNode instrumentation = (InstrumentationNode) usage;
+
+                if (instrumentation.target() == invokeNode) {
+                    usage.replaceFirstInput(invokeNode, null);
+                }
+            }
+        }
+    }
+
     /**
      * Performs an actual inlining, thereby replacing the given invoke with the given inlineGraph.
      *
@@ -340,6 +355,7 @@ public class InliningUtil {
             assert checkContainsOnlyInvalidOrAfterFrameState(duplicates);
         }
         if (!returnNodes.isEmpty()) {
+            removeAttachedInstrumentation(invoke);
             FixedNode n = invoke.next();
             invoke.setNext(null);
             if (returnNodes.size() == 1) {

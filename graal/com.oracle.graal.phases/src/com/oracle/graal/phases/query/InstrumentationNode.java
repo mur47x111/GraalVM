@@ -37,10 +37,6 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
         return icg;
     }
 
-    public void setTarget(ValueNode target) {
-        this.target = target;
-    }
-
     public NodeInputList<ValueNode> getWeakDependencies() {
         return weakDependencies;
     }
