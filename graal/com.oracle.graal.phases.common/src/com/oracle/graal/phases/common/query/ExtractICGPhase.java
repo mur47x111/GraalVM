@@ -226,6 +226,15 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                     }
                 }
 
+                for (InvokeNode invokeNode : icg.getNodes().filter(InvokeNode.class)) {
+                    ResolvedJavaMethod targetMethod = invokeNode.callTarget().targetMethod();
+                    StructuredGraph intrinsicGraph = InliningUtil.getIntrinsicGraph(cr, targetMethod);
+
+                    if (intrinsicGraph != null) {
+                        InliningUtil.inline(invokeNode, intrinsicGraph, true, null);
+                    }
+                }
+
                 new DeadCodeEliminationPhase().apply(icg, false);
                 new CanonicalizerPhase(!GraalOptions.ImmutableCode.getValue()).apply(icg, context, false);
                 Debug.dump(icg, "After extracted ICG starting from " + node);
