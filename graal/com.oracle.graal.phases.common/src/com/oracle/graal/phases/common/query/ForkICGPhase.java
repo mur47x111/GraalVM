@@ -11,12 +11,25 @@ import com.oracle.graal.phases.tiers.*;
 
 public class ForkICGPhase extends BasePhase<HighTierContext> {
 
+    private static AllocatedObjectNode getAllocatedObject(StructuredGraph graph, CommitAllocationNode alloc, VirtualObjectNode virtual) {
+        for (Node target : graph.getNodes()) {
+            if (target instanceof AllocatedObjectNode) {
+                AllocatedObjectNode object = (AllocatedObjectNode) target;
+
+                if (object.getCommit() == alloc && object.getVirtualObject() == virtual) {
+                    return object;
+                }
+            }
+        }
+        return null;
+    }
+
     @Override
     protected void run(StructuredGraph graph, HighTierContext context) {
         for (Node node : graph.getNodes()) {
             if (node instanceof CommitAllocationNode) {
-                CommitAllocationNode alloc = (CommitAllocationNode) node;
-                List<VirtualObjectNode> virtualObjects = alloc.getVirtualObjects();
+                CommitAllocationNode commit = (CommitAllocationNode) node;
+                List<VirtualObjectNode> virtualObjects = commit.getVirtualObjects();
 
                 for (int index = virtualObjects.size() - 1; index >= 0; index--) {
                     VirtualObjectNode virtual = virtualObjects.get(index);
@@ -42,25 +55,18 @@ public class ForkICGPhase extends BasePhase<HighTierContext> {
                                     }
                                 }
 
-                                if (flood.isMarked(alloc)) {
+                                if (flood.isMarked(commit)) {
                                     InstrumentationNode clone = (InstrumentationNode) instrumentation.copyWithInputs();
-                                    graph.addAfterFixed(alloc, clone);
+                                    graph.addAfterFixed(commit, clone);
 
-                                    for (Node target : graph.getNodes()) {
-                                        if (target instanceof AllocatedObjectNode) {
-                                            AllocatedObjectNode allocated = (AllocatedObjectNode) target;
+                                    AllocatedObjectNode object = getAllocatedObject(graph, commit, virtual);
 
-                                            if (allocated.getCommit() == alloc && allocated.getVirtualObject() == virtual) {
-                                                for (Node input : clone.inputs()) {
-                                                    if (input == virtual) {
-                                                        clone.replaceFirstInput(virtual, allocated);
-                                                    }
-                                                }
-
-                                                break;
-                                            }
-                                        }
+                                    if (object == null) {
+                                        object = graph.addWithoutUnique(new AllocatedObjectNode(virtual));
+                                        object.setCommit(commit);
                                     }
+
+                                    clone.replaceFirstInput(virtual, object);
                                 }
                             }
                         }
