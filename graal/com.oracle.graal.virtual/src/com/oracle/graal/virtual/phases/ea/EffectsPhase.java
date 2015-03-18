@@ -27,6 +27,7 @@ import static com.oracle.graal.phases.common.DeadCodeEliminationPhase.Optionalit
 
 import java.util.*;
 
+import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.debug.*;
 import com.oracle.graal.debug.Debug.Scope;
 import com.oracle.graal.graph.Graph.NodeEventScope;
@@ -36,6 +37,7 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.cfg.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
+import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.common.util.*;
 import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.schedule.*;
@@ -99,6 +101,10 @@ public abstract class EffectsPhase<PhaseContextT extends PhaseContext> extends B
 
                 if (Debug.isDumpEnabled()) {
                     Debug.dump(graph, "after " + getName() + " iteration");
+                }
+
+                if ("PartialEscape".equals(getName()) && GraalOptions.UseCompilerDecision.getValue()) {
+                    new ForkICGPhase().apply(graph, (HighTierContext) context);
                 }
 
                 new DeadCodeEliminationPhase(Required).apply(graph);

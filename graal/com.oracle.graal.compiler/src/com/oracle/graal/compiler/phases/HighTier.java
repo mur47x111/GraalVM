@@ -81,10 +81,6 @@ public class HighTier extends PhaseSuite<HighTierContext> {
             appendPhase(new PartialEscapePhase(true, canonicalizer));
         }
 
-        if (UseCompilerDecision.getValue()) {
-            appendPhase(new ForkICGPhase());
-        }
-
         if (OptConvertDeoptsToGuards.getValue()) {
             appendPhase(new ConvertDeoptimizeToGuardPhase());
         }

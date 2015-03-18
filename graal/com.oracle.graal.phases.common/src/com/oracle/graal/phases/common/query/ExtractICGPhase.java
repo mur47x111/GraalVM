@@ -57,12 +57,13 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
     }
 
     private static int getDirection(FixedWithNextNode begin) {
-        Node input = begin.inputs().first();
-        if (input != null && input instanceof ConstantNode) {
-            Constant c = ((ConstantNode) input).getValue();
+        for (Node input : begin.inputs()) {
+            if (input != null && input instanceof ConstantNode) {
+                Constant c = ((ConstantNode) input).getValue();
 
-            if (c instanceof PrimitiveConstant) {
-                return ((PrimitiveConstant) c).asInt();
+                if (c instanceof PrimitiveConstant) {
+                    return ((PrimitiveConstant) c).asInt();
+                }
             }
         }
 
@@ -165,7 +166,8 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                 }
 
                 FixedNode target = getTarget(originICGBegin, originICGEnd);
-                InstrumentationNode instrumentation = graph.addWithoutUnique(new InstrumentationNode(target, icg));
+                InstrumentationNode instrumentation = new InstrumentationNode(target, icg);
+                graph.addWithoutUnique(instrumentation);
 
                 // extract icg
                 FixedWithNextNode icgBegin = (FixedWithNextNode) mapping.get(originICGBegin);
