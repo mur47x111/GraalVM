@@ -27,6 +27,7 @@ import java.util.function.*;
 
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.phases.common.inlining.*;
 
 import edu.umd.cs.findbugs.annotations.*;
 
@@ -69,7 +70,7 @@ public class ComputeInliningRelevance {
             rootScope = new Scope(graph.start(), null);
         } else {
             if (nodeRelevances == null) {
-                nodeRelevances = Node.newIdentityMap(EXPECTED_MIN_INVOKE_COUNT + graph.getNodeCount() / EXPECTED_INVOKE_RATIO);
+                nodeRelevances = Node.newIdentityMap(EXPECTED_MIN_INVOKE_COUNT + InliningUtil.getNodeCount(graph) / EXPECTED_INVOKE_RATIO);
             }
             NodeWorkList workList = graph.createNodeWorkList();
             Map<LoopBeginNode, Scope> loops = Node.newIdentityMap(EXPECTED_LOOP_COUNT);

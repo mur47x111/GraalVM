@@ -601,4 +601,18 @@ public class InliningUtil {
             throw new GraalGraphInternalError(e).addContext(invoke.asNode()).addContext("macroSubstitution", macroNodeClass);
         }
     }
+
+    public static int getNodeCount(StructuredGraph graph) {
+        NodeBitMap instrumented = graph.createNodeBitMap();
+
+        for (Node node : graph.getNodes()) {
+            if (node instanceof InstrumentationNode) {
+                instrumented.mark(node);
+            }
+        }
+
+        // TODO (yz) mark parameters only used by instrumentation node
+        return graph.getNodeCount() - instrumented.count();
+    }
+
 }

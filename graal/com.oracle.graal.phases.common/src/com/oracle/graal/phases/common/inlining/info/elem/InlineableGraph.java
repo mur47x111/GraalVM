@@ -232,7 +232,7 @@ public class InlineableGraph implements Inlineable {
 
     @Override
     public int getNodeCount() {
-        return graph.getNodeCount();
+        return InliningUtil.getNodeCount(graph);
     }
 
     @Override
