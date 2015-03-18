@@ -66,7 +66,9 @@ public class ForkICGPhase extends BasePhase<HighTierContext> {
                                         object.setCommit(commit);
                                     }
 
-                                    clone.replaceFirstInput(virtual, object);
+                                    while (clone.inputs().contains(virtual)) {
+                                        clone.replaceFirstInput(virtual, object);
+                                    }
                                 }
                             }
                         }

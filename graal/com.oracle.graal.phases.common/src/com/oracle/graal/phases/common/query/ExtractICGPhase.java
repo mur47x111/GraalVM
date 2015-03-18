@@ -46,7 +46,7 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
     private static void redirectInput(StructuredGraph icg, Node node, Map<Node, Node> mapping, Map<TempInputNode, Node> tempInputs) {
         // redirect data dependency to FixedNode or AbstractLocalNode to temporary nodes
         for (Node input : node.inputs()) {
-            if (input instanceof FixedNode || input instanceof AbstractLocalNode) {
+            if (input instanceof FixedNode || input instanceof AbstractLocalNode || input instanceof ValuePhiNode || input instanceof ValueProxy) {
                 TempInputNode tempInput = icg.addWithoutUnique(new TempInputNode(((ValueNode) input).stamp()));
                 tempInputs.put(tempInput, input);
                 mapping.get(node).replaceFirstInput(mapping.get(input), tempInput);
@@ -163,6 +163,15 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                             flood.add(successor);
                         }
                     }
+                }
+
+                if (originICGBegin.next().equals(originICGEnd)) {
+                    // empty instrumentation
+                    FixedNode instrumentationNext = originICGEnd.next();
+                    originICGEnd.setNext(null);
+                    originICGBegin.replaceAtPredecessor(instrumentationNext);
+                    GraphUtil.killCFG(originICGBegin);
+                    continue;
                 }
 
                 FixedNode target = getTarget(originICGBegin, originICGEnd);

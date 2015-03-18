@@ -50,8 +50,12 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
             if (target != null) {
                 State state = tool.getObjectState(target);
 
-                if (state != null && state.getState() == EscapeState.Virtual) {
-                    tool.replaceFirstInput(target, state.getVirtualObject());
+                if (state != null) {
+                    if (state.getState() == EscapeState.Virtual) {
+                        tool.replaceFirstInput(target, state.getVirtualObject());
+                    } else {
+                        tool.replaceFirstInput(target, state.getMaterializedValue());
+                    }
                 }
             }
         }
@@ -60,9 +64,13 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
             ValueNode input = weakDependencies.get(i);
             State state = tool.getObjectState(input);
 
-            if (state != null && state.getState() == EscapeState.Virtual) {
-                // TODO (yz) check if in order
-                tool.replaceFirstInput(input, state.getVirtualObject());
+            if (state != null) {
+                if (state.getState() == EscapeState.Virtual) {
+                    // TODO (yz) check if in order
+                    tool.replaceFirstInput(input, state.getVirtualObject());
+                } else {
+                    tool.replaceFirstInput(input, state.getMaterializedValue());
+                }
             }
         }
 
