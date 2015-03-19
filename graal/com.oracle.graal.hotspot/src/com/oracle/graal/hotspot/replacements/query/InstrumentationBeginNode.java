@@ -19,4 +19,8 @@ public final class InstrumentationBeginNode extends ICGMacroNode implements Comp
         return this;
     }
 
+    public ConstantNode defaultValue() {
+        return ConstantNode.forInt(0, graph());
+    }
+
 }

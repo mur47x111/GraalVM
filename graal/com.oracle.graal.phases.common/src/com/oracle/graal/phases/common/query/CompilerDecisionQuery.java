@@ -5,6 +5,8 @@ import com.oracle.graal.phases.query.*;
 
 public interface CompilerDecisionQuery {
 
+    ConstantNode defaultValue();
+
     default ConstantNode resolve() {
         return null;
     }

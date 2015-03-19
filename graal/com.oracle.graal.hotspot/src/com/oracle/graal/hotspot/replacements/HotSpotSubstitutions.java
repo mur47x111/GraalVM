@@ -32,7 +32,6 @@ import com.oracle.graal.api.code.*;
 import com.oracle.graal.api.meta.*;
 import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.api.runtime.*;
-import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.debug.external.*;
 import com.oracle.graal.hotspot.bridge.*;
 import com.oracle.graal.nodes.spi.*;
@@ -66,9 +65,6 @@ public class HotSpotSubstitutions implements ReplacementsProvider {
         replacements.registerSubstitutions(CompilerToVMImpl.class, CompilerToVMImplSubstitutions.class);
         replacements.registerSubstitutions(new NamedType("com.sun.crypto.provider.AESCrypt"), AESCryptSubstitutions.class);
         replacements.registerSubstitutions(new NamedType("com.sun.crypto.provider.CipherBlockChaining"), CipherBlockChainingSubstitutions.class);
-
-        if (GraalOptions.UseCompilerDecision.getValue()) {
-            replacements.registerSubstitutions(CompilerDecision.class, CompilerDecisionSubstitutions.class);
-        }
+        replacements.registerSubstitutions(CompilerDecision.class, CompilerDecisionSubstitutions.class);
     }
 }

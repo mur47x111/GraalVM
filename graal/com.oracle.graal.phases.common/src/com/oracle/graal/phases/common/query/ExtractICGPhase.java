@@ -120,6 +120,17 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
             }
         }
 
+        if (!GraalOptions.UseCompilerDecision.getValue()) {
+            for (Node node : graph.getNodes()) {
+                if (node instanceof CompilerDecisionQuery) {
+                    ConstantNode c = ((CompilerDecisionQuery) node).defaultValue();
+                    graph.replaceFixedWithFloating((FixedWithNextNode) node, c);
+                }
+            }
+
+            return;
+        }
+
         // second iteration: resolve if possible
         for (Node node : graph.getNodes()) {
             if (node instanceof CompilerDecisionQuery) {

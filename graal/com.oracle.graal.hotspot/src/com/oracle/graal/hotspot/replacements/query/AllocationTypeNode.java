@@ -24,4 +24,8 @@ public final class AllocationTypeNode extends ICGMacroNode implements CompilerDe
         }
     }
 
+    public ConstantNode defaultValue() {
+        return ConstantNode.forInt(-1, graph());
+    }
+
 }

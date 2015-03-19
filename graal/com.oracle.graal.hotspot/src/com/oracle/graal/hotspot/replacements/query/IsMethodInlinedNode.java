@@ -27,4 +27,8 @@ public final class IsMethodInlinedNode extends ICGMacroNode implements CompilerD
         graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(!root.equals(original), graph()));
     }
 
+    public ConstantNode defaultValue() {
+        return ConstantNode.forBoolean(false, graph());
+    }
+
 }

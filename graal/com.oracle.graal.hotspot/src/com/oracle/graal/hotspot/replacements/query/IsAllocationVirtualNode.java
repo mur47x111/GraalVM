@@ -21,4 +21,8 @@ public final class IsAllocationVirtualNode extends ICGMacroNode implements Compi
         graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(isAllocationVirtual, graph()));
     }
 
+    public ConstantNode defaultValue() {
+        return ConstantNode.forBoolean(false, graph());
+    }
+
 }

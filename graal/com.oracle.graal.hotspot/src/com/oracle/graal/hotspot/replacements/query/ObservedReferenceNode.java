@@ -1,5 +1,6 @@
 package com.oracle.graal.hotspot.replacements.query;
 
+import com.oracle.graal.api.meta.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
@@ -20,6 +21,10 @@ public final class ObservedReferenceNode extends ICGMacroNode implements Compile
         GraphUtil.unlinkFixedNode(this);
         replaceAtUsages(inputs().first());
         safeDelete();
+    }
+
+    public ConstantNode defaultValue() {
+        return graph().unique(new ConstantNode(JavaConstant.NULL_POINTER, stamp()));
     }
 
 }

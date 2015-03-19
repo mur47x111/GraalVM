@@ -21,4 +21,8 @@ public final class IsCallsiteInlinedNode extends ICGMacroNode implements Compile
         graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(isCallsiteInlined, graph()));
     }
 
+    public ConstantNode defaultValue() {
+        return ConstantNode.forBoolean(false, graph());
+    }
+
 }

@@ -18,4 +18,8 @@ public final class IsMethodCompiledNode extends ICGMacroNode implements Compiler
         return ConstantNode.forBoolean(true, graph());
     }
 
+    public ConstantNode defaultValue() {
+        return ConstantNode.forBoolean(false, graph());
+    }
+
 }

@@ -24,4 +24,8 @@ public final class LockTypeNode extends ICGMacroNode implements CompilerDecision
         }
     }
 
+    public ConstantNode defaultValue() {
+        return ConstantNode.forInt(-1, graph());
+    }
+
 }
