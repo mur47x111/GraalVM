@@ -8,29 +8,22 @@ import com.oracle.graal.nodes.spi.*;
 public class InsertedCodeGraph {
 
     private final StructuredGraph graph;
-    private boolean passGuardLowering = false;
-    private boolean passFrameStateAssignent = false;
+
+    private ArrayList<String> passed;
     private ArrayList<LoweringTool.LoweringStage> loweringStages;
 
     public InsertedCodeGraph(StructuredGraph graph) {
         this.graph = graph;
+        this.passed = new ArrayList<>(16);
         this.loweringStages = new ArrayList<>(4);
     }
 
-    public boolean passGuardLowering() {
-        return passGuardLowering;
+    public boolean isPassed(String stage) {
+        return passed.contains(stage);
     }
 
-    public boolean passFrameStateAssignent() {
-        return passFrameStateAssignent;
-    }
-
-    public void setPassGuardLowering() {
-        passGuardLowering = true;
-    }
-
-    public void setPassFrameStateAssignent() {
-        passFrameStateAssignent = true;
+    public void pass(String stage) {
+        passed.add(stage);
     }
 
     public StructuredGraph graph() {

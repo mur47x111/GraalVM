@@ -8,6 +8,7 @@ import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.Graph.DuplicationReplacement;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.nodes.virtual.*;
 import com.oracle.graal.phases.*;
@@ -75,6 +76,8 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
                 if (!returnNodes.isEmpty()) {
                     if (returnNodes.size() == 1) {
                         ReturnNode returnNode = (ReturnNode) duplicates.get(returnNodes.get(0));
+                        MemoryNode lastAccess = returnNode.getMemoryMap().getLastLocationAccess(instrumentation.getLocationIdentity());
+                        instrumentation.replaceAtUsages(lastAccess.asNode());
                         returnNode.replaceAndDelete(n);
                     } else {
                         ArrayList<ReturnNode> returnDuplicates = new ArrayList<>(returnNodes.size());
@@ -82,13 +85,16 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
                             returnDuplicates.add((ReturnNode) duplicates.get(returnNode));
                         }
                         AbstractMergeNode merge = graph.add(new MergeNode());
+                        MemoryPhiNode phi = graph.addWithoutUnique(new MemoryPhiNode(merge, instrumentation.getLocationIdentity()));
 
                         for (ReturnNode returnNode : returnDuplicates) {
                             EndNode endNode = graph.add(new EndNode());
                             merge.addForwardEnd(endNode);
+                            phi.addInput(returnNode.getMemoryMap().getLastLocationAccess(instrumentation.getLocationIdentity()).asNode());
                             returnNode.replaceAndDelete(endNode);
                         }
 
+                        instrumentation.replaceAtUsages(phi);
                         merge.setNext(n);
                     }
                 }

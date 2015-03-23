@@ -5,6 +5,7 @@ import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.common.query.ExtractICGPhase.ICGBoundaryBegin;
+import com.oracle.graal.replacements.nodes.*;
 
 @NodeInfo
 public final class InstrumentationBeginNode extends ICGMacroNode implements CompilerDecisionQuery, ICGBoundaryBegin {
@@ -21,6 +22,10 @@ public final class InstrumentationBeginNode extends ICGMacroNode implements Comp
 
     public ConstantNode defaultValue() {
         return ConstantNode.forInt(0, graph());
+    }
+
+    public FixedWithNextNode createMemoryAnchor() {
+        return new MemoryAnchorNode();
     }
 
 }

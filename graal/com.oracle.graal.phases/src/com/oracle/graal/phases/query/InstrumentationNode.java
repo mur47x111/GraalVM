@@ -1,14 +1,16 @@
 package com.oracle.graal.phases.query;
 
+import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo
-public class InstrumentationNode extends FixedWithNextNode implements Virtualizable {
+public class InstrumentationNode extends FixedWithNextNode implements Virtualizable, MemoryCheckpoint.Single {
 
     public static final NodeClass<InstrumentationNode> TYPE = NodeClass.create(InstrumentationNode.class);
 
@@ -76,6 +78,10 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
 
         // TODO (yz) the following statement is for cheating PEA
         // a more elegant way should be creating another edge type
+    }
+
+    public LocationIdentity getLocationIdentity() {
+        return LocationIdentity.ANY_LOCATION;
     }
 
 }

@@ -25,6 +25,8 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
 
         FixedWithNextNode asFixedWithNextNode();
 
+        FixedWithNextNode createMemoryAnchor();
+
     }
 
     public interface ICGBoundaryEnd {
@@ -195,6 +197,7 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
 
                 StartNode start = icg.start();
                 FixedNode icgPred = start.next();
+                FixedWithNextNode anchor = ((ICGBoundaryBegin) icgBegin).createMemoryAnchor();
 
                 FixedNode icgWithoutHeader = icgBegin.next();
                 icgWithoutHeader.replaceAtPredecessor(null);
@@ -259,7 +262,11 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
 
                 new DeadCodeEliminationPhase().apply(icg, false);
                 new CanonicalizerPhase(!GraalOptions.ImmutableCode.getValue()).apply(icg, context, false);
-                Debug.dump(icg, "After extracted ICG starting from " + node);
+
+                icg.addWithoutUnique(anchor);
+                FixedNode next = start.next();
+                start.setNext(anchor);
+                anchor.setNext(next);
 
                 // remove icg from original graph
                 graph.addBeforeFixed(originICGBegin, instrumentation);
@@ -269,6 +276,7 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                 instrumentation.setNext(instrumentationNext);
 
                 GraphUtil.killCFG(originICGBegin);
+                Debug.dump(icg, "After extracted ICG " + instrumentation);
             }
         }
     }

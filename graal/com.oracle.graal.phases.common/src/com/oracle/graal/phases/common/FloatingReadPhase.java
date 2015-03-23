@@ -31,6 +31,7 @@ import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.graph.Graph.NodeEventScope;
 import com.oracle.graal.graph.*;
+import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.extended.*;
@@ -40,6 +41,7 @@ import com.oracle.graal.phases.common.util.*;
 import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.graph.ReentrantNodeIterator.LoopInfo;
 import com.oracle.graal.phases.graph.ReentrantNodeIterator.NodeIteratorClosure;
+import com.oracle.graal.phases.query.*;
 
 public class FloatingReadPhase extends Phase {
 
@@ -274,6 +276,19 @@ public class FloatingReadPhase extends Phase {
 
             if (createMemoryMapNodes && node instanceof ReturnNode) {
                 ((ReturnNode) node).setMemoryMap(node.graph().unique(new MemoryMapNode(state.lastMemorySnapshot)));
+            }
+
+            if (node instanceof InstrumentationNode) {
+                InsertedCodeGraph icg = ((InstrumentationNode) node).getICG();
+
+                if (!icg.isPassed("FloatingReadPhase")) {
+                    new FloatingReadPhase(false, true).apply(icg.graph(), false);
+
+                    StartNode start = icg.graph().start();
+                    FixedNode anchor = start.next();
+                    start.replaceAtUsages(InputType.Memory, anchor);
+                    icg.pass("FloatingReadPhase");
+                }
             }
             return state;
         }
