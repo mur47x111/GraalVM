@@ -52,8 +52,8 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
                         if (replacement instanceof ParameterNode) {
                             ValueNode value = instrumentation.getWeakDependencies().get(((ParameterNode) replacement).index());
 
-                            if (value instanceof VirtualObjectNode) {
-                                return graph.unique(new ConstantNode(JavaConstant.NULL_POINTER, value.stamp()));
+                            if (value == null || value.isDeleted() || value instanceof VirtualObjectNode || value.stamp().getStackKind() != Kind.Object) {
+                                return graph.unique(new ConstantNode(JavaConstant.NULL_POINTER, ((ParameterNode) replacement).stamp()));
                             } else {
                                 return value;
                             }
