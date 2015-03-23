@@ -8,9 +8,9 @@ import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.Graph.DuplicationReplacement;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.util.*;
-import com.oracle.graal.nodes.virtual.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.query.*;
@@ -53,7 +53,11 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
                         if (replacement instanceof ParameterNode) {
                             ValueNode value = instrumentation.getWeakDependencies().get(((ParameterNode) replacement).index());
 
-                            if (value == null || value.isDeleted() || value instanceof VirtualObjectNode || value.stamp().getStackKind() != Kind.Object) {
+                            // TODO (yz) add support for primitives
+                            if (value == null || // null pointer
+                                            value.isDeleted() || // deleted pointer
+                                            !(value instanceof FixedNode || value instanceof FloatingNode) || // schedulable
+                                            value.stamp().getStackKind() != Kind.Object) {
                                 return graph.unique(new ConstantNode(JavaConstant.NULL_POINTER, ((ParameterNode) replacement).stamp()));
                             } else {
                                 return value;
