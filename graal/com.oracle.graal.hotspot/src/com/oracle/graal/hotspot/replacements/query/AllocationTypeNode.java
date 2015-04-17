@@ -20,12 +20,12 @@ public final class AllocationTypeNode extends ICGMacroNode implements CompilerDe
             AbstractMergeNode merge = (AbstractMergeNode) instrumentation.target();
             graph().replaceFixedWithFloating(this, CompilerDecisionUtil.createValuePhi(graph(), merge));
         } else {
-            graph().replaceFixedWithFloating(this, ConstantNode.forInt(-1, graph()));
+            graph().replaceFixedWithFloating(this, ConstantNode.forInt(0, graph()));
         }
     }
 
     public ConstantNode defaultValue() {
-        return ConstantNode.forInt(-1, graph());
+        return ConstantNode.forInt(0, graph());
     }
 
 }

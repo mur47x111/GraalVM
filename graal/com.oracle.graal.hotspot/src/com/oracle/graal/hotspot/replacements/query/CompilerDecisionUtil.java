@@ -38,7 +38,7 @@ public class CompilerDecisionUtil {
         ValuePhiNode path = graph.addWithoutUnique(new ValuePhiNode(StampFactory.intValue(), merge));
 
         for (int i = 0; i < merge.cfgPredecessors().count(); i++) {
-            path.addInput(ConstantNode.forInt(i, merge.graph()));
+            path.addInput(ConstantNode.forInt(i + 1, merge.graph()));
         }
 
         return path;

@@ -230,7 +230,7 @@ public final class GraalOptions {
     public static final OptionValue<Boolean> UseProfilingInformation = new OptionValue<>(true);
 
     @Option(help = "", type = OptionType.Debug)
-    public static final OptionValue<Boolean> RemoveNeverExecutedCode = new OptionValue<>(true);
+    public static final OptionValue<Boolean> RemoveNeverExecutedCode = new OptionValue<>(false);
 
     @Option(help = "", type = OptionType.Debug)
     public static final OptionValue<Boolean> UseExceptionProbability = new OptionValue<>(true);
