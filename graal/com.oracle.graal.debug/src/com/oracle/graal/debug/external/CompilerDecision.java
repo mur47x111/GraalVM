@@ -54,6 +54,13 @@ public final class CompilerDecision {
     }
 
     /**
+     * @return true if an allocation is located on the head. I.e. !isAllocationVirtual()
+     */
+    public static boolean isHeapAlloc() {
+        return true;
+    }
+
+    /**
      * @return true if the enclosing method has been compiled by the dynamic compiler.
      */
     public static boolean isMethodCompiled() {
