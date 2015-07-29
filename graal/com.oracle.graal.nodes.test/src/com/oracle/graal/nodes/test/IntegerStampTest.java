@@ -22,11 +22,11 @@
  */
 package com.oracle.graal.nodes.test;
 
+import jdk.internal.jvmci.meta.*;
 import static org.junit.Assert.*;
 
 import org.junit.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.IntegerConvertOp;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.ShiftOp;
 import com.oracle.graal.compiler.common.type.*;
@@ -306,8 +306,8 @@ public class IntegerStampTest {
 
     @Test
     public void testIllegalJoin() {
-        assertFalse(new IntegerStamp(32, 0, 0xff00, 0, 0xff00).join(new IntegerStamp(32, 1, 0xff, 0x00, 0xff)).isLegal());
-        assertFalse(new IntegerStamp(32, 0x100, 0xff00, 0, 0xff00).join(new IntegerStamp(32, 0, 0xff, 0x00, 0xff)).isLegal());
+        assertFalse(new IntegerStamp(32, 0, 0xff00, 0, 0xff00).join(new IntegerStamp(32, 1, 0xff, 0x00, 0xff)).hasValues());
+        assertFalse(new IntegerStamp(32, 0x100, 0xff00, 0, 0xff00).join(new IntegerStamp(32, 0, 0xff, 0x00, 0xff)).hasValues());
     }
 
     @Test

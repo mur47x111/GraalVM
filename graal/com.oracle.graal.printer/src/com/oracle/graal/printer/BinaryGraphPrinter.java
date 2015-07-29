@@ -30,15 +30,14 @@ import java.nio.*;
 import java.nio.channels.*;
 import java.util.*;
 import java.util.Map.Entry;
-import java.util.function.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.cfg.*;
-import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.schedule.*;
 
 public class BinaryGraphPrinter implements GraphPrinter {
@@ -140,9 +139,10 @@ public class BinaryGraphPrinter implements GraphPrinter {
             }
         }
         ControlFlowGraph cfg = schedule == null ? null : schedule.getCFG();
-        BlockMap<List<ValueNode>> blockToNodes = schedule == null ? null : schedule.getBlockToNodesMap();
+        BlockMap<List<Node>> blockToNodes = schedule == null ? null : schedule.getBlockToNodesMap();
+        NodeMap<Block> nodeToBlocks = schedule == null ? null : schedule.getNodeToBlockMap();
         List<Block> blocks = cfg == null ? null : cfg.getBlocks();
-        writeNodes(graph);
+        writeNodes(graph, nodeToBlocks, cfg);
         writeBlocks(blocks, blockToNodes);
     }
 
@@ -364,6 +364,9 @@ public class BinaryGraphPrinter implements GraphPrinter {
         } else if (obj instanceof Graph) {
             writeByte(PROPERTY_SUBGRAPH);
             writeGraph((Graph) obj);
+        } else if (obj instanceof CachedGraph) {
+            writeByte(PROPERTY_SUBGRAPH);
+            writeGraph(((CachedGraph<?>) obj).getReadonlyCopy());
         } else if (obj != null && obj.getClass().isArray()) {
             Class<?> componentType = obj.getClass().getComponentType();
             if (componentType.isPrimitive()) {
@@ -399,14 +402,7 @@ public class BinaryGraphPrinter implements GraphPrinter {
         return node.getId();
     }
 
-    private void writeNodes(Graph graph) throws IOException {
-        ToDoubleFunction<FixedNode> probabilities = null;
-        if (PrintGraphProbabilities.getValue()) {
-            try {
-                probabilities = new FixedNodeProbabilityCache();
-            } catch (Throwable t) {
-            }
-        }
+    private void writeNodes(Graph graph, NodeMap<Block> nodeToBlocks, ControlFlowGraph cfg) throws IOException {
         Map<Object, Object> props = new HashMap<>();
 
         writeInt(graph.getNodeCount());
@@ -414,13 +410,46 @@ public class BinaryGraphPrinter implements GraphPrinter {
         for (Node node : graph.getNodes()) {
             NodeClass<?> nodeClass = node.getNodeClass();
             node.getDebugProperties(props);
-            if (probabilities != null && node instanceof FixedNode) {
+            if (cfg != null && PrintGraphProbabilities.getValue() && node instanceof FixedNode) {
                 try {
-                    props.put("probability", probabilities.applyAsDouble((FixedNode) node));
+                    props.put("probability", cfg.blockFor(node).probability());
                 } catch (Throwable t) {
                     props.put("probability", t);
                 }
             }
+            if (nodeToBlocks != null) {
+                if (nodeToBlocks.isNew(node)) {
+                    props.put("node-to-block", "NEW (not in schedule)");
+                } else {
+                    Block block = nodeToBlocks.get(node);
+                    if (block != null) {
+                        props.put("node-to-block", block.getId());
+                    }
+                }
+            }
+
+            if (node instanceof ControlSinkNode) {
+                props.put("category", "controlSink");
+            } else if (node instanceof ControlSplitNode) {
+                props.put("category", "controlSplit");
+            } else if (node instanceof AbstractMergeNode) {
+                props.put("category", "merge");
+            } else if (node instanceof AbstractBeginNode) {
+                props.put("category", "begin");
+            } else if (node instanceof AbstractEndNode) {
+                props.put("category", "end");
+            } else if (node instanceof FixedNode) {
+                props.put("category", "fixed");
+            } else if (node instanceof VirtualState) {
+                props.put("category", "state");
+            } else if (node instanceof PhiNode) {
+                props.put("category", "phi");
+            } else if (node instanceof ProxyNode) {
+                props.put("category", "proxy");
+            } else {
+                props.put("category", "floating");
+            }
+
             writeInt(getNodeId(node));
             writePoolObject(nodeClass);
             writeByte(node.predecessor() == null ? 0 : 1);
@@ -468,11 +497,18 @@ public class BinaryGraphPrinter implements GraphPrinter {
         }
     }
 
-    private void writeBlocks(List<Block> blocks, BlockMap<List<ValueNode>> blockToNodes) throws IOException {
-        if (blocks != null) {
+    private void writeBlocks(List<Block> blocks, BlockMap<List<Node>> blockToNodes) throws IOException {
+        if (blocks != null && blockToNodes != null) {
+            for (Block block : blocks) {
+                List<Node> nodes = blockToNodes.get(block);
+                if (nodes == null) {
+                    writeInt(0);
+                    return;
+                }
+            }
             writeInt(blocks.size());
             for (Block block : blocks) {
-                List<ValueNode> nodes = blockToNodes.get(block);
+                List<Node> nodes = blockToNodes.get(block);
                 writeInt(block.getId());
                 writeInt(nodes.size());
                 for (Node node : nodes) {

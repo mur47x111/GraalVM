@@ -22,11 +22,12 @@
  */
 package com.oracle.graal.jtt.jdk;
 
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
 import sun.misc.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.jtt.*;
 
 public class Unsafe_compareAndSwap extends JTTTest {

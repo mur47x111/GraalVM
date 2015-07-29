@@ -22,25 +22,20 @@
  */
 package com.oracle.graal.lir.sparc;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.asm.sparc.SPARCAssembler.*;
 import com.oracle.graal.asm.sparc.*;
-import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.asm.*;
 
 public final class SPARCMathIntrinsicOp extends SPARCLIRInstruction implements SPARCTailDelayedLIRInstruction {
     public static final LIRInstructionClass<SPARCMathIntrinsicOp> TYPE = LIRInstructionClass.create(SPARCMathIntrinsicOp.class);
+    public static final SizeEstimate SIZE = SizeEstimate.create(1);
 
     public enum IntrinsicOpcode {
         SQRT,
-        SIN,
-        COS,
-        TAN,
-        LOG,
-        LOG10,
         ABS
     }
 
@@ -49,7 +44,7 @@ public final class SPARCMathIntrinsicOp extends SPARCLIRInstruction implements S
     @Use protected Value input;
 
     public SPARCMathIntrinsicOp(IntrinsicOpcode opcode, Value result, Value input) {
-        super(TYPE);
+        super(TYPE, SIZE);
         this.opcode = opcode;
         this.result = result;
         this.input = input;
@@ -63,34 +58,29 @@ public final class SPARCMathIntrinsicOp extends SPARCLIRInstruction implements S
             case SQRT:
                 switch (inputKind) {
                     case Float:
-                        new Fsqrts(asFloatReg(input), asFloatReg(result)).emit(masm);
+                        masm.fsqrts(asFloatReg(input), asFloatReg(result));
                         break;
                     case Double:
-                        new Fsqrtd(asDoubleReg(input), asDoubleReg(result)).emit(masm);
+                        masm.fsqrtd(asDoubleReg(input), asDoubleReg(result));
                         break;
                     default:
-                        GraalInternalError.shouldNotReachHere();
+                        JVMCIError.shouldNotReachHere();
                 }
                 break;
             case ABS:
                 switch (inputKind) {
                     case Float:
-                        new Fabss(asFloatReg(input), asFloatReg(result)).emit(masm);
+                        masm.fabss(asFloatReg(input), asFloatReg(result));
                         break;
                     case Double:
-                        new Fabsd(asDoubleReg(input), asDoubleReg(result)).emit(masm);
+                        masm.fabsd(asDoubleReg(input), asDoubleReg(result));
                         break;
                     default:
-                        GraalInternalError.shouldNotReachHere();
+                        JVMCIError.shouldNotReachHere();
                 }
                 break;
-            case LOG:
-            case LOG10:
-            case SIN:
-            case COS:
-            case TAN:
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 

@@ -25,10 +25,10 @@ package com.oracle.graal.compiler.phases;
 import static com.oracle.graal.compiler.common.GraalOptions.*;
 import static com.oracle.graal.compiler.phases.HighTier.Options.*;
 import static com.oracle.graal.phases.common.DeadCodeEliminationPhase.Optionality.*;
+import jdk.internal.jvmci.options.*;
 
 import com.oracle.graal.loop.phases.*;
 import com.oracle.graal.nodes.spi.*;
-import com.oracle.graal.options.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.inlining.*;
@@ -47,46 +47,31 @@ public class HighTier extends PhaseSuite<HighTierContext> {
     }
 
     public HighTier() {
-        CanonicalizerPhase canonicalizer = new CanonicalizerPhase(!ImmutableCode.getValue());
+        CanonicalizerPhase canonicalizer = new CanonicalizerPhase();
+        if (ImmutableCode.getValue()) {
+            canonicalizer.disableReadCanonicalization();
+        }
 
         if (OptCanonicalizer.getValue()) {
             appendPhase(canonicalizer);
         }
 
         if (Inline.getValue()) {
-            if (IterativeInlining.getValue()) {
-                appendPhase(new IterativeInliningPhase(canonicalizer));
-            } else {
-                appendPhase(new InliningPhase(canonicalizer));
-                appendPhase(new DeadCodeEliminationPhase(Optional));
+            appendPhase(new InliningPhase(canonicalizer));
+            appendPhase(new DeadCodeEliminationPhase(Optional));
 
-                if (ConditionalElimination.getValue() && OptCanonicalizer.getValue()) {
-                    appendPhase(canonicalizer);
-                    appendPhase(new IterativeConditionalEliminationPhase(canonicalizer));
-                }
+            if (ConditionalElimination.getValue() && OptCanonicalizer.getValue()) {
+                appendPhase(canonicalizer);
+                appendPhase(new IterativeConditionalEliminationPhase(canonicalizer, false));
             }
-        }
-
-        appendPhase(new CleanTypeProfileProxyPhase(canonicalizer));
-
-        if (FullUnroll.getValue()) {
-            appendPhase(new LoopFullUnrollPhase(canonicalizer));
-        }
-
-        if (OptTailDuplication.getValue()) {
-            appendPhase(new TailDuplicationPhase(canonicalizer));
-        }
-
-        if (PartialEscapeAnalysis.getValue()) {
-            appendPhase(new PartialEscapePhase(true, canonicalizer));
-        }
-
-        if (UseCompilerDecision.getValue()) {
-            appendPhase(new ForkICGPhase());
         }
 
         if (OptConvertDeoptsToGuards.getValue()) {
             appendPhase(new ConvertDeoptimizeToGuardPhase());
+        }
+
+        if (FullUnroll.getValue()) {
+            appendPhase(new LoopFullUnrollPhase(canonicalizer));
         }
 
         if (OptLoopTransform.getValue()) {
@@ -97,10 +82,18 @@ public class HighTier extends PhaseSuite<HighTierContext> {
                 appendPhase(new LoopUnswitchingPhase());
             }
         }
-        appendPhase(new RemoveValueProxyPhase());
 
         if (OptCanonicalizer.getValue()) {
             appendPhase(canonicalizer);
+        }
+
+        if (PartialEscapeAnalysis.getValue()) {
+            appendPhase(new PartialEscapePhase(true, canonicalizer));
+        }
+        appendPhase(new RemoveValueProxyPhase());
+
+        if (UseCompilerDecision.getValue()) {
+            appendPhase(new ForkICGPhase());
         }
 
         appendPhase(new LoweringPhase(canonicalizer, LoweringTool.StandardLoweringStage.HIGH_TIER));

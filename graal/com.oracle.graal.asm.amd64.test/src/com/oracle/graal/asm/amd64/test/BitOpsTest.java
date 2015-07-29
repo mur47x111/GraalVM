@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,21 +23,24 @@
 
 package com.oracle.graal.asm.amd64.test;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
-import static com.oracle.graal.compiler.common.UnsafeAccess.*;
-import static org.junit.Assume.*;
+import com.oracle.graal.asm.amd64.*;
+import com.oracle.graal.asm.test.*;
 
-import org.junit.*;
+import static com.oracle.graal.asm.amd64.AMD64Assembler.AMD64RMOp.*;
+import static com.oracle.graal.asm.amd64.AMD64Assembler.OperandSize.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import static jdk.internal.jvmci.common.UnsafeAccess.*;
+import static org.junit.Assume.*;
 
 import java.lang.reflect.*;
 import java.util.*;
 
-import com.oracle.graal.amd64.*;
-import com.oracle.graal.amd64.AMD64.*;
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.asm.amd64.*;
-import com.oracle.graal.asm.test.*;
+import jdk.internal.jvmci.amd64.*;
+import jdk.internal.jvmci.amd64.AMD64.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
+import org.junit.*;
 
 public class BitOpsTest extends AssemblerTest {
     private static boolean lzcntSupported;
@@ -61,7 +64,7 @@ public class BitOpsTest extends AssemblerTest {
                     AMD64Assembler asm = new AMD64Assembler(target, registerConfig);
                     Register ret = registerConfig.getReturnRegister(Kind.Int);
                     Register arg = asRegister(cc.getArgument(0));
-                    asm.lzcntl(ret, arg);
+                    LZCNT.emit(asm, DWORD, ret, arg);
                     asm.ret(0);
                     return asm.close(true);
                 }
@@ -82,7 +85,7 @@ public class BitOpsTest extends AssemblerTest {
                     try {
                         Field f = IntField.class.getDeclaredField("x");
                         AMD64Address arg = new AMD64Address(asRegister(cc.getArgument(0)), (int) unsafe.objectFieldOffset(f));
-                        asm.lzcntl(ret, arg);
+                        LZCNT.emit(asm, DWORD, ret, arg);
                         asm.ret(0);
                         return asm.close(true);
                     } catch (Exception e) {
@@ -104,7 +107,7 @@ public class BitOpsTest extends AssemblerTest {
                     AMD64Assembler asm = new AMD64Assembler(target, registerConfig);
                     Register ret = registerConfig.getReturnRegister(Kind.Int);
                     Register arg = asRegister(cc.getArgument(0));
-                    asm.lzcntq(ret, arg);
+                    LZCNT.emit(asm, QWORD, ret, arg);
                     asm.ret(0);
                     return asm.close(true);
                 }
@@ -125,7 +128,7 @@ public class BitOpsTest extends AssemblerTest {
                     try {
                         Field f = LongField.class.getDeclaredField("x");
                         AMD64Address arg = new AMD64Address(asRegister(cc.getArgument(0)), (int) unsafe.objectFieldOffset(f));
-                        asm.lzcntq(ret, arg);
+                        LZCNT.emit(asm, QWORD, ret, arg);
                         asm.ret(0);
                         return asm.close(true);
                     } catch (Exception e) {
@@ -147,7 +150,7 @@ public class BitOpsTest extends AssemblerTest {
                     AMD64Assembler asm = new AMD64Assembler(target, registerConfig);
                     Register ret = registerConfig.getReturnRegister(Kind.Int);
                     Register arg = asRegister(cc.getArgument(0));
-                    asm.tzcntl(ret, arg);
+                    TZCNT.emit(asm, DWORD, ret, arg);
                     asm.ret(0);
                     return asm.close(true);
                 }
@@ -168,7 +171,7 @@ public class BitOpsTest extends AssemblerTest {
                     try {
                         Field f = IntField.class.getDeclaredField("x");
                         AMD64Address arg = new AMD64Address(asRegister(cc.getArgument(0)), (int) unsafe.objectFieldOffset(f));
-                        asm.tzcntl(ret, arg);
+                        TZCNT.emit(asm, DWORD, ret, arg);
                         asm.ret(0);
                         return asm.close(true);
                     } catch (Exception e) {
@@ -190,7 +193,7 @@ public class BitOpsTest extends AssemblerTest {
                     AMD64Assembler asm = new AMD64Assembler(target, registerConfig);
                     Register ret = registerConfig.getReturnRegister(Kind.Int);
                     Register arg = asRegister(cc.getArgument(0));
-                    asm.tzcntq(ret, arg);
+                    TZCNT.emit(asm, QWORD, ret, arg);
                     asm.ret(0);
                     return asm.close(true);
                 }
@@ -211,7 +214,7 @@ public class BitOpsTest extends AssemblerTest {
                     try {
                         Field f = LongField.class.getDeclaredField("x");
                         AMD64Address arg = new AMD64Address(asRegister(cc.getArgument(0)), (int) unsafe.objectFieldOffset(f));
-                        asm.tzcntq(ret, arg);
+                        TZCNT.emit(asm, QWORD, ret, arg);
                         asm.ret(0);
                         return asm.close(true);
                     } catch (Exception e) {

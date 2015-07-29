@@ -26,8 +26,10 @@ import static com.oracle.graal.asm.NumUtil.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.lir.gen.*;
 import com.oracle.graal.nodeinfo.*;
@@ -45,8 +47,8 @@ public final class DimensionsNode extends FixedWithNextNode implements LIRLowera
     public static final NodeClass<DimensionsNode> TYPE = NodeClass.create(DimensionsNode.class);
     protected final int rank;
 
-    public DimensionsNode(int rank) {
-        super(TYPE, null);
+    public DimensionsNode(@InjectedNodeParameter WordTypes wordTypes, int rank) {
+        super(TYPE, StampFactory.forKind(wordTypes.getWordKind()));
         this.rank = rank;
     }
 
@@ -61,6 +63,6 @@ public final class DimensionsNode extends FixedWithNextNode implements LIRLowera
         gen.setResult(this, result);
     }
 
-    @NodeIntrinsic(setStampFromReturnType = true)
+    @NodeIntrinsic
     public static native Word allocaDimsArray(@ConstantNodeParameter int rank);
 }

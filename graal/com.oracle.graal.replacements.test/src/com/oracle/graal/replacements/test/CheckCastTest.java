@@ -22,9 +22,10 @@
  */
 package com.oracle.graal.replacements.test;
 
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.java.*;
 

@@ -22,8 +22,9 @@
  */
 package com.oracle.graal.nodes.java;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.meta.Assumptions.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -36,14 +37,18 @@ import com.oracle.graal.nodes.spi.*;
  * The {@code InstanceOfNode} represents an instanceof test.
  */
 @NodeInfo
-public final class InstanceOfNode extends UnaryOpLogicNode implements Lowerable, Virtualizable {
+public class InstanceOfNode extends UnaryOpLogicNode implements Lowerable, Virtualizable {
     public static final NodeClass<InstanceOfNode> TYPE = NodeClass.create(InstanceOfNode.class);
 
     protected final ResolvedJavaType type;
     protected JavaTypeProfile profile;
 
-    public InstanceOfNode(ResolvedJavaType type, ValueNode object, JavaTypeProfile profile) {
-        super(TYPE, object);
+    private InstanceOfNode(ResolvedJavaType type, ValueNode object, JavaTypeProfile profile) {
+        this(TYPE, type, object, profile);
+    }
+
+    protected InstanceOfNode(NodeClass<? extends InstanceOfNode> c, ResolvedJavaType type, ValueNode object, JavaTypeProfile profile) {
+        super(c, object);
         this.type = type;
         this.profile = profile;
         assert type != null;
@@ -51,7 +56,7 @@ public final class InstanceOfNode extends UnaryOpLogicNode implements Lowerable,
 
     public static LogicNode create(ResolvedJavaType type, ValueNode object, JavaTypeProfile profile) {
         ObjectStamp objectStamp = (ObjectStamp) object.stamp();
-        LogicNode constantValue = findSynonym(type, objectStamp.type(), objectStamp.nonNull(), objectStamp.isExactType());
+        LogicNode constantValue = findSynonym(object, type, objectStamp.type(), objectStamp.nonNull(), objectStamp.isExactType());
         if (constantValue != null) {
             return constantValue;
         } else {
@@ -80,13 +85,13 @@ public final class InstanceOfNode extends UnaryOpLogicNode implements Lowerable,
             if (result != null) {
                 return result;
             }
-            Assumptions assumptions = graph().getAssumptions();
+            Assumptions assumptions = graph() == null ? null : graph().getAssumptions();
             if (assumptions != null) {
-                ResolvedJavaType exact = stampType.findUniqueConcreteSubtype();
-                if (exact != null) {
-                    result = checkInstanceOf(forValue, exact, objectStamp.nonNull(), true);
+                AssumptionResult<ResolvedJavaType> leafConcreteSubtype = stampType.findLeafConcreteSubtype();
+                if (leafConcreteSubtype != null) {
+                    result = checkInstanceOf(forValue, leafConcreteSubtype.getResult(), objectStamp.nonNull(), true);
                     if (result != null) {
-                        assumptions.recordConcreteSubtype(stampType, exact);
+                        assumptions.record(leafConcreteSubtype);
                         return result;
                     }
                 }
@@ -96,7 +101,7 @@ public final class InstanceOfNode extends UnaryOpLogicNode implements Lowerable,
     }
 
     private ValueNode checkInstanceOf(ValueNode forValue, ResolvedJavaType inputType, boolean nonNull, boolean exactType) {
-        ValueNode result = findSynonym(type(), inputType, nonNull, exactType);
+        ValueNode result = findSynonym(forValue, type(), inputType, nonNull, exactType);
         if (result != null) {
             return result;
         }
@@ -110,7 +115,7 @@ public final class InstanceOfNode extends UnaryOpLogicNode implements Lowerable,
         return null;
     }
 
-    public static LogicNode findSynonym(ResolvedJavaType type, ResolvedJavaType inputType, boolean nonNull, boolean exactType) {
+    public static LogicNode findSynonym(ValueNode object, ResolvedJavaType type, ResolvedJavaType inputType, boolean nonNull, boolean exactType) {
         if (inputType == null) {
             return null;
         }
@@ -128,12 +133,16 @@ public final class InstanceOfNode extends UnaryOpLogicNode implements Lowerable,
                 return LogicConstantNode.contradiction();
             } else {
                 boolean superType = inputType.isAssignableFrom(type);
-                if (!superType && !inputType.isInterface() && !type.isInterface()) {
+                if (!superType && (type.asExactType() != null || (!isInterfaceOrArrayOfInterface(inputType) && !isInterfaceOrArrayOfInterface(type)))) {
                     return LogicConstantNode.contradiction();
                 }
                 // since the subtype comparison was only performed on a declared type we don't
                 // really know if it might be true at run time...
             }
+        }
+
+        if (type.isLeaf() && nonNull) {
+            return TypeCheckNode.create(type, object);
         }
         return null;
     }
@@ -159,5 +168,48 @@ public final class InstanceOfNode extends UnaryOpLogicNode implements Lowerable,
         if (state != null) {
             tool.replaceWithValue(LogicConstantNode.forBoolean(type().isAssignableFrom(state.getVirtualObject().type()), graph()));
         }
+    }
+
+    @Override
+    public Stamp getSucceedingStampForValue(boolean negated) {
+        if (negated) {
+            return null;
+        } else {
+            return StampFactory.declaredTrustedNonNull(type);
+        }
+    }
+
+    @Override
+    public TriState tryFold(Stamp valueStamp) {
+        if (valueStamp instanceof ObjectStamp) {
+            ObjectStamp objectStamp = (ObjectStamp) valueStamp;
+            if (objectStamp.alwaysNull()) {
+                return TriState.FALSE;
+            }
+
+            ResolvedJavaType objectType = objectStamp.type();
+            if (objectType != null) {
+                ResolvedJavaType instanceofType = type;
+                if (instanceofType.isAssignableFrom(objectType)) {
+                    if (objectStamp.nonNull()) {
+                        return TriState.TRUE;
+                    }
+                } else {
+                    if (objectStamp.isExactType()) {
+                        return TriState.FALSE;
+                    } else {
+                        boolean superType = objectType.isAssignableFrom(instanceofType);
+                        if (!superType && !objectType.isInterface() && !instanceofType.isInterface()) {
+                            return TriState.FALSE;
+                        }
+                    }
+                }
+            }
+        }
+        return TriState.UNKNOWN;
+    }
+
+    private static boolean isInterfaceOrArrayOfInterface(ResolvedJavaType t) {
+        return t.isInterface() || (t.isArray() && t.getElementalType().isInterface());
     }
 }

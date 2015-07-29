@@ -22,16 +22,15 @@
  */
 package com.oracle.graal.hotspot.replacements;
 
-import static com.oracle.graal.compiler.GraalCompiler.*;
-
 import java.lang.reflect.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
+import com.oracle.graal.nodes.CallTargetNode.InvokeKind;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
 import com.oracle.graal.nodes.java.*;
@@ -44,16 +43,12 @@ public final class ObjectCloneNode extends BasicObjectCloneNode implements Virtu
 
     public static final NodeClass<ObjectCloneNode> TYPE = NodeClass.create(ObjectCloneNode.class);
 
-    public ObjectCloneNode(Invoke invoke) {
-        super(TYPE, invoke);
+    public ObjectCloneNode(InvokeKind invokeKind, ResolvedJavaMethod targetMethod, int bci, JavaType returnType, ValueNode receiver) {
+        super(TYPE, invokeKind, targetMethod, bci, returnType, receiver);
     }
 
     @Override
     protected StructuredGraph getLoweredSnippetGraph(LoweringTool tool) {
-        if (!shouldIntrinsify(getTargetMethod())) {
-            return null;
-        }
-
         ResolvedJavaType type = StampTool.typeOrNull(getObject());
         if (type != null) {
             if (type.isArray()) {
@@ -62,14 +57,14 @@ public final class ObjectCloneNode extends BasicObjectCloneNode implements Virtu
                     final ResolvedJavaMethod snippetMethod = tool.getMetaAccess().lookupJavaMethod(method);
                     final Replacements replacements = tool.getReplacements();
                     StructuredGraph snippetGraph = null;
-                    try (Scope s = Debug.scope("ArrayCopySnippet", snippetMethod)) {
-                        snippetGraph = replacements.getSnippet(snippetMethod);
+                    try (Scope s = Debug.scope("ArrayCloneSnippet", snippetMethod)) {
+                        snippetGraph = replacements.getSnippet(snippetMethod, null);
                     } catch (Throwable e) {
                         throw Debug.handle(e);
                     }
 
                     assert snippetGraph != null : "ObjectCloneSnippets should be installed";
-                    return lowerReplacement(snippetGraph.copy(), tool);
+                    return lowerReplacement((StructuredGraph) snippetGraph.copy(), tool);
                 }
                 assert false : "unhandled array type " + type.getComponentType().getKind();
             } else {

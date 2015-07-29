@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,20 +22,21 @@
  */
 package com.oracle.graal.lir.asm;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
 import java.util.*;
+import java.util.function.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.code.CompilationResult.ConstantReference;
-import com.oracle.graal.api.code.CompilationResult.DataSectionReference;
-import com.oracle.graal.api.code.DataSection.Data;
-import com.oracle.graal.api.code.DataSection.DataBuilder;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.asm.*;
-import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.compiler.common.cfg.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.code.CompilationResult.*;
+import jdk.internal.jvmci.code.DataSection.*;
+import jdk.internal.jvmci.common.*;
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.options.*;
+
+import com.oracle.graal.asm.*;
+import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.framemap.*;
 
@@ -45,6 +46,11 @@ import com.oracle.graal.lir.framemap.*;
  * @see CompilationResultBuilderFactory
  */
 public class CompilationResultBuilder {
+
+    // @formatter:off
+    @Option(help = "Include the LIR as comments with the final assembly.", type = OptionType.Debug)
+    public static final OptionValue<Boolean> PrintLIRWithAssembly = new OptionValue<>(false);
+    // @formatter:on
 
     private static class ExceptionInfo {
 
@@ -82,6 +88,9 @@ public class CompilationResultBuilder {
     private List<ExceptionInfo> exceptionInfoList;
 
     private final IdentityHashMap<Constant, Data> dataCache;
+
+    private Consumer<LIRInstruction> beforeOp;
+    private Consumer<LIRInstruction> afterOp;
 
     public CompilationResultBuilder(CodeCacheProvider codeCache, ForeignCallsProvider foreignCalls, FrameMap frameMap, Assembler asm, FrameContext frameContext, CompilationResult compilationResult) {
         this.target = codeCache.getTarget();
@@ -162,7 +171,7 @@ public class CompilationResultBuilder {
         compilationResult.recordInfopoint(pos, debugInfo, reason);
     }
 
-    public void recordInlineDataInCode(JavaConstant data) {
+    public void recordInlineDataInCode(Constant data) {
         assert data != null;
         int pos = asm.position();
         Debug.log("Inline data in code: pos = %d, data = %s", pos, data);
@@ -208,7 +217,7 @@ public class CompilationResultBuilder {
         assert !codeCache.needsDataPatch(constant) : constant + " should be in a DataPatch";
         long c = constant.asLong();
         if (!NumUtil.isInt(c)) {
-            throw GraalInternalError.shouldNotReachHere();
+            throw JVMCIError.shouldNotReachHere();
         }
         return (int) c;
     }
@@ -353,18 +362,24 @@ public class CompilationResultBuilder {
     }
 
     private void emitBlock(AbstractBlockBase<?> block) {
-        if (Debug.isDumpEnabled()) {
+        if (Debug.isDumpEnabled() || PrintLIRWithAssembly.getValue()) {
             blockComment(String.format("block B%d %s", block.getId(), block.getLoop()));
         }
 
         for (LIRInstruction op : lir.getLIRforBlock(block)) {
-            if (Debug.isDumpEnabled()) {
+            if (Debug.isDumpEnabled() || PrintLIRWithAssembly.getValue()) {
                 blockComment(String.format("%d %s", op.id(), op));
             }
 
             try {
+                if (beforeOp != null) {
+                    beforeOp.accept(op);
+                }
                 emitOp(this, op);
-            } catch (GraalInternalError e) {
+                if (afterOp != null) {
+                    afterOp.accept(op);
+                }
+            } catch (JVMCIError e) {
                 throw e.addContext("lir instruction", block + "@" + op.id() + " " + op + "\n" + lir.codeEmittingOrder());
             }
         }
@@ -374,9 +389,9 @@ public class CompilationResultBuilder {
         try {
             op.emitCode(crb);
         } catch (AssertionError t) {
-            throw new GraalInternalError(t);
+            throw new JVMCIError(t);
         } catch (RuntimeException t) {
-            throw new GraalInternalError(t);
+            throw new JVMCIError(t);
         }
     }
 
@@ -389,5 +404,10 @@ public class CompilationResultBuilder {
         if (dataCache != null) {
             dataCache.clear();
         }
+    }
+
+    public void setOpCallback(Consumer<LIRInstruction> beforeOp, Consumer<LIRInstruction> afterOp) {
+        this.beforeOp = beforeOp;
+        this.afterOp = afterOp;
     }
 }

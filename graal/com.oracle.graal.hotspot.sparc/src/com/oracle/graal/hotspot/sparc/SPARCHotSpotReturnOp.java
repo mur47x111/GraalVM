@@ -23,14 +23,14 @@
 package com.oracle.graal.hotspot.sparc;
 
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.asm.sparc.*;
-import com.oracle.graal.hotspot.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.asm.*;
 import com.oracle.graal.lir.sparc.SPARCControlFlow.ReturnOp;
-import com.oracle.graal.sparc.*;
 
 /**
  * Returns from a function.
@@ -38,25 +38,26 @@ import com.oracle.graal.sparc.*;
 @Opcode("RETURN")
 final class SPARCHotSpotReturnOp extends SPARCHotSpotEpilogueOp {
     public static final LIRInstructionClass<SPARCHotSpotReturnOp> TYPE = LIRInstructionClass.create(SPARCHotSpotReturnOp.class);
+    public static final SizeEstimate SIZE = SizeEstimate.create(2);
 
     @Use({REG, ILLEGAL}) protected Value value;
+    @Use({REG}) protected Value safepointPollAddress;
     private final boolean isStub;
     private final HotSpotVMConfig config;
 
-    SPARCHotSpotReturnOp(Value value, boolean isStub, HotSpotVMConfig config) {
-        super(TYPE);
+    SPARCHotSpotReturnOp(Value value, boolean isStub, HotSpotVMConfig config, Value safepointPoll) {
+        super(TYPE, SIZE);
         this.value = value;
         this.isStub = isStub;
         this.config = config;
+        this.safepointPollAddress = safepointPoll;
     }
 
     @Override
     public void emitCode(CompilationResultBuilder crb, SPARCMacroAssembler masm) {
         if (!isStub) {
             // Every non-stub compile method must have a poll before the return.
-            // Using the same scratch register as LIR_Assembler::return_op
-            // in c1_LIRAssembler_sparc.cpp
-            SPARCHotSpotSafepointOp.emitCode(crb, masm, config, true, null, SPARC.l0);
+            SPARCHotSpotSafepointOp.emitCode(crb, masm, config, true, null, asRegister(safepointPollAddress));
         }
         ReturnOp.emitCodeHelper(crb, masm);
     }

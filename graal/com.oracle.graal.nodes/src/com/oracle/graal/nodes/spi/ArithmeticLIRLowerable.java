@@ -22,10 +22,10 @@
  */
 package com.oracle.graal.nodes.spi;
 
-import com.oracle.graal.api.code.*;
 import com.oracle.graal.lir.gen.*;
+import com.oracle.graal.nodes.*;
 
 public interface ArithmeticLIRLowerable extends ArithmeticOperation {
 
-    void generate(NodeMappableLIRBuilder builder, ArithmeticLIRGenerator gen);
+    void generate(NodeValueMap nodeValueMap, ArithmeticLIRGenerator gen);
 }

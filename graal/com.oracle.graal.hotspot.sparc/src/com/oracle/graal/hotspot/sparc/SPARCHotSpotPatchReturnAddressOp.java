@@ -22,14 +22,13 @@
  */
 package com.oracle.graal.hotspot.sparc;
 
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
-import static com.oracle.graal.sparc.SPARC.*;
-import static com.oracle.graal.api.code.ValueUtil.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import static jdk.internal.jvmci.sparc.SPARC.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.asm.sparc.*;
-import com.oracle.graal.asm.sparc.SPARCAssembler.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.asm.*;
 import com.oracle.graal.lir.sparc.*;
@@ -40,17 +39,18 @@ import com.oracle.graal.lir.sparc.*;
 @Opcode("PATCH_RETURN")
 final class SPARCHotSpotPatchReturnAddressOp extends SPARCLIRInstruction {
     public static final LIRInstructionClass<SPARCHotSpotPatchReturnAddressOp> TYPE = LIRInstructionClass.create(SPARCHotSpotPatchReturnAddressOp.class);
+    public static final SizeEstimate SIZE = SizeEstimate.create(1);
 
     @Use(REG) AllocatableValue address;
 
     SPARCHotSpotPatchReturnAddressOp(AllocatableValue address) {
-        super(TYPE);
+        super(TYPE, SIZE);
         this.address = address;
     }
 
     @Override
     public void emitCode(CompilationResultBuilder crb, SPARCMacroAssembler masm) {
         Register addrRegister = asLongReg(address);
-        new Sub(addrRegister, Return.PC_RETURN_OFFSET, i7).emit(masm);
+        masm.sub(addrRegister, SPARCAssembler.PC_RETURN_OFFSET, i7);
     }
 }

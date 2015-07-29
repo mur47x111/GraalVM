@@ -25,6 +25,7 @@ package com.oracle.graal.loop.phases;
 import java.util.*;
 
 import com.oracle.graal.debug.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.loop.*;
 import com.oracle.graal.nodes.*;

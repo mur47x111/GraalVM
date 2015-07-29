@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,22 +22,20 @@
  */
 package com.oracle.graal.hotspot.stubs;
 
-import static com.oracle.graal.api.code.CallingConvention.Type.*;
-import static com.oracle.graal.hotspot.HotSpotForeignCallLinkage.RegisterEffect.*;
-
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.api.replacements.*;
-import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+import static com.oracle.graal.hotspot.HotSpotForeignCallLinkage.RegisterEffect.*;
+import static jdk.internal.jvmci.code.CallingConvention.Type.*;
+
+import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.hotspot.*;
 import com.oracle.graal.hotspot.HotSpotForeignCallLinkage.Transition;
 import com.oracle.graal.hotspot.meta.*;
 import com.oracle.graal.hotspot.nodes.*;
 import com.oracle.graal.hotspot.replacements.*;
-import com.oracle.graal.hotspot.word.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
-import com.oracle.graal.phases.util.*;
 import com.oracle.graal.replacements.*;
 import com.oracle.graal.replacements.nodes.*;
 import com.oracle.graal.word.*;
@@ -113,33 +111,40 @@ public class ForeignCallStub extends Stub {
         return null;
     }
 
+    private class DebugScopeContext implements JavaMethod, JavaMethodContex {
+        public JavaMethod asJavaMethod() {
+            return this;
+        }
+
+        public Signature getSignature() {
+            ForeignCallDescriptor d = linkage.getDescriptor();
+            MetaAccessProvider metaAccess = providers.getMetaAccess();
+            Class<?>[] arguments = d.getArgumentTypes();
+            ResolvedJavaType[] parameters = new ResolvedJavaType[arguments.length];
+            for (int i = 0; i < arguments.length; i++) {
+                parameters[i] = metaAccess.lookupJavaType(arguments[i]);
+            }
+            return new HotSpotSignature(runtime.getJVMCIRuntime(), metaAccess.lookupJavaType(d.getResultType()), parameters);
+        }
+
+        public String getName() {
+            return linkage.getDescriptor().getName();
+        }
+
+        public JavaType getDeclaringClass() {
+            return providers.getMetaAccess().lookupJavaType(ForeignCallStub.class);
+        }
+
+        @Override
+        public String toString() {
+            return format("ForeignCallStub<%n(%p)>");
+        }
+    }
+
     @Override
     protected Object debugScopeContext() {
-        return new JavaMethod() {
+        return new DebugScopeContext() {
 
-            public Signature getSignature() {
-                ForeignCallDescriptor d = linkage.getDescriptor();
-                MetaAccessProvider metaAccess = providers.getMetaAccess();
-                Class<?>[] arguments = d.getArgumentTypes();
-                ResolvedJavaType[] parameters = new ResolvedJavaType[arguments.length];
-                for (int i = 0; i < arguments.length; i++) {
-                    parameters[i] = metaAccess.lookupJavaType(arguments[i]);
-                }
-                return new HotSpotSignature(runtime, metaAccess.lookupJavaType(d.getResultType()), parameters);
-            }
-
-            public String getName() {
-                return linkage.getDescriptor().getName();
-            }
-
-            public JavaType getDeclaringClass() {
-                return providers.getMetaAccess().lookupJavaType(ForeignCallStub.class);
-            }
-
-            @Override
-            public String toString() {
-                return format("ForeignCallStub<%n(%p)>");
-            }
         };
     }
 
@@ -188,16 +193,18 @@ public class ForeignCallStub extends Stub {
      */
     @Override
     protected StructuredGraph getGraph() {
+        WordTypes wordTypes = providers.getWordTypes();
         Class<?>[] args = linkage.getDescriptor().getArgumentTypes();
         boolean isObjectResult = linkage.getOutgoingCallingConvention().getReturn().getKind() == Kind.Object;
 
         StructuredGraph graph = new StructuredGraph(toString(), null, AllowAssumptions.NO);
         graph.disableInlinedMethodRecording();
+        graph.disableUnsafeAccessTracking();
 
-        GraphKit kit = new HotSpotGraphKit(graph, providers);
+        GraphKit kit = new GraphKit(graph, providers, wordTypes, providers.getGraphBuilderPlugins());
         ParameterNode[] params = createParameters(kit, args);
 
-        ReadRegisterNode thread = kit.append(new ReadRegisterNode(providers.getRegisters().getThreadRegister(), true, false));
+        ReadRegisterNode thread = kit.append(new ReadRegisterNode(providers.getRegisters().getThreadRegister(), wordTypes.getWordKind(), true, false));
         ValueNode result = createTargetCall(kit, params, thread);
         kit.createInvoke(StubUtil.class, "handlePendingException", thread, ConstantNode.forBoolean(isObjectResult, graph));
         if (isObjectResult) {
@@ -210,8 +217,7 @@ public class ForeignCallStub extends Stub {
             Debug.dump(graph, "Initial stub graph");
         }
 
-        kit.rewriteWordTypes(providers.getSnippetReflection());
-        kit.inlineInvokes(providers.getSnippetReflection());
+        kit.inlineInvokes();
 
         if (Debug.isDumpEnabled()) {
             Debug.dump(graph, "Stub graph before compilation");
@@ -220,26 +226,13 @@ public class ForeignCallStub extends Stub {
         return graph;
     }
 
-    private static class HotSpotGraphKit extends GraphKit {
-
-        public HotSpotGraphKit(StructuredGraph graph, Providers providers) {
-            super(graph, providers);
-        }
-
-        @Override
-        public void rewriteWordTypes(SnippetReflectionProvider snippetReflection) {
-            new HotSpotWordTypeRewriterPhase(providers.getMetaAccess(), snippetReflection, providers.getConstantReflection(), providers.getCodeCache().getTarget().wordKind).apply(graph);
-        }
-    }
-
     private ParameterNode[] createParameters(GraphKit kit, Class<?>[] args) {
         ParameterNode[] params = new ParameterNode[args.length];
         ResolvedJavaType accessingClass = providers.getMetaAccess().lookupJavaType(getClass());
         for (int i = 0; i < args.length; i++) {
             ResolvedJavaType type = providers.getMetaAccess().lookupJavaType(args[i]).resolve(accessingClass);
-            Kind kind = type.getKind().getStackKind();
             Stamp stamp;
-            if (kind == Kind.Object) {
+            if (type.getKind().getStackKind() == Kind.Object) {
                 stamp = StampFactory.declared(type);
             } else {
                 stamp = StampFactory.forKind(type.getKind());

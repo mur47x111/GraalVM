@@ -24,9 +24,10 @@ package com.oracle.graal.lir.constopt;
 
 import java.util.*;
 
-import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
+import com.oracle.graal.debug.Debug.*;
+
+import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.lir.constopt.ConstantTree.Flags;
 import com.oracle.graal.lir.constopt.ConstantTree.NodeCost;
 

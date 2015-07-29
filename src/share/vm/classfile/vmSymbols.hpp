@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -79,6 +79,7 @@
   template(java_lang_ref_WeakReference,               "java/lang/ref/WeakReference")              \
   template(java_lang_ref_FinalReference,              "java/lang/ref/FinalReference")             \
   template(java_lang_ref_PhantomReference,            "java/lang/ref/PhantomReference")           \
+  template(sun_misc_Cleaner,                          "sun/misc/Cleaner")                         \
   template(java_lang_ref_Finalizer,                   "java/lang/ref/Finalizer")                  \
   template(java_lang_reflect_AccessibleObject,        "java/lang/reflect/AccessibleObject")       \
   template(java_lang_reflect_Method,                  "java/lang/reflect/Method")                 \
@@ -91,11 +92,17 @@
   template(java_lang_CharSequence,                    "java/lang/CharSequence")                   \
   template(java_lang_SecurityManager,                 "java/lang/SecurityManager")                \
   template(java_security_AccessControlContext,        "java/security/AccessControlContext")       \
+  template(java_security_CodeSource,                  "java/security/CodeSource")                 \
   template(java_security_ProtectionDomain,            "java/security/ProtectionDomain")           \
+  template(java_security_SecureClassLoader,           "java/security/SecureClassLoader")          \
+  template(java_net_URLClassLoader,                   "java/net/URLClassLoader")                  \
+  template(java_net_URL,                              "java/net/URL")                             \
+  template(java_util_jar_Manifest,                    "java/util/jar/Manifest")                   \
   template(impliesCreateAccessControlContext_name,    "impliesCreateAccessControlContext")        \
   template(java_io_OutputStream,                      "java/io/OutputStream")                     \
   template(java_io_Reader,                            "java/io/Reader")                           \
   template(java_io_BufferedReader,                    "java/io/BufferedReader")                   \
+  template(java_io_File,                              "java/io/File")                             \
   template(java_io_FileInputStream,                   "java/io/FileInputStream")                  \
   template(java_io_ByteArrayInputStream,              "java/io/ByteArrayInputStream")             \
   template(java_io_Serializable,                      "java/io/Serializable")                     \
@@ -106,9 +113,11 @@
   template(java_util_Hashtable,                       "java/util/Hashtable")                      \
   template(java_lang_Compiler,                        "java/lang/Compiler")                       \
   template(sun_misc_Signal,                           "sun/misc/Signal")                          \
+  template(sun_misc_Launcher,                         "sun/misc/Launcher")                        \
   template(java_lang_AssertionStatusDirectives,       "java/lang/AssertionStatusDirectives")      \
   template(getBootClassPathEntryForClass_name,        "getBootClassPathEntryForClass")            \
   template(sun_misc_PostVMInitHook,                   "sun/misc/PostVMInitHook")                  \
+  template(sun_misc_Launcher_AppClassLoader,          "sun/misc/Launcher$AppClassLoader")         \
   template(sun_misc_Launcher_ExtClassLoader,          "sun/misc/Launcher$ExtClassLoader")         \
                                                                                                   \
   /* Java runtime version access */                                                               \
@@ -289,68 +298,63 @@
   LP64_ONLY( do_alias(intptr_signature,               long_signature) )                           \
   template(selectAlternative_signature, "(ZLjava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodHandle;)Ljava/lang/invoke/MethodHandle;") \
                                                                                                                                       \
-  /* Support for Graal */                                                                                                             \
+  /* Support for JVMCI */                                                                                                             \
   template(java_util_BitSet,                                         "java/util/BitSet")                                              \
-  GRAAL_ONLY(template(com_oracle_graal_graph_Node,                              "com/oracle/graal/graph/Node"))                                   \
-  GRAAL_ONLY(template(com_oracle_graal_graph_NodeClass,                         "com/oracle/graal/graph/NodeClass"))                              \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_HotSpotGraalRuntime,             "com/oracle/graal/hotspot/HotSpotGraalRuntime"))                  \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_HotSpotCompiledCode,             "com/oracle/graal/hotspot/HotSpotCompiledCode"))                  \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_HotSpotCompiledCode_Comment,     "com/oracle/graal/hotspot/HotSpotCompiledCode$Comment"))          \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_HotSpotCompiledNmethod,          "com/oracle/graal/hotspot/HotSpotCompiledNmethod"))               \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_HotSpotCompiledRuntimeStub,      "com/oracle/graal/hotspot/HotSpotCompiledRuntimeStub"))           \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_HotSpotForeignCallLinkageImpl,   "com/oracle/graal/hotspot/HotSpotForeignCallLinkageImpl"))        \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_HotSpotReferenceMap,             "com/oracle/graal/hotspot/HotSpotReferenceMap"))                  \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_bridge_CompilerToVMImpl,         "com/oracle/graal/hotspot/bridge/CompilerToVMImpl"))              \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_meta_HotSpotInstalledCode,       "com/oracle/graal/hotspot/meta/HotSpotInstalledCode"))            \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_meta_HotSpotNmethod,             "com/oracle/graal/hotspot/meta/HotSpotNmethod"))                  \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_meta_HotSpotResolvedJavaMethodImpl, "com/oracle/graal/hotspot/meta/HotSpotResolvedJavaMethodImpl")) \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_meta_HotSpotResolvedObjectTypeImpl, "com/oracle/graal/hotspot/meta/HotSpotResolvedObjectTypeImpl")) \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_meta_HotSpotCompressedNullConstant, "com/oracle/graal/hotspot/meta/HotSpotCompressedNullConstant")) \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_meta_HotSpotObjectConstantImpl,  "com/oracle/graal/hotspot/meta/HotSpotObjectConstantImpl"))       \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_meta_HotSpotMetaspaceConstantImpl,"com/oracle/graal/hotspot/meta/HotSpotMetaspaceConstantImpl"))   \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_HotSpotStackFrameReference,      "com/oracle/graal/hotspot/HotSpotStackFrameReference"))           \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_CompilationTask,                 "com/oracle/graal/hotspot/CompilationTask"))                      \
-  GRAAL_ONLY(template(com_oracle_graal_api_meta_JavaConstant,                   "com/oracle/graal/api/meta/JavaConstant"))                        \
-  GRAAL_ONLY(template(com_oracle_graal_api_meta_PrimitiveConstant,              "com/oracle/graal/api/meta/PrimitiveConstant"))                   \
-  GRAAL_ONLY(template(com_oracle_graal_api_meta_RawConstant,                    "com/oracle/graal/api/meta/RawConstant"))                         \
-  GRAAL_ONLY(template(com_oracle_graal_api_meta_NullConstant,                   "com/oracle/graal/api/meta/NullConstant"))                        \
-  GRAAL_ONLY(template(com_oracle_graal_api_meta_ExceptionHandler,               "com/oracle/graal/api/meta/ExceptionHandler"))                    \
-  GRAAL_ONLY(template(com_oracle_graal_api_meta_JavaMethod,                     "com/oracle/graal/api/meta/JavaMethod"))                          \
-  GRAAL_ONLY(template(com_oracle_graal_api_meta_JavaType,                       "com/oracle/graal/api/meta/JavaType"))                            \
-  GRAAL_ONLY(template(com_oracle_graal_api_meta_Kind,                           "com/oracle/graal/api/meta/Kind"))                                \
-  GRAAL_ONLY(template(com_oracle_graal_api_meta_LIRKind,                        "com/oracle/graal/api/meta/LIRKind"))                             \
-  GRAAL_ONLY(template(com_oracle_graal_api_meta_AbstractValue,                  "com/oracle/graal/api/meta/AbstractValue"))                       \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_Assumptions_ConcreteSubtype,    "com/oracle/graal/api/code/Assumptions$ConcreteSubtype"))         \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_Assumptions_NoFinalizableSubclass, "com/oracle/graal/api/code/Assumptions$NoFinalizableSubclass")) \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_Assumptions_ConcreteMethod,     "com/oracle/graal/api/code/Assumptions$ConcreteMethod"))          \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_Assumptions_CallSiteTargetValue,"com/oracle/graal/api/code/Assumptions$CallSiteTargetValue"))     \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_CompilationResult,              "com/oracle/graal/api/code/CompilationResult"))                   \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_CompilationResult_Call,         "com/oracle/graal/api/code/CompilationResult$Call"))              \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_CompilationResult_ConstantReference, "com/oracle/graal/api/code/CompilationResult$ConstantReference")) \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_CompilationResult_DataPatch,    "com/oracle/graal/api/code/CompilationResult$DataPatch"))         \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_CompilationResult_DataSectionReference, "com/oracle/graal/api/code/CompilationResult$DataSectionReference")) \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_CompilationResult_ExceptionHandler, "com/oracle/graal/api/code/CompilationResult$ExceptionHandler")) \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_CompilationResult_Mark,         "com/oracle/graal/api/code/CompilationResult$Mark"))              \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_CompilationResult_Infopoint,    "com/oracle/graal/api/code/CompilationResult$Infopoint"))         \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_CompilationResult_Site,         "com/oracle/graal/api/code/CompilationResult$Site"))              \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_InfopointReason,                "com/oracle/graal/api/code/InfopointReason"))                     \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_InstalledCode,                  "com/oracle/graal/api/code/InstalledCode"))                       \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_BytecodeFrame,                  "com/oracle/graal/api/code/BytecodeFrame"))                       \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_BytecodePosition,               "com/oracle/graal/api/code/BytecodePosition"))                    \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_DebugInfo,                      "com/oracle/graal/api/code/DebugInfo"))                           \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_Register,                       "com/oracle/graal/api/code/Register"))                            \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_RegisterValue,                  "com/oracle/graal/api/code/RegisterValue"))                       \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_Register_RegisterCategory,      "com/oracle/graal/api/code/Register$RegisterCategory"))           \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_StackSlot,                      "com/oracle/graal/api/code/StackSlot"))                           \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_StackLockValue,                 "com/oracle/graal/api/code/StackLockValue"))                      \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_VirtualObject,                  "com/oracle/graal/api/code/VirtualObject"))                       \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_RegisterSaveLayout,             "com/oracle/graal/api/code/RegisterSaveLayout"))                  \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_InvalidInstalledCodeException,  "com/oracle/graal/api/code/InvalidInstalledCodeException"))       \
-  GRAAL_ONLY(template(com_oracle_graal_api_code_SpeculationLog,                 "com/oracle/graal/api/code/SpeculationLog"))                      \
-  GRAAL_ONLY(template(compileMetaspaceMethod_name,               "compileMetaspaceMethod"))                                                       \
-  GRAAL_ONLY(template(compileMetaspaceMethod_signature,          "(JIJI)V"))                                                                      \
-  GRAAL_ONLY(template(graal_mirror_name,                         "graal_mirror"))                                                                 \
-  GRAAL_ONLY(template(com_oracle_graal_hotspot_Stable_signature, "Lcom/oracle/graal/hotspot/Stable;"))                                            \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotCompiledCode,             "jdk/internal/jvmci/hotspot/HotSpotCompiledCode"))                  \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotCompiledCode_Comment,     "jdk/internal/jvmci/hotspot/HotSpotCompiledCode$Comment"))          \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotCompiledNmethod,          "jdk/internal/jvmci/hotspot/HotSpotCompiledNmethod"))               \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotForeignCallTarget,        "jdk/internal/jvmci/hotspot/HotSpotForeignCallTarget"))             \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotReferenceMap,             "jdk/internal/jvmci/hotspot/HotSpotReferenceMap"))                  \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_CompilerToVMImpl,                "jdk/internal/jvmci/hotspot/CompilerToVMImpl"))                     \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotInstalledCode,            "jdk/internal/jvmci/hotspot/HotSpotInstalledCode"))                 \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotNmethod,                  "jdk/internal/jvmci/hotspot/HotSpotNmethod"))                       \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotResolvedJavaMethodImpl,   "jdk/internal/jvmci/hotspot/HotSpotResolvedJavaMethodImpl"))        \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotResolvedObjectTypeImpl,   "jdk/internal/jvmci/hotspot/HotSpotResolvedObjectTypeImpl"))        \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotCompressedNullConstant,   "jdk/internal/jvmci/hotspot/HotSpotCompressedNullConstant"))        \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotObjectConstantImpl,       "jdk/internal/jvmci/hotspot/HotSpotObjectConstantImpl"))            \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotMetaspaceConstantImpl,    "jdk/internal/jvmci/hotspot/HotSpotMetaspaceConstantImpl"))         \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_HotSpotStackFrameReference,      "jdk/internal/jvmci/hotspot/HotSpotStackFrameReference"))           \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_JavaConstant,                       "jdk/internal/jvmci/meta/JavaConstant"))                            \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_PrimitiveConstant,                  "jdk/internal/jvmci/meta/PrimitiveConstant"))                       \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_RawConstant,                        "jdk/internal/jvmci/meta/RawConstant"))                             \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_NullConstant,                       "jdk/internal/jvmci/meta/NullConstant"))                            \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_ExceptionHandler,                   "jdk/internal/jvmci/meta/ExceptionHandler"))                        \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_JavaMethod,                         "jdk/internal/jvmci/meta/JavaMethod"))                              \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_JavaType,                           "jdk/internal/jvmci/meta/JavaType"))                                \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_Kind,                               "jdk/internal/jvmci/meta/Kind"))                                    \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_LIRKind,                            "jdk/internal/jvmci/meta/LIRKind"))                                 \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_AbstractValue,                      "jdk/internal/jvmci/meta/AbstractValue"))                           \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_Assumptions_ConcreteSubtype,        "jdk/internal/jvmci/meta/Assumptions$ConcreteSubtype"))             \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_Assumptions_LeafType,               "jdk/internal/jvmci/meta/Assumptions$LeafType"))                    \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_Assumptions_NoFinalizableSubclass,  "jdk/internal/jvmci/meta/Assumptions$NoFinalizableSubclass"))       \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_Assumptions_ConcreteMethod,         "jdk/internal/jvmci/meta/Assumptions$ConcreteMethod"))              \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_Assumptions_CallSiteTargetValue,    "jdk/internal/jvmci/meta/Assumptions$CallSiteTargetValue"))         \
+  JVMCI_ONLY(template(jdk_internal_jvmci_meta_SpeculationLog,                     "jdk/internal/jvmci/meta/SpeculationLog"))                          \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_CompilationResult_Call,             "jdk/internal/jvmci/code/CompilationResult$Call"))                  \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_CompilationResult_ConstantReference, "jdk/internal/jvmci/code/CompilationResult$ConstantReference"))    \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_CompilationResult_DataPatch,        "jdk/internal/jvmci/code/CompilationResult$DataPatch"))             \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_CompilationResult_DataSectionReference, "jdk/internal/jvmci/code/CompilationResult$DataSectionReference")) \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_CompilationResult_ExceptionHandler, "jdk/internal/jvmci/code/CompilationResult$ExceptionHandler"))      \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_CompilationResult_Mark,             "jdk/internal/jvmci/code/CompilationResult$Mark"))                  \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_CompilationResult_Infopoint,        "jdk/internal/jvmci/code/CompilationResult$Infopoint"))             \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_CompilationResult_Site,             "jdk/internal/jvmci/code/CompilationResult$Site"))                  \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_InfopointReason,                    "jdk/internal/jvmci/code/InfopointReason"))                         \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_InstalledCode,                      "jdk/internal/jvmci/code/InstalledCode"))                           \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_BytecodeFrame,                      "jdk/internal/jvmci/code/BytecodeFrame"))                           \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_BytecodePosition,                   "jdk/internal/jvmci/code/BytecodePosition"))                        \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_DebugInfo,                          "jdk/internal/jvmci/code/DebugInfo"))                               \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_Location,                           "jdk/internal/jvmci/code/Location"))                                \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_Register,                           "jdk/internal/jvmci/code/Register"))                                \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_RegisterValue,                      "jdk/internal/jvmci/code/RegisterValue"))                           \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_Register_RegisterCategory,          "jdk/internal/jvmci/code/Register$RegisterCategory"))               \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_StackSlot,                          "jdk/internal/jvmci/code/StackSlot"))                               \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_StackLockValue,                     "jdk/internal/jvmci/code/StackLockValue"))                          \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_VirtualObject,                      "jdk/internal/jvmci/code/VirtualObject"))                           \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_RegisterSaveLayout,                 "jdk/internal/jvmci/code/RegisterSaveLayout"))                      \
+  JVMCI_ONLY(template(jdk_internal_jvmci_code_InvalidInstalledCodeException,      "jdk/internal/jvmci/code/InvalidInstalledCodeException"))           \
+  JVMCI_ONLY(template(compileMetaspaceMethod_name,                     "compileMetaspaceMethod"))                                                 \
+  JVMCI_ONLY(template(compileMetaspaceMethod_signature,                "(JIJI)V"))                                                                \
+  JVMCI_ONLY(template(jdk_internal_jvmci_hotspot_Stable_signature, "Ljdk/internal/jvmci/hotspot/Stable;"))                                            \
                                                                                                   \
   /* common method and field names */                                                             \
   template(object_initializer_name,                   "<init>")                                   \
@@ -461,6 +465,14 @@
   template(signers_name,                              "signers_name")                             \
   template(loader_data_name,                          "loader_data")                              \
   template(dependencies_name,                         "dependencies")                             \
+  template(input_stream_void_signature,               "(Ljava/io/InputStream;)V")                 \
+  template(getFileURL_name,                           "getFileURL")                               \
+  template(getFileURL_signature,                      "(Ljava/io/File;)Ljava/net/URL;")           \
+  template(definePackageInternal_name,                "definePackageInternal")                    \
+  template(definePackageInternal_signature,           "(Ljava/lang/String;Ljava/util/jar/Manifest;Ljava/net/URL;)V") \
+  template(getProtectionDomain_name,                  "getProtectionDomain")                      \
+  template(getProtectionDomain_signature,             "(Ljava/security/CodeSource;)Ljava/security/ProtectionDomain;") \
+  template(url_code_signer_array_void_signature,      "(Ljava/net/URL;[Ljava/security/CodeSigner;)V") \
                                                                                                   \
   /* non-intrinsic name/signature pairs: */                                                       \
   template(register_method_name,                      "register")                                 \
@@ -637,6 +649,7 @@
   template(serializePropertiesToByteArray_signature,   "()[B")                                                    \
   template(serializeAgentPropertiesToByteArray_name,   "serializeAgentPropertiesToByteArray")                     \
   template(classRedefinedCount_name,                   "classRedefinedCount")                                     \
+  template(classLoader_name,                           "classLoader")                                             \
                                                                                                                   \
   /* trace signatures */                                                                                          \
   TRACE_TEMPLATES(template)                                                                                       \
@@ -836,6 +849,11 @@
    do_name(     encodeISOArray_name,                             "encodeISOArray")                                      \
    do_signature(encodeISOArray_signature,                        "([CI[BII)I")                                          \
                                                                                                                         \
+  do_class(java_math_BigInteger,                      "java/math/BigInteger")                                           \
+  do_intrinsic(_multiplyToLen,      java_math_BigInteger, multiplyToLen_name, multiplyToLen_signature, F_R)             \
+   do_name(     multiplyToLen_name,                             "multiplyToLen")                                        \
+   do_signature(multiplyToLen_signature,                        "([II[II[I)[I")                                         \
+                                                                                                                        \
   /* java/lang/ref/Reference */                                                                                         \
   do_intrinsic(_Reference_get,            java_lang_ref_Reference, get_name,    void_object_signature, F_R)             \
                                                                                                                         \
@@ -853,6 +871,26 @@
    do_name(     encrypt_name,                                      "encrypt")                                           \
    do_name(     decrypt_name,                                      "decrypt")                                           \
    do_signature(byteArray_int_int_byteArray_int_signature,         "([BII[BI)I")                                        \
+                                                                                                                        \
+  /* support for sun.security.provider.SHA */                                                                           \
+  do_class(sun_security_provider_sha,                              "sun/security/provider/SHA")                         \
+  do_intrinsic(_sha_implCompress, sun_security_provider_sha, implCompress_name, implCompress_signature, F_R)            \
+   do_name(     implCompress_name,                                 "implCompress")                                      \
+   do_signature(implCompress_signature,                            "([BI)V")                                            \
+                                                                                                                        \
+  /* support for sun.security.provider.SHA2 */                                                                          \
+  do_class(sun_security_provider_sha2,                             "sun/security/provider/SHA2")                        \
+  do_intrinsic(_sha2_implCompress, sun_security_provider_sha2, implCompress_name, implCompress_signature, F_R)          \
+                                                                                                                        \
+  /* support for sun.security.provider.SHA5 */                                                                          \
+  do_class(sun_security_provider_sha5,                             "sun/security/provider/SHA5")                        \
+  do_intrinsic(_sha5_implCompress, sun_security_provider_sha5, implCompress_name, implCompress_signature, F_R)          \
+                                                                                                                        \
+  /* support for sun.security.provider.DigestBase */                                                                    \
+  do_class(sun_security_provider_digestbase,                       "sun/security/provider/DigestBase")                  \
+  do_intrinsic(_digestBase_implCompressMB, sun_security_provider_digestbase, implCompressMB_name, implCompressMB_signature, F_R)   \
+   do_name(     implCompressMB_name,                               "implCompressMultiBlock")                            \
+   do_signature(implCompressMB_signature,                          "([BII)I")                                           \
                                                                                                                         \
   /* support for java.util.zip */                                                                                       \
   do_class(java_util_zip_CRC32,           "java/util/zip/CRC32")                                                        \

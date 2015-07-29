@@ -245,12 +245,12 @@ class decode_env {
 };
 
 decode_env::decode_env(CodeBlob* code, outputStream* output, CodeStrings c) {
-  memset(this, 0, sizeof(*this));
+  memset(this, 0, sizeof(*this)); // Beware, this zeroes bits of fields.
   _output = output ? output : tty;
   _code = code;
   if (code != NULL && code->is_nmethod())
     _nm = (nmethod*) code;
-  _strings.assign(c);
+  _strings.copy(c);
 
   // by default, output pc but not bytes:
   _print_pc       = true;
@@ -529,6 +529,15 @@ void Disassembler::decode(nmethod* nm, outputStream* st) {
   nm->method()->method_holder()->name()->print_symbol_on(env.output());
   env.output()->print(".");
   nm->method()->name()->print_symbol_on(env.output());
+#if INCLUDE_JVMCI
+  {
+    char buffer[O_BUFLEN];
+    char* jvmciName = nm->jvmci_installed_code_name(buffer, O_BUFLEN);
+    if (jvmciName != NULL) {
+      env.output()->print(" (%s)", jvmciName);
+    }
+  }
+#endif
   env.output()->print_cr("  [" PTR_FORMAT ", " PTR_FORMAT "]  %d bytes", p, end, ((jlong)(end - p)));
 
   // If there has been profiling, print the buckets.

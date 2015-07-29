@@ -24,7 +24,8 @@ package com.oracle.graal.lir;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.lir.LIRInstruction.OperandFlag;
 import com.oracle.graal.lir.LIRInstruction.OperandMode;
 
@@ -32,7 +33,7 @@ import com.oracle.graal.lir.LIRInstruction.OperandMode;
  * Non-modifying version of {@link ValueProcedure}.
  */
 @FunctionalInterface
-public interface ValueConsumer extends InstructionValueProcedure {
+public interface ValueConsumer extends InstructionValueConsumer {
 
     /**
      * Iterator method to be overwritten.
@@ -43,8 +44,7 @@ public interface ValueConsumer extends InstructionValueProcedure {
      */
     void visitValue(Value value, OperandMode mode, EnumSet<OperandFlag> flags);
 
-    default Value doValue(LIRInstruction instruction, Value value, OperandMode mode, EnumSet<OperandFlag> flags) {
+    default void visitValue(LIRInstruction instruction, Value value, OperandMode mode, EnumSet<OperandFlag> flags) {
         visitValue(value, mode, flags);
-        return value;
     }
 }

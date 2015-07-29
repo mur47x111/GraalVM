@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,13 +24,15 @@ package com.oracle.graal.nodes.cfg;
 
 import java.util.*;
 
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.memory.*;
 
 public final class Block extends AbstractBlockBase<Block> {
 
-    public static final int DISTANCED_DOMINATOR_CACHE = 5;
     protected final AbstractBeginNode beginNode;
 
     protected FixedNode endNode;
@@ -40,6 +42,8 @@ public final class Block extends AbstractBlockBase<Block> {
 
     protected Block postdominator;
     protected Block distancedDominatorCache;
+    private LocationSet killLocations;
+    private LocationSet killLocationsBetweenThisAndDominator;
 
     protected Block(AbstractBeginNode node) {
         this.beginNode = node;
@@ -125,10 +129,15 @@ public final class Block extends AbstractBlockBase<Block> {
         @Override
         public FixedNode next() {
             FixedNode result = cur;
-            if (cur == getEndNode()) {
-                cur = null;
+            if (result instanceof FixedWithNextNode) {
+                FixedWithNextNode fixedWithNextNode = (FixedWithNextNode) result;
+                FixedNode next = fixedWithNextNode.next();
+                if (next instanceof AbstractBeginNode) {
+                    next = null;
+                }
+                cur = next;
             } else {
-                cur = ((FixedWithNextNode) cur).next();
+                cur = null;
             }
             assert !(cur instanceof AbstractBeginNode);
             return result;
@@ -177,30 +186,99 @@ public final class Block extends AbstractBlockBase<Block> {
         this.probability = probability;
     }
 
-    public Block getDistancedDominatorCache() {
-        Block result = this.distancedDominatorCache;
-        if (result == null) {
-            Block current = this;
-            for (int i = 0; i < DISTANCED_DOMINATOR_CACHE; ++i) {
-                current = current.getDominator();
-            }
-            distancedDominatorCache = current;
-            return current;
-        } else {
-            return result;
-        }
-    }
-
     @Override
     public Block getDominator(int distance) {
         Block result = this;
-        int i = 0;
-        for (; i < distance - (DISTANCED_DOMINATOR_CACHE - 1); i += DISTANCED_DOMINATOR_CACHE) {
-            result = result.getDistancedDominatorCache();
-        }
-        for (; i < distance; ++i) {
+        for (int i = 0; i < distance; ++i) {
             result = result.getDominator();
         }
         return result;
+    }
+
+    public boolean canKill(LocationIdentity location) {
+        if (location.isImmutable()) {
+            return false;
+        }
+        return getKillLocations().contains(location);
+    }
+
+    public LocationSet getKillLocations() {
+        if (killLocations == null) {
+            killLocations = calcKillLocations();
+        }
+        return killLocations;
+    }
+
+    private LocationSet calcKillLocations() {
+        LocationSet result = new LocationSet();
+        for (FixedNode node : this.getNodes()) {
+            if (node instanceof MemoryCheckpoint.Single) {
+                LocationIdentity identity = ((MemoryCheckpoint.Single) node).getLocationIdentity();
+                result.add(identity);
+            } else if (node instanceof MemoryCheckpoint.Multi) {
+                for (LocationIdentity identity : ((MemoryCheckpoint.Multi) node).getLocationIdentities()) {
+                    result.add(identity);
+                }
+            }
+            if (result.isAny()) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    public boolean canKillBetweenThisAndDominator(LocationIdentity location) {
+        if (location.isImmutable()) {
+            return false;
+        }
+        return this.getKillLocationsBetweenThisAndDominator().contains(location);
+    }
+
+    private LocationSet getKillLocationsBetweenThisAndDominator() {
+        if (this.killLocationsBetweenThisAndDominator == null) {
+            LocationSet dominatorResult = new LocationSet();
+            Block stopBlock = getDominator();
+            if (this.isLoopHeader()) {
+                assert stopBlock.getLoopDepth() < this.getLoopDepth();
+                dominatorResult.addAll(((HIRLoop) this.getLoop()).getKillLocations());
+            } else {
+                for (Block b : this.getPredecessors()) {
+                    assert !this.isLoopHeader();
+                    if (b != stopBlock) {
+                        dominatorResult.addAll(b.getKillLocations());
+                        if (dominatorResult.isAny()) {
+                            break;
+                        }
+                        b.calcKillLocationsBetweenThisAndTarget(dominatorResult, stopBlock);
+                        if (dominatorResult.isAny()) {
+                            break;
+                        }
+                    }
+                }
+            }
+            this.killLocationsBetweenThisAndDominator = dominatorResult;
+        }
+        return this.killLocationsBetweenThisAndDominator;
+    }
+
+    private void calcKillLocationsBetweenThisAndTarget(LocationSet result, Block stopBlock) {
+        assert AbstractControlFlowGraph.dominates(stopBlock, this);
+        if (stopBlock == this || result.isAny()) {
+            // We reached the stop block => nothing to do.
+            return;
+        } else {
+            if (stopBlock == this.getDominator()) {
+                result.addAll(this.getKillLocationsBetweenThisAndDominator());
+            } else {
+                // Divide and conquer: Aggregate kill locations from this to the dominator and then
+                // from the dominator onwards.
+                calcKillLocationsBetweenThisAndTarget(result, this.getDominator());
+                result.addAll(this.getDominator().getKillLocations());
+                if (result.isAny()) {
+                    return;
+                }
+                this.getDominator().calcKillLocationsBetweenThisAndTarget(result, stopBlock);
+            }
+        }
     }
 }

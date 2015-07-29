@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,8 +23,10 @@
 //JaCoCo Exclude
 package com.oracle.graal.hotspot.replacements.arraycopy;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.api.runtime.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.hotspot.*;
@@ -34,8 +36,9 @@ import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
+import com.oracle.graal.nodes.memory.address.*;
 import com.oracle.graal.nodes.spi.*;
-import com.oracle.graal.runtime.*;
 import com.oracle.graal.word.*;
 
 @NodeInfo(allowedUsageTypes = {InputType.Memory, InputType.Value})
@@ -95,8 +98,12 @@ public final class CheckcastArrayCopyCallNode extends AbstractMemoryCheckpoint i
     private ValueNode computeBase(ValueNode base, ValueNode pos) {
         FixedWithNextNode basePtr = graph().add(new GetObjectAddressNode(base));
         graph().addBeforeFixed(this, basePtr);
-        ValueNode loc = graph().unique(new IndexedLocationNode(getLocationIdentity(), runtime.getArrayBaseOffset(Kind.Object), pos, runtime.getArrayIndexScale(Kind.Object)));
-        return graph().unique(new ComputeAddressNode(basePtr, loc, StampFactory.forKind(Kind.Long)));
+
+        HotSpotJVMCIRuntimeProvider jvmciRuntime = runtime.getJVMCIRuntime();
+        int shift = CodeUtil.log2(jvmciRuntime.getArrayIndexScale(Kind.Object));
+        ValueNode scaledIndex = graph().unique(new LeftShiftNode(pos, ConstantNode.forInt(shift, graph())));
+        ValueNode offset = graph().unique(new AddNode(scaledIndex, ConstantNode.forInt(jvmciRuntime.getArrayBaseOffset(Kind.Object), graph())));
+        return graph().unique(new OffsetAddressNode(basePtr, offset));
     }
 
     @Override
@@ -107,11 +114,10 @@ public final class CheckcastArrayCopyCallNode extends AbstractMemoryCheckpoint i
             ValueNode srcAddr = computeBase(getSource(), getSourcePosition());
             ValueNode destAddr = computeBase(getDestination(), getDestinationPosition());
             ValueNode len = getLength();
-            if (len.stamp().getStackKind() != Kind.Long) {
-                len = IntegerConvertNode.convert(len, StampFactory.forKind(Kind.Long), graph());
+            if (len.stamp().getStackKind() != runtime.getTarget().wordKind) {
+                len = IntegerConvertNode.convert(len, StampFactory.forKind(runtime.getTarget().wordKind), graph());
             }
-            ForeignCallNode call = graph.add(new ForeignCallNode(Graal.getRequiredCapability(RuntimeProvider.class).getHostBackend().getForeignCalls(), desc, srcAddr, destAddr, len, superCheckOffset,
-                            destElemKlass));
+            ForeignCallNode call = graph.add(new ForeignCallNode(runtime.getHostBackend().getForeignCalls(), desc, srcAddr, destAddr, len, superCheckOffset, destElemKlass));
             call.setStateAfter(stateAfter());
             graph.replaceFixedWithFixed(this, call);
         }
@@ -119,7 +125,11 @@ public final class CheckcastArrayCopyCallNode extends AbstractMemoryCheckpoint i
 
     @Override
     public LocationIdentity getLocationIdentity() {
-        return NamedLocationIdentity.getArrayLocation(Kind.Object);
+        /*
+         * Because of restrictions that the memory graph of snippets matches the original node,
+         * pretend that we kill any.
+         */
+        return LocationIdentity.any();
     }
 
     @NodeIntrinsic

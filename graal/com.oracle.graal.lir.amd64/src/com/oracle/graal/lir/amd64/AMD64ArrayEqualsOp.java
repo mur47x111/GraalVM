@@ -22,20 +22,21 @@
  */
 package com.oracle.graal.lir.amd64;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
-import static com.oracle.graal.compiler.common.UnsafeAccess.*;
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import static jdk.internal.jvmci.common.UnsafeAccess.*;
 
 import java.lang.reflect.*;
 
-import com.oracle.graal.amd64.*;
-import com.oracle.graal.amd64.AMD64.CPUFeature;
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.amd64.*;
+import jdk.internal.jvmci.amd64.AMD64.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.asm.*;
 import com.oracle.graal.asm.amd64.*;
-import com.oracle.graal.asm.amd64.AMD64Address.Scale;
-import com.oracle.graal.asm.amd64.AMD64Assembler.ConditionFlag;
+import com.oracle.graal.asm.amd64.AMD64Address.*;
+import com.oracle.graal.asm.amd64.AMD64Assembler.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.asm.*;
 import com.oracle.graal.lir.gen.*;
@@ -77,8 +78,8 @@ public final class AMD64ArrayEqualsOp extends AMD64LIRInstruction {
         this.lengthValue = length;
 
         // Allocate some temporaries.
-        this.temp1 = tool.newVariable(LIRKind.derivedReference(tool.target().wordKind));
-        this.temp2 = tool.newVariable(LIRKind.derivedReference(tool.target().wordKind));
+        this.temp1 = tool.newVariable(LIRKind.unknownReference(tool.target().wordKind));
+        this.temp2 = tool.newVariable(LIRKind.unknownReference(tool.target().wordKind));
         this.temp3 = tool.newVariable(LIRKind.value(tool.target().wordKind));
         this.temp4 = tool.newVariable(LIRKind.value(tool.target().wordKind));
 

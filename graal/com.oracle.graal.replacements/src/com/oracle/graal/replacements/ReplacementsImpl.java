@@ -22,28 +22,33 @@
  */
 package com.oracle.graal.replacements;
 
-import static com.oracle.graal.api.meta.MetaUtil.*;
-import static com.oracle.graal.compiler.GraalCompiler.*;
 import static com.oracle.graal.compiler.common.GraalOptions.*;
+import static com.oracle.graal.graphbuilderconf.IntrinsicContext.CompilationContext.*;
+import static com.oracle.graal.java.BytecodeParser.Options.*;
 import static com.oracle.graal.phases.common.DeadCodeEliminationPhase.Optionality.*;
+import static java.lang.String.*;
+import static jdk.internal.jvmci.meta.MetaUtil.*;
 
 import java.lang.reflect.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.options.*;
+import jdk.internal.jvmci.options.OptionValue.*;
 import sun.misc.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.api.replacements.*;
-import com.oracle.graal.compiler.*;
 import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
-import com.oracle.graal.debug.internal.*;
-import com.oracle.graal.graph.Graph.Mark;
 import com.oracle.graal.graph.*;
+import com.oracle.graal.graph.Node.NodeIntrinsic;
+import com.oracle.graal.graphbuilderconf.*;
+import com.oracle.graal.graphbuilderconf.GraphBuilderConfiguration.Plugins;
 import com.oracle.graal.java.*;
 import com.oracle.graal.java.GraphBuilderPhase.Instance;
 import com.oracle.graal.nodes.*;
@@ -52,32 +57,87 @@ import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
-import com.oracle.graal.phases.common.inlining.*;
 import com.oracle.graal.phases.tiers.*;
 import com.oracle.graal.phases.util.*;
-import com.oracle.graal.replacements.Snippet.DefaultSnippetInliningPolicy;
-import com.oracle.graal.replacements.Snippet.SnippetInliningPolicy;
-import com.oracle.graal.word.phases.*;
+import com.oracle.graal.word.*;
 
-public class ReplacementsImpl implements Replacements {
+public class ReplacementsImpl implements Replacements, InlineInvokePlugin {
 
     public final Providers providers;
     public final SnippetReflectionProvider snippetReflection;
     public final TargetDescription target;
-    public final NodeIntrinsificationPhase nodeIntrinsificationPhase;
+    private GraphBuilderConfiguration.Plugins graphBuilderPlugins;
 
     /**
      * The preprocessed replacement graphs.
      */
     protected final ConcurrentMap<ResolvedJavaMethod, StructuredGraph> graphs;
 
+    public void setGraphBuilderPlugins(GraphBuilderConfiguration.Plugins plugins) {
+        assert this.graphBuilderPlugins == null;
+        this.graphBuilderPlugins = plugins;
+    }
+
+    public GraphBuilderConfiguration.Plugins getGraphBuilderPlugins() {
+        return graphBuilderPlugins;
+    }
+
+    protected boolean hasGenericInvocationPluginAnnotation(ResolvedJavaMethod method) {
+        return method.getAnnotation(Node.NodeIntrinsic.class) != null || method.getAnnotation(Word.Operation.class) != null || method.getAnnotation(Fold.class) != null;
+    }
+
+    private static final int MAX_GRAPH_INLINING_DEPTH = 100; // more than enough
+
+    /**
+     * Determines whether a given method should be inlined based on whether it has a substitution or
+     * whether the inlining context is already within a substitution.
+     *
+     * @return an object specifying how {@code method} is to be inlined or null if it should not be
+     *         inlined based on substitution related criteria
+     */
+    @Override
+    public InlineInfo shouldInlineInvoke(GraphBuilderContext b, ResolvedJavaMethod method, ValueNode[] args, JavaType returnType) {
+        ResolvedJavaMethod subst = getSubstitutionMethod(method);
+        if (subst != null) {
+            if (b.parsingIntrinsic() || InlineDuringParsing.getValue() || InlineIntrinsicsDuringParsing.getValue()) {
+                // Forced inlining of intrinsics
+                return new InlineInfo(subst, true);
+            }
+            return null;
+        }
+        if (b.parsingIntrinsic()) {
+            assert !hasGenericInvocationPluginAnnotation(method) : format("%s should have been handled by %s", method.format("%H.%n(%p)"), NodeIntrinsificationPlugin.class.getName());
+
+            assert b.getDepth() < MAX_GRAPH_INLINING_DEPTH : "inlining limit exceeded";
+
+            if (method.getName().startsWith("$jacoco")) {
+                throw new JVMCIError("Found call to JaCoCo instrumentation method " + method.format("%H.%n(%p)") + ". Placing \"//JaCoCo Exclude\" anywhere in " +
+                                b.getMethod().getDeclaringClass().getSourceFileName() + " should fix this.");
+            }
+
+            // Force inlining when parsing replacements
+            return new InlineInfo(method, true);
+        } else {
+            assert method.getAnnotation(NodeIntrinsic.class) == null : String.format("@%s method %s must only be called from within a replacement%n%s", NodeIntrinsic.class.getSimpleName(),
+                            method.format("%h.%n"), b);
+        }
+        return null;
+    }
+
+    @Override
+    public void notifyNotInlined(GraphBuilderContext b, ResolvedJavaMethod method, Invoke invoke) {
+        if (b.parsingIntrinsic()) {
+            IntrinsicContext intrinsic = b.getIntrinsic();
+            assert intrinsic.isCallToOriginal(method) : format("All non-recursive calls in the intrinsic %s must be inlined or intrinsified: found call to %s",
+                            intrinsic.getIntrinsicMethod().format("%H.%n(%p)"), method.format("%h.%n(%p)"));
+        }
+    }
+
     /**
      * Encapsulates method and macro substitutions for a single class.
      */
     protected class ClassReplacements {
         public final Map<ResolvedJavaMethod, ResolvedJavaMethod> methodSubstitutions = CollectionsFactory.newMap();
-        public final Map<ResolvedJavaMethod, Class<? extends FixedWithNextNode>> macroSubstitutions = CollectionsFactory.newMap();
-        public final Set<ResolvedJavaMethod> forcedSubstitutions = new HashSet<>();
 
         public ClassReplacements(Class<?>[] substitutionClasses, AtomicReference<ClassReplacements> ref) {
             for (Class<?> substitutionClass : substitutionClasses) {
@@ -90,14 +150,13 @@ public class ReplacementsImpl implements Replacements {
                         return;
                     }
                     MethodSubstitution methodSubstitution = substituteMethod.getAnnotation(MethodSubstitution.class);
-                    MacroSubstitution macroSubstitution = substituteMethod.getAnnotation(MacroSubstitution.class);
-                    if (methodSubstitution == null && macroSubstitution == null) {
+                    if (methodSubstitution == null) {
                         continue;
                     }
 
                     int modifiers = substituteMethod.getModifiers();
                     if (!Modifier.isStatic(modifiers)) {
-                        throw new GraalInternalError("Substitution methods must be static: " + substituteMethod);
+                        throw new JVMCIError("Substitution methods must be static: " + substituteMethod);
                     }
 
                     if (methodSubstitution != null) {
@@ -106,35 +165,16 @@ public class ReplacementsImpl implements Replacements {
                             guard = defaultGuard;
                         }
 
-                        if (macroSubstitution != null && macroSubstitution.isStatic() != methodSubstitution.isStatic()) {
-                            throw new GraalInternalError("Macro and method substitution must agree on isStatic attribute: " + substituteMethod);
-                        }
                         if (Modifier.isAbstract(modifiers) || Modifier.isNative(modifiers)) {
-                            throw new GraalInternalError("Substitution method must not be abstract or native: " + substituteMethod);
+                            throw new JVMCIError("Substitution method must not be abstract or native: " + substituteMethod);
                         }
                         String originalName = originalName(substituteMethod, methodSubstitution.value());
                         JavaSignature originalSignature = originalSignature(substituteMethod, methodSubstitution.signature(), methodSubstitution.isStatic());
-                        Executable[] originalMethods = originalMethods(classSubstitution, methodSubstitution.optional(), originalName, originalSignature);
-                        for (Executable originalMethod : originalMethods) {
-                            if (originalMethod != null && (guard == null || guard.execute())) {
-                                ResolvedJavaMethod original = registerMethodSubstitution(this, originalMethod, substituteMethod);
-                                if (original != null && methodSubstitution.forced() && shouldIntrinsify(original)) {
-                                    forcedSubstitutions.add(original);
-                                }
-                            }
-                        }
-                    }
-                    // We don't have per method guards for macro substitutions but at
-                    // least respect the defaultGuard if there is one.
-                    if (macroSubstitution != null && (defaultGuard == null || defaultGuard.execute())) {
-                        String originalName = originalName(substituteMethod, macroSubstitution.value());
-                        JavaSignature originalSignature = originalSignature(substituteMethod, macroSubstitution.signature(), macroSubstitution.isStatic());
-                        Executable[] originalMethods = originalMethods(classSubstitution, macroSubstitution.optional(), originalName, originalSignature);
-                        for (Executable originalMethod : originalMethods) {
-                            if (originalMethod != null) {
-                                ResolvedJavaMethod original = registerMacroSubstitution(this, originalMethod, macroSubstitution.macro());
-                                if (original != null && macroSubstitution.forced() && shouldIntrinsify(original)) {
-                                    forcedSubstitutions.add(original);
+                        Executable[] originalMethods = originalMethods(classSubstitution, classSubstitution.optional(), originalName, originalSignature);
+                        if (originalMethods != null) {
+                            for (Executable originalMethod : originalMethods) {
+                                if (originalMethod != null && (guard == null || guard.execute())) {
+                                    registerMethodSubstitution(this, originalMethod, substituteMethod);
                                 }
                             }
                         }
@@ -187,7 +227,7 @@ public class ReplacementsImpl implements Replacements {
             return null;
         }
 
-        private Executable lookupOriginalMethod(Class<?> originalClass, String name, JavaSignature signature, boolean optional) throws GraalInternalError {
+        private Executable lookupOriginalMethod(Class<?> originalClass, String name, JavaSignature signature, boolean optional) throws JVMCIError {
             try {
                 if (name.equals("<init>")) {
                     assert signature.returnType.equals(void.class) : signature;
@@ -204,7 +244,7 @@ public class ReplacementsImpl implements Replacements {
                 if (optional) {
                     return null;
                 }
-                throw new GraalInternalError(e);
+                throw new JVMCIError(e);
             }
         }
     }
@@ -228,7 +268,6 @@ public class ReplacementsImpl implements Replacements {
         this.target = target;
         this.graphs = new ConcurrentHashMap<>();
         this.snippetTemplateCache = CollectionsFactory.newMap();
-        this.nodeIntrinsificationPhase = createNodeIntrinsificationPhase();
     }
 
     private static final boolean UseSnippetGraphCache = Boolean.parseBoolean(System.getProperty("graal.useSnippetGraphCache", "true"));
@@ -251,23 +290,21 @@ public class ReplacementsImpl implements Replacements {
         return null;
     }
 
-    public StructuredGraph getSnippet(ResolvedJavaMethod method) {
-        return getSnippet(method, null);
+    public StructuredGraph getSnippet(ResolvedJavaMethod method, Object[] args) {
+        return getSnippet(method, null, args);
     }
 
     @Override
-    public StructuredGraph getSnippet(ResolvedJavaMethod method, ResolvedJavaMethod recursiveEntry) {
+    public StructuredGraph getSnippet(ResolvedJavaMethod method, ResolvedJavaMethod recursiveEntry, Object[] args) {
         assert method.getAnnotation(Snippet.class) != null : "Snippet must be annotated with @" + Snippet.class.getSimpleName();
         assert method.hasBytecodes() : "Snippet must not be abstract or native";
 
         StructuredGraph graph = UseSnippetGraphCache ? graphs.get(method) : null;
         if (graph == null) {
-            try (TimerCloseable a = SnippetPreparationTime.start()) {
-                FrameStateProcessing frameStateProcessing = method.getAnnotation(Snippet.class).removeAllFrameStates() ? FrameStateProcessing.Removal
-                                : FrameStateProcessing.CollapseFrameForSingleSideEffect;
-                StructuredGraph newGraph = makeGraph(method, recursiveEntry, inliningPolicy(method), frameStateProcessing);
+            try (DebugCloseable a = SnippetPreparationTime.start()) {
+                StructuredGraph newGraph = makeGraph(method, args, recursiveEntry);
                 Debug.metric("SnippetNodeCount[%#s]", method).add(newGraph.getNodeCount());
-                if (!UseSnippetGraphCache) {
+                if (!UseSnippetGraphCache || args != null) {
                     return newGraph;
                 }
                 graphs.putIfAbsent(method, newGraph);
@@ -283,29 +320,34 @@ public class ReplacementsImpl implements Replacements {
     }
 
     @Override
-    public void notifyAfterConstantsBound(StructuredGraph specializedSnippet) {
-
-        // Do deferred intrinsification of node intrinsics
-
-        nodeIntrinsificationPhase.apply(specializedSnippet);
-        new CanonicalizerPhase(true).apply(specializedSnippet, new PhaseContext(providers));
-        NodeIntrinsificationVerificationPhase.verify(specializedSnippet);
-    }
-
-    protected NodeIntrinsificationPhase createNodeIntrinsificationPhase() {
-        return new NodeIntrinsificationPhase(providers, snippetReflection);
-    }
-
-    @Override
-    public StructuredGraph getMethodSubstitution(ResolvedJavaMethod original) {
-        ClassReplacements cr = getClassReplacements(original.getDeclaringClass().getName());
-        ResolvedJavaMethod substitute = cr == null ? null : cr.methodSubstitutions.get(original);
+    public StructuredGraph getSubstitution(ResolvedJavaMethod original, boolean fromBytecodeOnly, int invokeBci) {
+        ResolvedJavaMethod substitute = null;
+        if (!fromBytecodeOnly) {
+            InvocationPlugin plugin = graphBuilderPlugins.getInvocationPlugins().lookupInvocation(original);
+            if (plugin != null) {
+                if (!plugin.inlineOnly() || invokeBci >= 0) {
+                    if (plugin instanceof MethodSubstitutionPlugin) {
+                        MethodSubstitutionPlugin msPlugin = (MethodSubstitutionPlugin) plugin;
+                        substitute = msPlugin.getSubstitute(providers.getMetaAccess());
+                    } else {
+                        StructuredGraph graph = new IntrinsicGraphBuilder(providers.getMetaAccess(), providers.getConstantReflection(), providers.getStampProvider(), original, invokeBci).buildGraph(plugin);
+                        if (graph != null) {
+                            return graph;
+                        }
+                    }
+                }
+            }
+        }
+        if (substitute == null) {
+            ClassReplacements cr = getClassReplacements(original.getDeclaringClass().getName());
+            substitute = cr == null ? null : cr.methodSubstitutions.get(original);
+        }
         if (substitute == null) {
             return null;
         }
         StructuredGraph graph = graphs.get(substitute);
         if (graph == null) {
-            graph = makeGraph(substitute, original, inliningPolicy(substitute), FrameStateProcessing.None);
+            graph = makeGraph(substitute, null, original);
             graph.freeze();
             graphs.putIfAbsent(substitute, graph);
             graph = graphs.get(substitute);
@@ -315,16 +357,11 @@ public class ReplacementsImpl implements Replacements {
 
     }
 
-    public Class<? extends FixedWithNextNode> getMacroSubstitution(ResolvedJavaMethod method) {
-        ClassReplacements cr = getClassReplacements(method.getDeclaringClass().getName());
-        return cr == null ? null : cr.macroSubstitutions.get(method);
-    }
-
     private SubstitutionGuard getGuard(Class<? extends SubstitutionGuard> guardClass) {
         if (guardClass != SubstitutionGuard.class) {
             Constructor<?>[] constructors = guardClass.getConstructors();
             if (constructors.length != 1) {
-                throw new GraalInternalError("Substitution guard " + guardClass.getSimpleName() + " must have a single public constructor");
+                throw new JVMCIError("Substitution guard " + guardClass.getSimpleName() + " must have a single public constructor");
             }
             Constructor<?> constructor = constructors[0];
             Class<?>[] paramTypes = constructor.getParameterTypes();
@@ -338,13 +375,13 @@ public class ReplacementsImpl implements Replacements {
                     } else if (paramTypes[i].isInstance(target.arch)) {
                         args[i] = target.arch;
                     } else {
-                        throw new GraalInternalError("Unsupported type %s in substitution guard constructor: %s", paramTypes[i].getName(), constructor);
+                        throw new JVMCIError("Unsupported type %s in substitution guard constructor: %s", paramTypes[i].getName(), constructor);
                     }
                 }
 
                 return (SubstitutionGuard) constructor.newInstance(args);
             } catch (Exception e) {
-                throw new GraalInternalError(e);
+                throw new JVMCIError(e);
             }
         }
         return null;
@@ -403,82 +440,24 @@ public class ReplacementsImpl implements Replacements {
     }
 
     /**
-     * Registers a macro substitution.
-     *
-     * @param originalMethod a method or constructor being substituted
-     * @param macro the substitute macro node class
-     * @return the original method
-     */
-    protected ResolvedJavaMethod registerMacroSubstitution(ClassReplacements cr, Executable originalMethod, Class<? extends FixedWithNextNode> macro) {
-        MetaAccessProvider metaAccess = providers.getMetaAccess();
-        ResolvedJavaMethod originalJavaMethod = metaAccess.lookupJavaMethod(originalMethod);
-        cr.macroSubstitutions.put(originalJavaMethod, macro);
-        return originalJavaMethod;
-    }
-
-    private static SnippetInliningPolicy createPolicyClassInstance(Class<? extends SnippetInliningPolicy> policyClass) {
-        try {
-            return policyClass.getConstructor().newInstance();
-        } catch (Exception e) {
-            throw new GraalInternalError(e);
-        }
-    }
-
-    protected SnippetInliningPolicy inliningPolicy(ResolvedJavaMethod method) {
-        Class<? extends SnippetInliningPolicy> policyClass = SnippetInliningPolicy.class;
-        Snippet snippet = method.getAnnotation(Snippet.class);
-        if (snippet != null) {
-            policyClass = snippet.inlining();
-        }
-        if (policyClass == SnippetInliningPolicy.class) {
-            return new DefaultSnippetInliningPolicy(providers.getMetaAccess());
-        }
-        return createPolicyClassInstance(policyClass);
-    }
-
-    /**
      * Creates a preprocessed graph for a snippet or method substitution.
      *
      * @param method the snippet or method substitution for which a graph will be created
+     * @param args
      * @param original the original method if {@code method} is a {@linkplain MethodSubstitution
      *            substitution} otherwise null
-     * @param policy the inlining policy to use during preprocessing
-     * @param frameStateProcessing controls how {@link FrameState FrameStates} should be handled.
      */
-    public StructuredGraph makeGraph(ResolvedJavaMethod method, ResolvedJavaMethod original, SnippetInliningPolicy policy, FrameStateProcessing frameStateProcessing) {
-        return createGraphMaker(method, original, frameStateProcessing).makeGraph(policy);
+    public StructuredGraph makeGraph(ResolvedJavaMethod method, Object[] args, ResolvedJavaMethod original) {
+        try (OverrideScope s = OptionValue.override(DeoptALot, false)) {
+            return createGraphMaker(method, original).makeGraph(args);
+        }
     }
 
     /**
      * Can be overridden to return an object that specializes various parts of graph preprocessing.
      */
-    protected GraphMaker createGraphMaker(ResolvedJavaMethod substitute, ResolvedJavaMethod original, FrameStateProcessing frameStateProcessing) {
-        return new GraphMaker(this, substitute, original, frameStateProcessing);
-    }
-
-    /**
-     * Cache to speed up preprocessing of replacement graphs.
-     */
-    final ConcurrentMap<ResolvedJavaMethod, StructuredGraph> graphCache = new ConcurrentHashMap<>();
-
-    public enum FrameStateProcessing {
-        None,
-        CollapseFrameForSingleSideEffect,
-        Removal
-    }
-
-    /**
-     * Calls in snippets to methods matching one of these filters are elided. Only void methods are
-     * considered for elision.
-     */
-    private static final MethodFilter[] MethodsElidedInSnippets = getMethodsElidedInSnippets();
-
-    private static MethodFilter[] getMethodsElidedInSnippets() {
-        String commaSeparatedPatterns = System.getProperty("graal.MethodsElidedInSnippets");
-        if (commaSeparatedPatterns != null) {
-            return MethodFilter.parse(commaSeparatedPatterns);
-        }
-        return null;
+    protected GraphMaker createGraphMaker(ResolvedJavaMethod substitute, ResolvedJavaMethod original) {
+        return new GraphMaker(this, substitute, original);
     }
 
     /**
@@ -500,24 +479,16 @@ public class ReplacementsImpl implements Replacements {
          */
         protected final ResolvedJavaMethod substitutedMethod;
 
-        /**
-         * Controls how FrameStates are processed.
-         */
-        private FrameStateProcessing frameStateProcessing;
-
-        protected GraphMaker(ReplacementsImpl replacements, ResolvedJavaMethod substitute, ResolvedJavaMethod substitutedMethod, FrameStateProcessing frameStateProcessing) {
+        protected GraphMaker(ReplacementsImpl replacements, ResolvedJavaMethod substitute, ResolvedJavaMethod substitutedMethod) {
             this.replacements = replacements;
             this.method = substitute;
             this.substitutedMethod = substitutedMethod;
-            this.frameStateProcessing = frameStateProcessing;
         }
 
-        public StructuredGraph makeGraph(final SnippetInliningPolicy policy) {
+        public StructuredGraph makeGraph(Object[] args) {
             try (Scope s = Debug.scope("BuildSnippetGraph", method)) {
-                StructuredGraph graph = parseGraph(method, policy, 0);
-
-                // Cannot have a finalized version of a graph in the cache
-                graph = graph.copy();
+                assert method.hasBytecodes() : method;
+                StructuredGraph graph = buildInitialGraph(method, args);
 
                 finalizeGraph(graph);
 
@@ -533,28 +504,19 @@ public class ReplacementsImpl implements Replacements {
          * Does final processing of a snippet graph.
          */
         protected void finalizeGraph(StructuredGraph graph) {
-            replacements.nodeIntrinsificationPhase.apply(graph);
-            if (!SnippetTemplate.hasConstantParameter(method)) {
-                NodeIntrinsificationVerificationPhase.verify(graph);
-            }
-            int sideEffectCount = 0;
-            assert (sideEffectCount = graph.getNodes().filter(e -> hasSideEffect(e)).count()) >= 0;
-            new ConvertDeoptimizeToGuardPhase().apply(graph, null);
-            assert sideEffectCount == graph.getNodes().filter(e -> hasSideEffect(e)).count() : "deleted side effecting node";
+            if (!GraalOptions.SnippetCounters.getValue() || graph.getNodes().filter(SnippetCounterNode.class).isEmpty()) {
+                int sideEffectCount = 0;
+                assert (sideEffectCount = graph.getNodes().filter(e -> hasSideEffect(e)).count()) >= 0;
+                new ConvertDeoptimizeToGuardPhase().apply(graph, null);
+                assert sideEffectCount == graph.getNodes().filter(e -> hasSideEffect(e)).count() : "deleted side effecting node";
 
-            switch (frameStateProcessing) {
-                case Removal:
-                    for (Node node : graph.getNodes()) {
-                        if (node instanceof StateSplit) {
-                            ((StateSplit) node).setStateAfter(null);
-                        }
-                    }
-                    break;
-                case CollapseFrameForSingleSideEffect:
-                    new CollapseFrameForSingleSideEffectPhase().apply(graph);
-                    break;
+                new DeadCodeEliminationPhase(Required).apply(graph);
+            } else {
+                // ConvertDeoptimizeToGuardPhase will eliminate snippet counters on paths
+                // that terminate in a deopt so we disable it if the graph contains
+                // snippet counters. The trade off is that we miss out on guard
+                // coalescing opportunities.
             }
-            new DeadCodeEliminationPhase(Required).apply(graph);
         }
 
         /**
@@ -586,49 +548,43 @@ public class ReplacementsImpl implements Replacements {
             return false;
         }
 
-        private static final int MAX_GRAPH_INLINING_DEPTH = 100; // more than enough
-
-        private StructuredGraph parseGraph(final ResolvedJavaMethod methodToParse, final SnippetInliningPolicy policy, int inliningDepth) {
-            StructuredGraph graph = replacements.graphCache.get(methodToParse);
-            if (graph == null) {
-                StructuredGraph newGraph = null;
-                try (Scope s = Debug.scope("ParseGraph", methodToParse)) {
-                    newGraph = buildGraph(methodToParse, policy == null ? replacements.inliningPolicy(methodToParse) : policy, inliningDepth);
-                } catch (Throwable e) {
-                    throw Debug.handle(e);
-                }
-
-                replacements.graphCache.putIfAbsent(methodToParse, newGraph);
-                graph = replacements.graphCache.get(methodToParse);
-                assert graph != null;
-            }
-            return graph;
-        }
-
         /**
          * Builds the initial graph for a snippet.
          */
-        protected StructuredGraph buildInitialGraph(final ResolvedJavaMethod methodToParse) {
+        protected StructuredGraph buildInitialGraph(final ResolvedJavaMethod methodToParse, Object[] args) {
             // Replacements cannot have optimistic assumptions since they have
             // to be valid for the entire run of the VM.
             final StructuredGraph graph = new StructuredGraph(methodToParse, AllowAssumptions.NO);
 
-            // They will also never be never be evolved or have breakpoints set in them
+            // They will also never evolve or have breakpoints set in them
             graph.disableInlinedMethodRecording();
+            // They are not user code so they do not participate in unsafe access tracking
+            graph.disableUnsafeAccessTracking();
 
             try (Scope s = Debug.scope("buildInitialGraph", graph)) {
                 MetaAccessProvider metaAccess = replacements.providers.getMetaAccess();
 
-                if (MethodsElidedInSnippets != null && methodToParse.getSignature().getReturnKind() == Kind.Void && MethodFilter.matches(MethodsElidedInSnippets, methodToParse)) {
-                    graph.addAfterFixed(graph.start(), graph.add(new ReturnNode(null)));
-                } else {
-                    createGraphBuilder(metaAccess, replacements.providers.getStampProvider(), replacements.providers.getConstantReflection(), GraphBuilderConfiguration.getSnippetDefault(),
-                                    OptimisticOptimizations.NONE).apply(graph);
+                Plugins plugins = new Plugins(replacements.graphBuilderPlugins);
+                GraphBuilderConfiguration config = GraphBuilderConfiguration.getSnippetDefault(plugins);
+                if (args != null) {
+                    plugins.prependParameterPlugin(new ConstantBindingParameterPlugin(args, metaAccess, replacements.snippetReflection));
                 }
-                afterParsing(graph);
+
+                IntrinsicContext initialIntrinsicContext = null;
+                if (method.getAnnotation(Snippet.class) == null) {
+                    // Post-parse inlined intrinsic
+                    initialIntrinsicContext = new IntrinsicContext(substitutedMethod, method, INLINE_AFTER_PARSING);
+                } else {
+                    // Snippet
+                    ResolvedJavaMethod original = substitutedMethod != null ? substitutedMethod : method;
+                    initialIntrinsicContext = new IntrinsicContext(original, method, INLINE_AFTER_PARSING);
+                }
+
+                createGraphBuilder(metaAccess, replacements.providers.getStampProvider(), replacements.providers.getConstantReflection(), config, OptimisticOptimizations.NONE, initialIntrinsicContext).apply(
+                                graph);
 
                 if (OptCanonicalizer.getValue()) {
-                    new CanonicalizerPhase(true).apply(graph, new PhaseContext(replacements.providers));
+                    new CanonicalizerPhase().apply(graph, new PhaseContext(replacements.providers));
                 }
             } catch (Throwable e) {
                 throw Debug.handle(e);
@@ -637,115 +593,8 @@ public class ReplacementsImpl implements Replacements {
         }
 
         protected Instance createGraphBuilder(MetaAccessProvider metaAccess, StampProvider stampProvider, ConstantReflectionProvider constantReflection, GraphBuilderConfiguration graphBuilderConfig,
-                        OptimisticOptimizations optimisticOpts) {
-            return new GraphBuilderPhase.Instance(metaAccess, stampProvider, constantReflection, graphBuilderConfig, optimisticOpts);
-        }
-
-        protected void afterParsing(StructuredGraph graph) {
-            MetaAccessProvider metaAccess = replacements.providers.getMetaAccess();
-            new WordTypeVerificationPhase(metaAccess, replacements.snippetReflection, replacements.providers.getConstantReflection(), replacements.target.wordKind).apply(graph);
-            new WordTypeRewriterPhase(metaAccess, replacements.snippetReflection, replacements.providers.getConstantReflection(), replacements.target.wordKind).apply(graph);
-        }
-
-        protected Object beforeInline(@SuppressWarnings("unused") MethodCallTargetNode callTarget, @SuppressWarnings("unused") StructuredGraph callee) {
-            return null;
-        }
-
-        /**
-         * Called after a graph is inlined.
-         *
-         * @param caller the graph into which {@code callee} was inlined
-         * @param callee the graph that was inlined into {@code caller}
-         * @param beforeInlineData value returned by {@link #beforeInline}.
-         */
-        protected void afterInline(StructuredGraph caller, StructuredGraph callee, Object beforeInlineData) {
-            if (OptCanonicalizer.getValue()) {
-                new CanonicalizerPhase(true).apply(caller, new PhaseContext(replacements.providers));
-            }
-        }
-
-        /**
-         * Called after all inlining for a given graph is complete.
-         */
-        protected void afterInlining(StructuredGraph graph) {
-            replacements.nodeIntrinsificationPhase.apply(graph);
-            new DeadCodeEliminationPhase(Optional).apply(graph);
-            if (OptCanonicalizer.getValue()) {
-                new CanonicalizerPhase(true).apply(graph, new PhaseContext(replacements.providers));
-            }
-        }
-
-        private StructuredGraph buildGraph(final ResolvedJavaMethod methodToParse, final SnippetInliningPolicy policy, int inliningDepth) {
-            assert inliningDepth < MAX_GRAPH_INLINING_DEPTH : "inlining limit exceeded";
-            assert methodToParse.hasBytecodes() : methodToParse;
-            final StructuredGraph graph = buildInitialGraph(methodToParse);
-            try (Scope s = Debug.scope("buildGraph", graph)) {
-                Set<MethodCallTargetNode> doNotInline = null;
-                for (MethodCallTargetNode callTarget : graph.getNodes(MethodCallTargetNode.TYPE)) {
-                    if (doNotInline != null && doNotInline.contains(callTarget)) {
-                        continue;
-                    }
-                    ResolvedJavaMethod callee = callTarget.targetMethod();
-                    if (substitutedMethod != null && (callee.equals(method) || callee.equals(substitutedMethod))) {
-                        /*
-                         * Ensure that calls to the original method inside of a substitution ends up
-                         * calling it instead of the Graal substitution.
-                         */
-                        if (substitutedMethod.hasBytecodes()) {
-                            final StructuredGraph originalGraph = buildInitialGraph(substitutedMethod);
-                            Mark mark = graph.getMark();
-                            InliningUtil.inline(callTarget.invoke(), originalGraph, true, null);
-                            for (MethodCallTargetNode inlinedCallTarget : graph.getNewNodes(mark).filter(MethodCallTargetNode.class)) {
-                                if (doNotInline == null) {
-                                    doNotInline = new HashSet<>();
-                                }
-                                // We do not want to do further inlining (now) for calls
-                                // in the original method as this can cause unlimited
-                                // recursive inlining given an eager inlining policy such
-                                // as DefaultSnippetInliningPolicy.
-                                doNotInline.add(inlinedCallTarget);
-                            }
-                            Debug.dump(graph, "after inlining %s", callee);
-                            afterInline(graph, originalGraph, null);
-                        }
-                    } else {
-                        Class<? extends FixedWithNextNode> macroNodeClass = InliningUtil.getMacroNodeClass(replacements, callee);
-                        if (macroNodeClass != null) {
-                            InliningUtil.inlineMacroNode(callTarget.invoke(), callee, macroNodeClass);
-                        } else {
-                            StructuredGraph intrinsicGraph = InliningUtil.getIntrinsicGraph(replacements, callee);
-                            if (callTarget.invokeKind().isDirect() && (policy.shouldInline(callee, methodToParse) || (intrinsicGraph != null && policy.shouldUseReplacement(callee, methodToParse)))) {
-                                StructuredGraph targetGraph;
-                                if (intrinsicGraph != null && policy.shouldUseReplacement(callee, methodToParse)) {
-                                    targetGraph = intrinsicGraph;
-                                } else {
-                                    if (callee.getName().startsWith("$jacoco")) {
-                                        throw new GraalInternalError("Parsing call to JaCoCo instrumentation method " + callee.format("%H.%n(%p)") + " from " + methodToParse.format("%H.%n(%p)") +
-                                                        " while preparing replacement " + method.format("%H.%n(%p)") + ". Placing \"//JaCoCo Exclude\" anywhere in " +
-                                                        methodToParse.getDeclaringClass().getSourceFileName() + " should fix this.");
-                                    }
-                                    targetGraph = parseGraph(callee, policy, inliningDepth + 1);
-                                }
-                                Object beforeInlineData = beforeInline(callTarget, targetGraph);
-                                InliningUtil.inline(callTarget.invoke(), targetGraph, true, null);
-                                Debug.dump(graph, "after inlining %s", callee);
-                                afterInline(graph, targetGraph, beforeInlineData);
-                            }
-                        }
-                    }
-                }
-
-                afterInlining(graph);
-
-                for (LoopEndNode end : graph.getNodes(LoopEndNode.TYPE)) {
-                    end.disableSafepoint();
-                }
-
-                new DeadCodeEliminationPhase(Required).apply(graph);
-            } catch (Throwable e) {
-                throw Debug.handle(e);
-            }
-            return graph;
+                        OptimisticOptimizations optimisticOpts, IntrinsicContext initialIntrinsicContext) {
+            return new GraphBuilderPhase.Instance(metaAccess, stampProvider, constantReflection, graphBuilderConfig, optimisticOpts, initialIntrinsicContext);
         }
     }
 
@@ -764,7 +613,7 @@ public class ReplacementsImpl implements Replacements {
      * @param optional if true, resolution failure returns null
      * @return the resolved class or null if resolution fails and {@code optional} is true
      */
-    static Class<?> resolveClass(String className, boolean optional) {
+    public static Class<?> resolveClass(String className, boolean optional) {
         try {
             // Need to use launcher class path to handle classes
             // that are not on the boot class path
@@ -774,7 +623,7 @@ public class ReplacementsImpl implements Replacements {
             if (optional) {
                 return null;
             }
-            throw new GraalInternalError("Could not resolve type " + className);
+            throw new JVMCIError("Could not resolve type " + className);
         }
     }
 
@@ -818,19 +667,28 @@ public class ReplacementsImpl implements Replacements {
         for (String internalName : classReplacements.keySet()) {
             ClassReplacements cr = getClassReplacements(internalName);
             result.addAll(cr.methodSubstitutions.keySet());
-            result.addAll(cr.macroSubstitutions.keySet());
         }
         return result;
     }
 
-    @Override
-    public boolean isForcedSubstitution(ResolvedJavaMethod method) {
-        ClassReplacements cr = getClassReplacements(method.getDeclaringClass().getName());
-        return cr != null && cr.forcedSubstitutions.contains(method);
+    public boolean hasSubstitution(ResolvedJavaMethod method, boolean fromBytecodeOnly, int callerBci) {
+        if (!fromBytecodeOnly) {
+            InvocationPlugin plugin = graphBuilderPlugins.getInvocationPlugins().lookupInvocation(method);
+            if (plugin != null) {
+                if (!plugin.inlineOnly() || callerBci >= 0) {
+                    return true;
+                }
+            }
+        }
+        return getSubstitutionMethod(method) != null;
     }
 
-    @Override
-    public ResolvedJavaMethod getMethodSubstitutionMethod(ResolvedJavaMethod original) {
+    public ResolvedJavaMethod getSubstitutionMethod(ResolvedJavaMethod original) {
+        InvocationPlugin plugin = graphBuilderPlugins.getInvocationPlugins().lookupInvocation(original);
+        if (plugin instanceof MethodSubstitutionPlugin) {
+            MethodSubstitutionPlugin msPlugin = (MethodSubstitutionPlugin) plugin;
+            return msPlugin.getSubstitute(providers.getMetaAccess());
+        }
         ClassReplacements cr = getClassReplacements(original.getDeclaringClass().getName());
         return cr == null ? null : cr.methodSubstitutions.get(original);
     }

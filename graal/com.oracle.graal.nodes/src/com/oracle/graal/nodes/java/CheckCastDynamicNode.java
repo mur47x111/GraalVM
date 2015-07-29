@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.nodes.java;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
 import com.oracle.graal.nodeinfo.*;
@@ -100,7 +101,4 @@ public final class CheckCastDynamicNode extends FixedWithNextNode implements Can
         }
         return this;
     }
-
-    @NodeIntrinsic
-    public static native <T> T checkCastDynamic(Class<T> type, Object object, @ConstantNodeParameter boolean forStoreCheck);
 }

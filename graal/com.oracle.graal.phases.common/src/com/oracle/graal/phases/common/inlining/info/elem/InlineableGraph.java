@@ -27,9 +27,10 @@ import static com.oracle.graal.phases.common.DeadCodeEliminationPhase.Optionalit
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
@@ -60,9 +61,9 @@ public class InlineableGraph implements Inlineable {
     private FixedNodeProbabilityCache probabilites = new FixedNodeProbabilityCache();
 
     public InlineableGraph(final ResolvedJavaMethod method, final Invoke invoke, final HighTierContext context, CanonicalizerPhase canonicalizer) {
-        StructuredGraph original = getOriginalGraph(method, context, canonicalizer, invoke.asNode().graph());
+        StructuredGraph original = getOriginalGraph(method, context, canonicalizer, invoke.asNode().graph(), invoke.bci());
         // TODO copying the graph is only necessary if it is modified or if it contains any invokes
-        this.graph = original.copy();
+        this.graph = (StructuredGraph) original.copy();
         specializeGraphToArguments(invoke, context, canonicalizer);
     }
 
@@ -71,12 +72,8 @@ public class InlineableGraph implements Inlineable {
      * The graph thus obtained is returned, ie the caller is responsible for cloning before
      * modification.
      */
-    private static StructuredGraph getOriginalGraph(final ResolvedJavaMethod method, final HighTierContext context, CanonicalizerPhase canonicalizer, StructuredGraph caller) {
-        StructuredGraph result = InliningUtil.getIntrinsicGraph(context.getReplacements(), method);
-        if (result != null) {
-            return result;
-        }
-        result = getCachedGraph(method, context);
+    private static StructuredGraph getOriginalGraph(final ResolvedJavaMethod method, final HighTierContext context, CanonicalizerPhase canonicalizer, StructuredGraph caller, int callerBci) {
+        StructuredGraph result = InliningUtil.getIntrinsicGraph(context.getReplacements(), method, callerBci);
         if (result != null) {
             return result;
         }
@@ -126,10 +123,8 @@ public class InlineableGraph implements Inlineable {
     /**
      * This method detects:
      * <ul>
-     * <li>
-     * constants among the arguments to the <code>invoke</code></li>
-     * <li>
-     * arguments with more precise type than that declared by the corresponding parameter</li>
+     * <li>constants among the arguments to the <code>invoke</code></li>
+     * <li>arguments with more precise type than that declared by the corresponding parameter</li>
      * </ul>
      *
      * <p>
@@ -182,22 +177,10 @@ public class InlineableGraph implements Inlineable {
         return result;
     }
 
-    private static StructuredGraph getCachedGraph(ResolvedJavaMethod method, HighTierContext context) {
-        if (context.getGraphCache() != null) {
-            StructuredGraph cachedGraph = context.getGraphCache().get(method);
-            if (cachedGraph != null) {
-                // TODO: check that cachedGraph.getAssumptions() are still valid
-                // instead of waiting for code installation to do it.
-                return cachedGraph;
-            }
-        }
-        return null;
-    }
-
     /**
      * This method builds the IR nodes for the given <code>method</code> and canonicalizes them.
      * Provided profiling info is mature, the resulting graph is cached. The caller is responsible
-     * for cloning before modification.</p>
+     * for cloning before modification. </p>
      */
     private static StructuredGraph parseBytecodes(ResolvedJavaMethod method, HighTierContext context, CanonicalizerPhase canonicalizer, StructuredGraph caller) {
         StructuredGraph newGraph = new StructuredGraph(method, AllowAssumptions.from(caller.getAssumptions() != null));
@@ -208,6 +191,9 @@ public class InlineableGraph implements Inlineable {
                 // preserved in the graph cache (if used) which is
                 // ok since the graph cache is compilation local.
                 newGraph.disableInlinedMethodRecording();
+            }
+            if (!caller.isUnsafeAccessTrackingEnabled()) {
+                newGraph.disableUnsafeAccessTracking();
             }
             if (context.getGraphBuilderSuite() != null) {
                 context.getGraphBuilderSuite().apply(newGraph, context);
@@ -221,9 +207,6 @@ public class InlineableGraph implements Inlineable {
                 canonicalizer.apply(newGraph, context);
             }
 
-            if (context.getGraphCache() != null) {
-                context.getGraphCache().put(newGraph.method(), newGraph);
-            }
             return newGraph;
         } catch (Throwable e) {
             throw Debug.handle(e);

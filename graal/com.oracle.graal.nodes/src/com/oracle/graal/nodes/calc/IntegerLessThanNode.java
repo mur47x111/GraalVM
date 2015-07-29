@@ -22,8 +22,10 @@
  */
 package com.oracle.graal.nodes.calc;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
@@ -112,6 +114,87 @@ public final class IntegerLessThanNode extends CompareNode {
         } else if (newX.stamp() instanceof IntegerStamp && newY.stamp() instanceof IntegerStamp) {
             return new IntegerLessThanNode(newX, newY);
         }
-        throw GraalInternalError.shouldNotReachHere();
+        throw JVMCIError.shouldNotReachHere();
+    }
+
+    @Override
+    public Stamp getSucceedingStampForX(boolean negated) {
+        Stamp xStampGeneric = getX().stamp();
+        Stamp yStampGeneric = getY().stamp();
+        if (xStampGeneric instanceof IntegerStamp) {
+            IntegerStamp xStamp = (IntegerStamp) xStampGeneric;
+            int bits = xStamp.getBits();
+            if (yStampGeneric instanceof IntegerStamp) {
+                IntegerStamp yStamp = (IntegerStamp) yStampGeneric;
+                assert yStamp.getBits() == bits;
+                if (negated) {
+                    // x >= y
+                    long xLowerBound = xStamp.lowerBound();
+                    long yLowerBound = yStamp.lowerBound();
+                    if (yLowerBound > xLowerBound) {
+                        return new IntegerStamp(bits, yLowerBound, xStamp.upperBound(), xStamp.downMask(), xStamp.upMask());
+                    }
+                } else {
+                    // x < y
+                    long xUpperBound = xStamp.upperBound();
+                    long yUpperBound = yStamp.upperBound();
+                    if (yUpperBound == CodeUtil.minValue(bits)) {
+                        return null;
+                    } else if (yUpperBound <= xUpperBound) {
+                        assert yUpperBound != CodeUtil.minValue(bits);
+                        return new IntegerStamp(bits, xStamp.lowerBound(), yUpperBound - 1, xStamp.downMask(), xStamp.upMask());
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public Stamp getSucceedingStampForY(boolean negated) {
+        Stamp xStampGeneric = getX().stamp();
+        Stamp yStampGeneric = getY().stamp();
+        if (xStampGeneric instanceof IntegerStamp) {
+            IntegerStamp xStamp = (IntegerStamp) xStampGeneric;
+            int bits = xStamp.getBits();
+            if (yStampGeneric instanceof IntegerStamp) {
+                IntegerStamp yStamp = (IntegerStamp) yStampGeneric;
+                assert yStamp.getBits() == bits;
+                if (negated) {
+                    // y <= x
+                    long xUpperBound = xStamp.upperBound();
+                    long yUpperBound = yStamp.upperBound();
+                    if (xUpperBound < yUpperBound) {
+                        return new IntegerStamp(bits, yStamp.lowerBound(), xUpperBound, yStamp.downMask(), yStamp.upMask());
+                    }
+                } else {
+                    // y > x
+                    long xLowerBound = xStamp.lowerBound();
+                    long yLowerBound = yStamp.lowerBound();
+                    if (xLowerBound == CodeUtil.maxValue(bits)) {
+                        return null;
+                    } else if (xLowerBound >= yLowerBound) {
+                        assert xLowerBound != CodeUtil.maxValue(bits);
+                        return new IntegerStamp(bits, xLowerBound + 1, yStamp.upperBound(), yStamp.downMask(), yStamp.upMask());
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public TriState tryFold(Stamp xStampGeneric, Stamp yStampGeneric) {
+        if (xStampGeneric instanceof IntegerStamp && yStampGeneric instanceof IntegerStamp) {
+            IntegerStamp xStamp = (IntegerStamp) xStampGeneric;
+            IntegerStamp yStamp = (IntegerStamp) yStampGeneric;
+            if (xStamp.upperBound() < yStamp.lowerBound()) {
+                return TriState.TRUE;
+            }
+            if (xStamp.lowerBound() >= yStamp.upperBound()) {
+                return TriState.FALSE;
+            }
+        }
+        return TriState.UNKNOWN;
     }
 }

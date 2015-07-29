@@ -24,8 +24,9 @@ package com.oracle.graal.truffle;
 
 import java.lang.reflect.*;
 
-import com.oracle.graal.api.code.stack.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.code.stack.*;
+import jdk.internal.jvmci.common.*;
+
 import com.oracle.truffle.api.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.*;
@@ -73,7 +74,7 @@ public abstract class GraalFrameInstance implements FrameInstance {
                 }
                 return (Frame) stackFrame.getLocal(getFrameIndex());
             default:
-                throw GraalInternalError.unimplemented();
+                throw JVMCIError.unimplemented();
         }
     }
 
@@ -96,7 +97,7 @@ public abstract class GraalFrameInstance implements FrameInstance {
             try {
                 METHOD = OptimizedDirectCallNode.class.getDeclaredMethod("callProxy", MaterializedFrameNotify.class, CallTarget.class, VirtualFrame.class, Object[].class, boolean.class);
             } catch (NoSuchMethodException | SecurityException e) {
-                throw new GraalInternalError(e);
+                throw new JVMCIError(e);
             }
         }
         private static final int NOTIFY_INDEX = 0;
@@ -141,7 +142,7 @@ public abstract class GraalFrameInstance implements FrameInstance {
             try {
                 METHOD = OptimizedCallTarget.class.getDeclaredMethod("callProxy", VirtualFrame.class);
             } catch (NoSuchMethodException | SecurityException e) {
-                throw new GraalInternalError(e);
+                throw new JVMCIError(e);
             }
         }
         private static final int NOTIFY_INDEX = -1;

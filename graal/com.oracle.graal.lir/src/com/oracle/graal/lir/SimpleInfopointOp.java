@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.lir;
 
-import com.oracle.graal.api.code.*;
+import jdk.internal.jvmci.code.*;
+
 import com.oracle.graal.lir.asm.*;
 
 @Opcode("SIMPLE_INFOPOINT")
@@ -39,6 +40,6 @@ public final class SimpleInfopointOp extends LIRInstruction {
 
     @Override
     public void emitCode(CompilationResultBuilder crb) {
-        crb.recordInfopoint(crb.asm.position(), new DebugInfo(position, null), reason);
+        crb.recordInfopoint(crb.asm.position(), new DebugInfo(position), reason);
     }
 }

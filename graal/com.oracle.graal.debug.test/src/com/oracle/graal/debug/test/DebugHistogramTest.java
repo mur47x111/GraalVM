@@ -24,10 +24,10 @@ package com.oracle.graal.debug.test;
 
 import java.io.*;
 
-import org.junit.*;
-
 import com.oracle.graal.debug.*;
 import com.oracle.graal.debug.internal.*;
+
+import org.junit.*;
 
 public class DebugHistogramTest {
 

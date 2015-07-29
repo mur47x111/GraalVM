@@ -22,20 +22,18 @@
  */
 package com.oracle.graal.replacements.test;
 
-import static org.junit.Assert.*;
-
 import java.lang.reflect.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.compiler.test.*;
-import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
-import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.inlining.*;
 import com.oracle.graal.phases.tiers.*;
@@ -47,14 +45,14 @@ import com.oracle.graal.phases.tiers.*;
  */
 public abstract class MethodSubstitutionTest extends GraalCompilerTest {
 
-    protected StructuredGraph test(final String snippet) {
+    protected StructuredGraph testGraph(final String snippet) {
         try (Scope s = Debug.scope("MethodSubstitutionTest", getResolvedJavaMethod(snippet))) {
             StructuredGraph graph = parseEager(snippet, AllowAssumptions.YES);
-            HighTierContext context = new HighTierContext(getProviders(), null, getDefaultGraphBuilderSuite(), OptimisticOptimizations.ALL);
+            HighTierContext context = getDefaultHighTierContext();
             Debug.dump(graph, "Graph");
-            new InliningPhase(new CanonicalizerPhase(true)).apply(graph, context);
+            new InliningPhase(new CanonicalizerPhase()).apply(graph, context);
             Debug.dump(graph, "Graph");
-            new CanonicalizerPhase(true).apply(graph, context);
+            new CanonicalizerPhase().apply(graph, context);
             new DeadCodeEliminationPhase().apply(graph);
 
             assertNotInGraph(graph, Invoke.class);
@@ -76,10 +74,10 @@ public abstract class MethodSubstitutionTest extends GraalCompilerTest {
     protected void testSubstitution(String testMethodName, Class<?> intrinsicClass, Class<?> holder, String methodName, Class<?>[] parameterTypes, boolean optional, Object[] args1, Object[] args2) {
         ResolvedJavaMethod realMethod = getResolvedJavaMethod(holder, methodName, parameterTypes);
         ResolvedJavaMethod testMethod = getResolvedJavaMethod(testMethodName);
-        StructuredGraph graph = test(testMethodName);
+        StructuredGraph graph = testGraph(testMethodName);
 
         // Check to see if the resulting graph contains the expected node
-        StructuredGraph replacement = getReplacements().getMethodSubstitution(realMethod);
+        StructuredGraph replacement = getReplacements().getSubstitution(realMethod, -1);
         if (replacement == null && !optional) {
             assertInGraph(graph, intrinsicClass);
         }

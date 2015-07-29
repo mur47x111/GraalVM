@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,10 +24,13 @@ package com.oracle.graal.nodes;
 
 import java.util.*;
 import java.util.concurrent.atomic.*;
+import java.util.function.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.code.Assumptions.Assumption;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.compiler.Compiler;
+import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.meta.Assumptions.Assumption;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -39,7 +42,7 @@ import com.oracle.graal.nodes.util.*;
  * A graph that contains at least one distinguished node : the {@link #start() start} node. This
  * node is the start of the control flow of the graph.
  */
-public class StructuredGraph extends Graph {
+public class StructuredGraph extends Graph implements JavaMethodContex {
 
     /**
      * The different stages of the compilation of a {@link Graph} regarding the status of
@@ -80,6 +83,10 @@ public class StructuredGraph extends Graph {
         public boolean areFrameStatesAtSideEffects() {
             return !this.areFrameStatesAtDeopts();
         }
+
+        public boolean areDeoptsFixed() {
+            return this.ordinal() >= FIXED_DEOPTS.ordinal();
+        }
     }
 
     /**
@@ -93,7 +100,6 @@ public class StructuredGraph extends Graph {
         }
     }
 
-    public static final int INVOCATION_ENTRY_BCI = -1;
     public static final long INVALID_GRAPH_ID = -1;
 
     private static final AtomicLong uniqueGraphIds = new AtomicLong();
@@ -111,10 +117,21 @@ public class StructuredGraph extends Graph {
      */
     private final Assumptions assumptions;
 
+    private final SpeculationLog speculationLog;
+
     /**
-     * The methods that were inlined while constructing this graph.
+     * Records the methods that were inlined while constructing this graph along with how many times
+     * each method was inlined.
      */
-    private Set<ResolvedJavaMethod> inlinedMethods = new HashSet<>();
+    private Map<ResolvedJavaMethod, Integer> inlinedMethods = new HashMap<>();
+
+    private static enum UnsafeAccessState {
+        NO_ACCESS,
+        HAS_ACCESS,
+        DISABLED
+    }
+
+    private UnsafeAccessState hasUnsafeAccess = UnsafeAccessState.NO_ACCESS;
 
     /**
      * Creates a new Graph containing a single {@link AbstractBeginNode} as the {@link #start()
@@ -129,24 +146,33 @@ public class StructuredGraph extends Graph {
      * start} node.
      */
     public StructuredGraph(String name, ResolvedJavaMethod method, AllowAssumptions allowAssumptions) {
-        this(name, method, uniqueGraphIds.incrementAndGet(), INVOCATION_ENTRY_BCI, allowAssumptions);
+        this(name, method, uniqueGraphIds.incrementAndGet(), Compiler.INVOCATION_ENTRY_BCI, allowAssumptions, null);
+    }
+
+    public StructuredGraph(String name, ResolvedJavaMethod method, AllowAssumptions allowAssumptions, SpeculationLog speculationLog) {
+        this(name, method, uniqueGraphIds.incrementAndGet(), Compiler.INVOCATION_ENTRY_BCI, allowAssumptions, speculationLog);
     }
 
     public StructuredGraph(ResolvedJavaMethod method, AllowAssumptions allowAssumptions) {
-        this(null, method, uniqueGraphIds.incrementAndGet(), INVOCATION_ENTRY_BCI, allowAssumptions);
+        this(null, method, uniqueGraphIds.incrementAndGet(), Compiler.INVOCATION_ENTRY_BCI, allowAssumptions, null);
     }
 
-    public StructuredGraph(ResolvedJavaMethod method, int entryBCI, AllowAssumptions allowAssumptions) {
-        this(null, method, uniqueGraphIds.incrementAndGet(), entryBCI, allowAssumptions);
+    public StructuredGraph(ResolvedJavaMethod method, AllowAssumptions allowAssumptions, SpeculationLog speculationLog) {
+        this(null, method, uniqueGraphIds.incrementAndGet(), Compiler.INVOCATION_ENTRY_BCI, allowAssumptions, speculationLog);
     }
 
-    private StructuredGraph(String name, ResolvedJavaMethod method, long graphId, int entryBCI, AllowAssumptions allowAssumptions) {
+    public StructuredGraph(ResolvedJavaMethod method, int entryBCI, AllowAssumptions allowAssumptions, SpeculationLog speculationLog) {
+        this(null, method, uniqueGraphIds.incrementAndGet(), entryBCI, allowAssumptions, speculationLog);
+    }
+
+    private StructuredGraph(String name, ResolvedJavaMethod method, long graphId, int entryBCI, AllowAssumptions allowAssumptions, SpeculationLog speculationLog) {
         super(name);
         this.setStart(add(new StartNode()));
         this.method = method;
         this.graphId = graphId;
         this.entryBCI = entryBCI;
         this.assumptions = allowAssumptions == AllowAssumptions.YES ? new Assumptions() : null;
+        this.speculationLog = speculationLog;
     }
 
     public Stamp getReturnStamp() {
@@ -203,7 +229,7 @@ public class StructuredGraph extends Graph {
     }
 
     public boolean isOSR() {
-        return entryBCI != INVOCATION_ENTRY_BCI;
+        return entryBCI != Compiler.INVOCATION_ENTRY_BCI;
     }
 
     public long graphId() {
@@ -214,29 +240,33 @@ public class StructuredGraph extends Graph {
         this.start = start;
     }
 
+    /**
+     * Creates a copy of this graph.
+     *
+     * @param newName the name of the copy, used for debugging purposes (can be null)
+     * @param duplicationMapCallback consumer of the duplication map created during the copying
+     */
     @Override
-    public StructuredGraph copy() {
-        return copy(name);
-    }
-
-    public StructuredGraph copy(String newName, ResolvedJavaMethod newMethod) {
-        return copy(newName, newMethod, AllowAssumptions.from(assumptions != null), isInlinedMethodRecordingEnabled());
-    }
-
-    public StructuredGraph copy(String newName, ResolvedJavaMethod newMethod, AllowAssumptions allowAssumptions, boolean enableInlinedMethodRecording) {
-        StructuredGraph copy = new StructuredGraph(newName, newMethod, graphId, entryBCI, allowAssumptions);
+    protected Graph copy(String newName, Consumer<Map<Node, Node>> duplicationMapCallback) {
+        AllowAssumptions allowAssumptions = AllowAssumptions.from(assumptions != null);
+        boolean enableInlinedMethodRecording = isInlinedMethodRecordingEnabled();
+        StructuredGraph copy = new StructuredGraph(newName, method, graphId, entryBCI, allowAssumptions, speculationLog);
         if (allowAssumptions == AllowAssumptions.YES && assumptions != null) {
             copy.assumptions.record(assumptions);
         }
         if (!enableInlinedMethodRecording) {
             copy.disableInlinedMethodRecording();
         }
+        copy.hasUnsafeAccess = hasUnsafeAccess;
         copy.setGuardsStage(getGuardsStage());
         copy.isAfterFloatingReadPhase = isAfterFloatingReadPhase;
         copy.hasValueProxies = hasValueProxies;
         Map<Node, Node> replacements = Node.newMap();
         replacements.put(start, copy.start);
-        copy.addDuplicates(getNodes(), this, this.getNodeCount(), replacements);
+        Map<Node, Node> duplicates = copy.addDuplicates(getNodes(), this, this.getNodeCount(), replacements);
+        if (duplicationMapCallback != null) {
+            duplicationMapCallback.accept(duplicates);
+        }
         return copy;
     }
 
@@ -247,11 +277,6 @@ public class StructuredGraph extends Graph {
         Map<Node, Node> replacements = Node.newMap();
         replacements.put(start, copy.start);
         return copy.addDuplicates(getNodes(), this, this.getNodeCount(), replacements);
-    }
-
-    @Override
-    public StructuredGraph copy(String newName) {
-        return copy(newName, method);
     }
 
     public ParameterNode getParameter(int index) {
@@ -333,7 +358,7 @@ public class StructuredGraph extends Graph {
         if (node instanceof AbstractBeginNode) {
             ((AbstractBeginNode) node).prepareDelete();
         }
-        assert node.hasNoUsages() : node + " " + node.usages();
+        assert node.hasNoUsages() : node + " " + node.usages().count() + ", " + node.usages().first();
         GraphUtil.unlinkFixedNode(node);
         node.safeDelete();
     }
@@ -439,6 +464,7 @@ public class StructuredGraph extends Graph {
         assert node != null && newNode != null && node.isAlive() && newNode.isAlive() : "cannot add " + newNode + " before " + node;
         assert node.predecessor() != null && node.predecessor() instanceof FixedWithNextNode : "cannot add " + newNode + " before " + node;
         assert newNode.next() == null : newNode;
+        assert !(node instanceof AbstractMergeNode);
         FixedWithNextNode pred = (FixedWithNextNode) node.predecessor();
         pred.setNext(newNode);
         newNode.setNext(node);
@@ -521,12 +547,12 @@ public class StructuredGraph extends Graph {
     }
 
     /**
-     * Disables recording of methods inlined while constructing this graph. This can be done at most
+     * Disables method inlining recording while constructing this graph. This can be done at most
      * once and must be done before any inlined methods are recorded.
      */
     public void disableInlinedMethodRecording() {
-        assert inlinedMethods != null : "cannot disable inlined method recording more than once";
-        assert inlinedMethods.isEmpty() : "cannot disable inlined method recording once methods have been recorded";
+        assert inlinedMethods != null : "cannot disable method inlining recording more than once";
+        assert inlinedMethods.isEmpty() : "cannot disable method inlining recording once methods have been recorded";
         inlinedMethods = null;
     }
 
@@ -537,10 +563,103 @@ public class StructuredGraph extends Graph {
     /**
      * Gets the methods that were inlined while constructing this graph.
      *
-     * @return {@code null} if inlined method recording has been
+     * @return {@code null} if method inlining recording has been
      *         {@linkplain #disableInlinedMethodRecording() disabled}
      */
     public Set<ResolvedJavaMethod> getInlinedMethods() {
-        return inlinedMethods;
+        return inlinedMethods == null ? null : inlinedMethods.keySet();
+    }
+
+    /**
+     * If method inlining recording has not been {@linkplain #disableInlinedMethodRecording()
+     * disabled}, records that {@code inlinedMethod} was inlined to this graph. Otherwise, this
+     * method does nothing.
+     */
+    public void recordInlinedMethod(ResolvedJavaMethod inlinedMethod) {
+        if (inlinedMethods != null) {
+            Integer count = inlinedMethods.get(inlinedMethod);
+            if (count != null) {
+                inlinedMethods.put(inlinedMethod, count + 1);
+            } else {
+                inlinedMethods.put(inlinedMethod, 1);
+            }
+        }
+    }
+
+    /**
+     * If method inlining recording has not been {@linkplain #disableInlinedMethodRecording()
+     * disabled}, updates the {@linkplain #getInlinedMethods() inlined methods} of this graph with
+     * the inlined methods of another graph. Otherwise, this method does nothing.
+     */
+    public void updateInlinedMethods(StructuredGraph other) {
+        if (inlinedMethods != null) {
+            assert this != other;
+            Map<ResolvedJavaMethod, Integer> otherInlinedMethods = other.inlinedMethods;
+            if (otherInlinedMethods != null) {
+                for (Map.Entry<ResolvedJavaMethod, Integer> e : otherInlinedMethods.entrySet()) {
+                    ResolvedJavaMethod key = e.getKey();
+                    Integer count = inlinedMethods.get(key);
+                    if (count != null) {
+                        inlinedMethods.put(key, count + e.getValue());
+                    } else {
+                        inlinedMethods.put(key, e.getValue());
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Gets the input bytecode {@linkplain ResolvedJavaMethod#getCodeSize() size} from which this
+     * graph is constructed. This ignores how many bytecodes in each constituent method are actually
+     * parsed (which may be none for methods whose IR is retrieved from a cache or less than the
+     * full amount for any given method due to profile guided branch pruning). If method inlining
+     * recording has been {@linkplain #disableInlinedMethodRecording() disabled} for this graph,
+     * bytecode counts for inlined methods are not included in the returned value.
+     */
+    public int getBytecodeSize() {
+        int res = method.getCodeSize();
+        if (inlinedMethods != null) {
+            for (Map.Entry<ResolvedJavaMethod, Integer> e : inlinedMethods.entrySet()) {
+                int inlinedBytes = e.getValue() * e.getKey().getCodeSize();
+                res += inlinedBytes;
+            }
+        }
+        return res;
+    }
+
+    /**
+     *
+     * @return true if the graph contains only a {@link StartNode} and {@link ReturnNode}
+     */
+    public boolean isTrivial() {
+        return !(start.next() instanceof ReturnNode);
+    }
+
+    public JavaMethod asJavaMethod() {
+        return method();
+    }
+
+    public boolean hasUnsafeAccess() {
+        return hasUnsafeAccess == UnsafeAccessState.HAS_ACCESS;
+    }
+
+    public void markUnsafeAccess() {
+        if (hasUnsafeAccess == UnsafeAccessState.DISABLED) {
+            return;
+        }
+        hasUnsafeAccess = UnsafeAccessState.HAS_ACCESS;
+    }
+
+    public void disableUnsafeAccessTracking() {
+        hasUnsafeAccess = UnsafeAccessState.DISABLED;
+    }
+
+    public boolean isUnsafeAccessTrackingEnabled() {
+        return hasUnsafeAccess != UnsafeAccessState.DISABLED;
+    }
+
+    public SpeculationLog getSpeculationLog() {
+        return speculationLog;
     }
 }

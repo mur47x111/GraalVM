@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,42 +22,46 @@
  */
 package com.oracle.graal.hotspot.replacements;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
-import com.oracle.graal.hotspot.meta.*;
-import com.oracle.graal.hotspot.nodes.type.*;
 import com.oracle.graal.hotspot.word.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
+import com.oracle.graal.nodes.memory.address.*;
 import com.oracle.graal.nodes.spi.*;
 
 /**
  * Read {@code Class::_klass} to get the hub for a {@link java.lang.Class}. This node mostly exists
  * to replace {@code _klass._java_mirror._klass} with {@code _klass}. The constant folding could be
  * handled by
- * {@link ReadNode#canonicalizeRead(ValueNode, LocationNode, ValueNode, CanonicalizerTool)}.
+ * {@link ReadNode#canonicalizeRead(ValueNode, AddressNode, LocationIdentity, CanonicalizerTool)}.
  */
 @NodeInfo
 public final class ClassGetHubNode extends FloatingGuardedNode implements Lowerable, Canonicalizable, ConvertNode {
     public static final NodeClass<ClassGetHubNode> TYPE = NodeClass.create(ClassGetHubNode.class);
     @Input protected ValueNode clazz;
+    StampProvider stampProvider;
 
-    public ClassGetHubNode(ValueNode clazz) {
-        this(clazz, null);
+    public ClassGetHubNode(@InjectedNodeParameter StampProvider stampProvider, ValueNode clazz) {
+        this(stampProvider, clazz, null);
     }
 
-    public ClassGetHubNode(ValueNode clazz, ValueNode guard) {
-        super(TYPE, KlassPointerStamp.klass(), (GuardingNode) guard);
+    public ClassGetHubNode(@InjectedNodeParameter StampProvider stampProvider, ValueNode clazz, ValueNode guard) {
+        super(TYPE, stampProvider.createHubStamp(false), (GuardingNode) guard);
         this.clazz = clazz;
+        this.stampProvider = stampProvider;
     }
 
     @Override
     public Node canonical(CanonicalizerTool tool) {
-        if (hasNoUsages()) {
+        if (tool.allUsagesAvailable() && hasNoUsages()) {
             return null;
         } else {
             if (clazz.isConstant()) {
@@ -72,6 +76,10 @@ public final class ClassGetHubNode extends FloatingGuardedNode implements Lowera
                         return ConstantNode.forConstant(stamp(), JavaConstant.NULL_POINTER, metaAccess);
                     }
                 }
+            }
+            if (clazz instanceof GetClassNode) {
+                GetClassNode getClass = (GetClassNode) clazz;
+                return new LoadHubNode(stampProvider, getClass.getObject(), null);
             }
             if (clazz instanceof HubGetClassNode) {
                 // replace _klass._java_mirror._klass -> _klass

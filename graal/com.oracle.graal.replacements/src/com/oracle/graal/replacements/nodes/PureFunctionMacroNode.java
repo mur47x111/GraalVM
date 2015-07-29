@@ -22,10 +22,12 @@
  */
 package com.oracle.graal.replacements.nodes;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
 import com.oracle.graal.nodeinfo.*;
+import com.oracle.graal.nodes.CallTargetNode.InvokeKind;
 import com.oracle.graal.nodes.*;
 
 /**
@@ -37,8 +39,8 @@ public abstract class PureFunctionMacroNode extends MacroStateSplitNode implemen
 
     public static final NodeClass<PureFunctionMacroNode> TYPE = NodeClass.create(PureFunctionMacroNode.class);
 
-    protected PureFunctionMacroNode(NodeClass<? extends PureFunctionMacroNode> c, Invoke invoke) {
-        super(c, invoke);
+    public PureFunctionMacroNode(NodeClass<? extends MacroNode> c, InvokeKind invokeKind, ResolvedJavaMethod targetMethod, int bci, JavaType returnType, ValueNode... arguments) {
+        super(c, invokeKind, targetMethod, bci, returnType, arguments);
     }
 
     /**
@@ -49,7 +51,7 @@ public abstract class PureFunctionMacroNode extends MacroStateSplitNode implemen
 
     @Override
     public Node canonical(CanonicalizerTool tool) {
-        if (hasNoUsages()) {
+        if (tool.allUsagesAvailable() && hasNoUsages()) {
             return null;
         } else {
             ValueNode param = arguments.get(0);

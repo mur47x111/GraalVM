@@ -24,9 +24,9 @@ package com.oracle.graal.compiler.phases;
 
 import static com.oracle.graal.compiler.common.GraalOptions.*;
 import static com.oracle.graal.phases.common.DeadCodeEliminationPhase.Optionality.*;
+import jdk.internal.jvmci.options.*;
 
 import com.oracle.graal.nodes.spi.*;
-import com.oracle.graal.options.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.query.*;
@@ -44,7 +44,10 @@ public class LowTier extends PhaseSuite<LowTierContext> {
     }
 
     public LowTier() {
-        CanonicalizerPhase canonicalizer = new CanonicalizerPhase(!ImmutableCode.getValue());
+        CanonicalizerPhase canonicalizer = new CanonicalizerPhase();
+        if (ImmutableCode.getValue()) {
+            canonicalizer.disableReadCanonicalization();
+        }
 
         if (Options.ProfileCompiledMethods.getValue()) {
             appendPhase(new ProfileCompiledMethodsPhase());
@@ -63,7 +66,7 @@ public class LowTier extends PhaseSuite<LowTierContext> {
 
         /* Cleanup IsNull checks resulting from MID_TIER/LOW_TIER lowering and ExpandLogic phase. */
         if (ConditionalElimination.getValue() && OptCanonicalizer.getValue()) {
-            appendPhase(new IterativeConditionalEliminationPhase(canonicalizer));
+            appendPhase(new IterativeConditionalEliminationPhase(canonicalizer, false));
             /* Canonicalizer may create some new ShortCircuitOrNodes so clean them up. */
             appendPhase(new ExpandLogicPhase());
         }

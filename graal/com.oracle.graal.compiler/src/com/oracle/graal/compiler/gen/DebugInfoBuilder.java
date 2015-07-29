@@ -23,28 +23,30 @@
 package com.oracle.graal.compiler.gen;
 
 import java.util.*;
-import java.util.Map.Entry;
+import java.util.Map.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.nodes.virtual.*;
 import com.oracle.graal.virtual.nodes.*;
+
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
 
 /**
  * Builds {@link LIRFrameState}s from {@link FrameState}s.
  */
 public class DebugInfoBuilder {
 
-    protected final NodeMap<Value> nodeOperands;
+    protected final NodeValueMap nodeValueMap;
 
-    public DebugInfoBuilder(NodeMap<Value> nodeOperands) {
-        this.nodeOperands = nodeOperands;
+    public DebugInfoBuilder(NodeValueMap nodeValueMap) {
+        this.nodeValueMap = nodeValueMap;
     }
 
     protected final Map<VirtualObjectNode, VirtualObject> virtualObjects = Node.newMap();
@@ -83,7 +85,7 @@ public class DebugInfoBuilder {
                 for (Entry<VirtualObjectNode, VirtualObject> entry : virtualObjectsCopy.entrySet()) {
                     if (entry.getValue().getValues() == null) {
                         VirtualObjectNode vobj = entry.getKey();
-                        JavaValue[] values = new JavaValue[vobj.entryCount()];
+                        Value[] values = new Value[vobj.entryCount()];
                         if (values.length > 0) {
                             changed = true;
                             VirtualObjectState currentField = (VirtualObjectState) objectStates.get(vobj);
@@ -98,7 +100,7 @@ public class DebugInfoBuilder {
                                 }
                             }
                             if (pos != vobj.entryCount()) {
-                                JavaValue[] newValues = new JavaValue[pos];
+                                Value[] newValues = new Value[pos];
                                 System.arraycopy(values, 0, newValues, 0, pos);
                                 values = newValues;
                             }
@@ -113,7 +115,6 @@ public class DebugInfoBuilder {
         }
         objectStates.clear();
 
-        assert frame.validateFormat();
         return newLIRFrameState(exceptionEdge, frame, virtualObjectsArray);
     }
 
@@ -136,7 +137,7 @@ public class DebugInfoBuilder {
             int numStack = state.stackSize();
             int numLocks = state.locksSize();
 
-            JavaValue[] values = new JavaValue[numLocals + numStack + numLocks];
+            Value[] values = new Value[numLocals + numStack + numLocks];
             computeLocals(state, numLocals, values);
             computeStack(state, numLocals, numStack, values);
             computeLocks(state, values);
@@ -146,38 +147,38 @@ public class DebugInfoBuilder {
                 caller = computeFrameForState(state.outerFrameState());
             }
             return new BytecodeFrame(caller, state.method(), state.bci, state.rethrowException(), state.duringCall(), values, numLocals, numStack, numLocks);
-        } catch (GraalInternalError e) {
+        } catch (JVMCIError e) {
             throw e.addContext("FrameState: ", state);
         }
     }
 
-    protected void computeLocals(FrameState state, int numLocals, JavaValue[] values) {
+    protected void computeLocals(FrameState state, int numLocals, Value[] values) {
         for (int i = 0; i < numLocals; i++) {
             values[i] = computeLocalValue(state, i);
         }
     }
 
-    protected JavaValue computeLocalValue(FrameState state, int i) {
+    protected Value computeLocalValue(FrameState state, int i) {
         return toValue(state.localAt(i));
     }
 
-    protected void computeStack(FrameState state, int numLocals, int numStack, JavaValue[] values) {
+    protected void computeStack(FrameState state, int numLocals, int numStack, Value[] values) {
         for (int i = 0; i < numStack; i++) {
             values[numLocals + i] = computeStackValue(state, i);
         }
     }
 
-    protected JavaValue computeStackValue(FrameState state, int i) {
+    protected Value computeStackValue(FrameState state, int i) {
         return toValue(state.stackAt(i));
     }
 
-    protected void computeLocks(FrameState state, JavaValue[] values) {
+    protected void computeLocks(FrameState state, Value[] values) {
         for (int i = 0; i < state.locksSize(); i++) {
             values[state.localsSize() + state.stackSize() + i] = computeLockValue(state, i);
         }
     }
 
-    protected JavaValue computeLockValue(FrameState state, int i) {
+    protected Value computeLockValue(FrameState state, int i) {
         return toValue(state.lockAt(i));
     }
 
@@ -186,14 +187,14 @@ public class DebugInfoBuilder {
     private static final DebugMetric STATE_VARIABLES = Debug.metric("StateVariables");
     private static final DebugMetric STATE_CONSTANTS = Debug.metric("StateConstants");
 
-    protected JavaValue toValue(ValueNode value) {
+    protected Value toValue(ValueNode value) {
         try {
             if (value instanceof VirtualObjectNode) {
                 VirtualObjectNode obj = (VirtualObjectNode) value;
                 EscapeObjectState state = objectStates.get(obj);
                 if (state == null && obj.entryCount() > 0) {
                     // null states occur for objects with 0 fields
-                    throw new GraalInternalError("no mapping found for virtual object %s", obj);
+                    throw new JVMCIError("no mapping found for virtual object %s", obj);
                 }
                 if (state instanceof MaterializedObjectState) {
                     return toValue(((MaterializedObjectState) state).materializedValue());
@@ -216,9 +217,9 @@ public class DebugInfoBuilder {
 
                 } else if (value != null) {
                     STATE_VARIABLES.increment();
-                    Value operand = nodeOperands.get(value);
+                    Value operand = nodeValueMap.operand(value);
                     assert operand != null && (operand instanceof Variable || operand instanceof JavaConstant) : operand + " for " + value;
-                    return (JavaValue) operand;
+                    return operand;
 
                 } else {
                     // return a dummy value because real value not needed
@@ -226,7 +227,7 @@ public class DebugInfoBuilder {
                     return Value.ILLEGAL;
                 }
             }
-        } catch (GraalInternalError e) {
+        } catch (JVMCIError e) {
             throw e.addContext("toValue: ", value);
         }
     }

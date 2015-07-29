@@ -25,10 +25,11 @@ package com.oracle.graal.api.directives.test;
 import java.lang.annotation.*;
 import java.util.*;
 
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
 import com.oracle.graal.api.directives.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.test.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.iterators.*;
@@ -165,7 +166,6 @@ public class ControlFlowAnchorDirectiveTest extends GraalCompilerTest {
 
     @Test
     public void testPeel() {
-        test("verifyPeelSnippet", 42);
         test("preventPeelSnippet", 42);
     }
 

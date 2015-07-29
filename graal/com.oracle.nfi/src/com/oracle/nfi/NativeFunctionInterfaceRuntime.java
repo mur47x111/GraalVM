@@ -22,6 +22,8 @@
  */
 package com.oracle.nfi;
 
+import java.lang.reflect.*;
+
 import com.oracle.nfi.api.*;
 
 /**
@@ -29,14 +31,6 @@ import com.oracle.nfi.api.*;
  */
 public final class NativeFunctionInterfaceRuntime {
     private static final NativeFunctionInterface INSTANCE;
-
-    /**
-     * Creates a new {@link NativeFunctionInterface}.
-     *
-     * @throws UnsatisfiedLinkError if not running on a VM that provides a
-     *             {@link NativeFunctionInterface}
-     */
-    private static native NativeFunctionInterface createInterface();
 
     /**
      * Gets the {@link NativeFunctionInterface} (if any) provided by the VM.
@@ -48,11 +42,33 @@ public final class NativeFunctionInterfaceRuntime {
     }
 
     static {
-        NativeFunctionInterface instance;
+
+        NativeFunctionInterface instance = null;
+
+        NativeFunctionInterfaceAccess access = null;
+        Class<?> servicesClass = null;
         try {
-            instance = createInterface();
-        } catch (UnsatisfiedLinkError e) {
-            instance = null;
+            servicesClass = Class.forName("jdk.internal.jvmci.service.Services");
+        } catch (ClassNotFoundException e) {
+            try {
+                // Legacy support
+                servicesClass = Class.forName("com.oracle.jvmci.service.Services");
+            } catch (ClassNotFoundException e2) {
+                // JVMCI is unavailable
+            }
+        }
+        if (servicesClass != null) {
+            try {
+                Method m = servicesClass.getDeclaredMethod("loadSingle", Class.class, boolean.class);
+                access = (NativeFunctionInterfaceAccess) m.invoke(null, NativeFunctionInterfaceAccess.class, false);
+            } catch (Throwable e) {
+                // Fail fast for other errors
+                throw (InternalError) new InternalError().initCause(e);
+            }
+        }
+        // TODO: try standard ServiceLoader?
+        if (access != null) {
+            instance = access.getNativeFunctionInterface();
         }
         INSTANCE = instance;
     }

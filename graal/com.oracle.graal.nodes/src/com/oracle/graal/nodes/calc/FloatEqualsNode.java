@@ -22,8 +22,9 @@
  */
 package com.oracle.graal.nodes.calc;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
@@ -58,9 +59,11 @@ public final class FloatEqualsNode extends CompareNode implements BinaryCommutat
         if (result != this) {
             return result;
         }
-        if (forX.stamp() instanceof FloatStamp && forY.stamp() instanceof FloatStamp) {
-            FloatStamp xStamp = (FloatStamp) forX.stamp();
-            FloatStamp yStamp = (FloatStamp) forY.stamp();
+        Stamp xStampGeneric = forX.stamp();
+        Stamp yStampGeneric = forY.stamp();
+        if (xStampGeneric instanceof FloatStamp && yStampGeneric instanceof FloatStamp) {
+            FloatStamp xStamp = (FloatStamp) xStampGeneric;
+            FloatStamp yStamp = (FloatStamp) yStampGeneric;
             if (GraphUtil.unproxify(forX) == GraphUtil.unproxify(forY) && xStamp.isNonNaN() && yStamp.isNonNaN()) {
                 return LogicConstantNode.tautology();
             } else if (xStamp.alwaysDistinct(yStamp)) {
@@ -77,6 +80,36 @@ public final class FloatEqualsNode extends CompareNode implements BinaryCommutat
         } else if (newX.stamp() instanceof IntegerStamp && newY.stamp() instanceof IntegerStamp) {
             return new IntegerEqualsNode(newX, newY);
         }
-        throw GraalInternalError.shouldNotReachHere();
+        throw JVMCIError.shouldNotReachHere();
+    }
+
+    @Override
+    public Stamp getSucceedingStampForX(boolean negated) {
+        if (!negated) {
+            return getX().stamp().join(getY().stamp());
+        }
+        return null;
+    }
+
+    @Override
+    public Stamp getSucceedingStampForY(boolean negated) {
+        if (!negated) {
+            return getX().stamp().join(getY().stamp());
+        }
+        return null;
+    }
+
+    @Override
+    public TriState tryFold(Stamp xStampGeneric, Stamp yStampGeneric) {
+        if (xStampGeneric instanceof FloatStamp && yStampGeneric instanceof FloatStamp) {
+            FloatStamp xStamp = (FloatStamp) xStampGeneric;
+            FloatStamp yStamp = (FloatStamp) yStampGeneric;
+            if (xStamp.alwaysDistinct(yStamp)) {
+                return TriState.FALSE;
+            } else if (xStamp.neverDistinct(yStamp)) {
+                return TriState.TRUE;
+            }
+        }
+        return TriState.UNKNOWN;
     }
 }

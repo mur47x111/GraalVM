@@ -22,14 +22,15 @@
  */
 package com.oracle.graal.hotspot.amd64.test;
 
-import static com.oracle.graal.amd64.AMD64.*;
+import static jdk.internal.jvmci.amd64.AMD64.*;
 
 import java.util.*;
 
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.asm.amd64.*;
 import com.oracle.graal.compiler.test.*;
 

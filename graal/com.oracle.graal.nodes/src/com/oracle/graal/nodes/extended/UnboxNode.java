@@ -22,23 +22,30 @@
  */
 package com.oracle.graal.nodes.extended;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.spi.*;
+import com.oracle.graal.nodes.type.*;
 
 @NodeInfo
-public final class UnboxNode extends UnaryNode implements Virtualizable, Lowerable {
+public final class UnboxNode extends FixedWithNextNode implements Virtualizable, Lowerable, Canonicalizable.Unary<ValueNode> {
 
     public static final NodeClass<UnboxNode> TYPE = NodeClass.create(UnboxNode.class);
+    @Input protected ValueNode value;
     protected final Kind boxingKind;
 
+    public ValueNode getValue() {
+        return value;
+    }
+
     protected UnboxNode(ValueNode value, Kind boxingKind) {
-        super(TYPE, StampFactory.forKind(boxingKind.getStackKind()), value);
+        super(TYPE, StampFactory.forKind(boxingKind.getStackKind()));
+        this.value = value;
         this.boxingKind = boxingKind;
     }
 
@@ -73,6 +80,9 @@ public final class UnboxNode extends UnaryNode implements Virtualizable, Lowerab
 
     @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forValue) {
+        if (tool.allUsagesAvailable() && hasNoUsages() && StampTool.isPointerNonNull(forValue)) {
+            return null;
+        }
         ValueNode synonym = findSynonym(tool.getMetaAccess(), tool.getConstantReflection(), forValue, boxingKind);
         if (synonym != null) {
             return synonym;
@@ -95,28 +105,4 @@ public final class UnboxNode extends UnaryNode implements Virtualizable, Lowerab
         }
         return null;
     }
-
-    @NodeIntrinsic
-    public static native boolean unbox(Boolean value, @ConstantNodeParameter Kind kind);
-
-    @NodeIntrinsic
-    public static native byte unbox(Byte value, @ConstantNodeParameter Kind kind);
-
-    @NodeIntrinsic
-    public static native char unbox(Character value, @ConstantNodeParameter Kind kind);
-
-    @NodeIntrinsic
-    public static native double unbox(Double value, @ConstantNodeParameter Kind kind);
-
-    @NodeIntrinsic
-    public static native float unbox(Float value, @ConstantNodeParameter Kind kind);
-
-    @NodeIntrinsic
-    public static native int unbox(Integer value, @ConstantNodeParameter Kind kind);
-
-    @NodeIntrinsic
-    public static native long unbox(Long value, @ConstantNodeParameter Kind kind);
-
-    @NodeIntrinsic
-    public static native short unbox(Short value, @ConstantNodeParameter Kind kind);
 }

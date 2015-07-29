@@ -23,8 +23,10 @@
 package com.oracle.graal.nodes.java;
 
 import static com.oracle.graal.nodes.java.ForeignCallDescriptors.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.meta.Assumptions.*;
 
-import com.oracle.graal.api.code.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -66,12 +68,13 @@ public final class RegisterFinalizerNode extends AbstractStateSplit implements C
         ObjectStamp objectStamp = (ObjectStamp) object.stamp();
         if (objectStamp.isExactType()) {
             return objectStamp.type().hasFinalizer();
-        } else if (objectStamp.type() != null && !objectStamp.type().hasFinalizableSubclass()) {
-            // if either the declared type of receiver or the holder
-            // can be assumed to have no finalizers
-            if (assumptions != null) {
-                assumptions.recordNoFinalizableSubclassAssumption(objectStamp.type());
-                return false;
+        } else if (objectStamp.type() != null) {
+            AssumptionResult<Boolean> result = objectStamp.type().hasFinalizableSubclass();
+            if (result.isAssumptionFree()) {
+                return result.getResult();
+            } else if (assumptions != null) {
+                assumptions.record(result);
+                return result.getResult();
             }
         }
         return true;
@@ -102,8 +105,6 @@ public final class RegisterFinalizerNode extends AbstractStateSplit implements C
         return true;
     }
 
-    @SuppressWarnings("unused")
     @NodeIntrinsic
-    public static void register(Object thisObj) {
-    }
+    public static native void register(Object thisObj);
 }

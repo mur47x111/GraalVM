@@ -24,7 +24,8 @@ package com.oracle.graal.phases.common.inlining.info;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.*;
@@ -52,23 +53,13 @@ public abstract class AbstractInlineInfo implements InlineInfo {
 
     protected static Collection<Node> inline(Invoke invoke, ResolvedJavaMethod concrete, Inlineable inlineable, boolean receiverNullCheck) {
         List<Node> canonicalizeNodes = new ArrayList<>();
-        if (inlineable instanceof InlineableGraph) {
-            StructuredGraph calleeGraph = ((InlineableGraph) inlineable).getGraph();
-            Map<Node, Node> duplicateMap = InliningUtil.inline(invoke, calleeGraph, receiverNullCheck, canonicalizeNodes);
-            getInlinedParameterUsages(canonicalizeNodes, calleeGraph, duplicateMap);
-        } else {
-            assert inlineable instanceof InlineableMacroNode;
+        assert inlineable instanceof InlineableGraph;
+        StructuredGraph calleeGraph = ((InlineableGraph) inlineable).getGraph();
+        Map<Node, Node> duplicateMap = InliningUtil.inline(invoke, calleeGraph, receiverNullCheck, canonicalizeNodes);
+        getInlinedParameterUsages(canonicalizeNodes, calleeGraph, duplicateMap);
 
-            Class<? extends FixedWithNextNode> macroNodeClass = ((InlineableMacroNode) inlineable).getMacroNodeClass();
-            FixedWithNextNode macroNode = InliningUtil.inlineMacroNode(invoke, concrete, macroNodeClass);
-            canonicalizeNodes.add(macroNode);
-        }
-
-        InliningUtil.InlinedBytecodes.add(concrete.getCodeSize());
         StructuredGraph graph = invoke.asNode().graph();
-        if (graph.isInlinedMethodRecordingEnabled()) {
-            graph.getInlinedMethods().add(concrete);
-        }
+        graph.recordInlinedMethod(concrete);
         return canonicalizeNodes;
     }
 

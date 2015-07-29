@@ -22,20 +22,20 @@
  */
 package com.oracle.graal.asm.amd64.test;
 
+import com.oracle.graal.asm.amd64.*;
+import com.oracle.graal.asm.test.*;
+
 import static org.junit.Assume.*;
 
 import java.nio.*;
 
-import org.junit.*;
+import jdk.internal.jvmci.amd64.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.code.CompilationResult.*;
+import jdk.internal.jvmci.code.DataSection.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.amd64.*;
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.code.CompilationResult.DataSectionReference;
-import com.oracle.graal.api.code.DataSection.Data;
-import com.oracle.graal.api.code.DataSection.DataBuilder;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.asm.amd64.*;
-import com.oracle.graal.asm.test.*;
+import org.junit.*;
 
 public class SimpleAssemblerTest extends AssemblerTest {
 

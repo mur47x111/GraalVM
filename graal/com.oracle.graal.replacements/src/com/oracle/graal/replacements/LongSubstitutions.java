@@ -22,19 +22,12 @@
  */
 package com.oracle.graal.replacements;
 
-import com.oracle.graal.api.replacements.*;
-import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.replacements.nodes.*;
 
-@ClassSubstitution(Long.class)
+// JaCoCo Exclude
+
 public class LongSubstitutions {
 
-    @MethodSubstitution
-    public static long reverseBytes(long i) {
-        return ReverseBytesNode.reverse(i);
-    }
-
-    @MethodSubstitution
     public static int numberOfLeadingZeros(long i) {
         if (i == 0) {
             return 64;
@@ -42,26 +35,10 @@ public class LongSubstitutions {
         return 63 - BitScanReverseNode.unsafeScan(i);
     }
 
-    @MethodSubstitution
     public static int numberOfTrailingZeros(long i) {
         if (i == 0) {
             return 64;
         }
         return BitScanForwardNode.unsafeScan(i);
-    }
-
-    @MethodSubstitution
-    public static int bitCount(long i) {
-        return BitCountNode.bitCount(i);
-    }
-
-    @MethodSubstitution
-    public static long divideUnsigned(long dividend, long divisor) {
-        return UnsignedDivNode.unsignedDivide(dividend, divisor);
-    }
-
-    @MethodSubstitution
-    public static long remainderUnsigned(long dividend, long divisor) {
-        return UnsignedRemNode.unsignedRemainder(dividend, divisor);
     }
 }

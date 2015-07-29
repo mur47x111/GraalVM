@@ -22,12 +22,12 @@
  */
 package com.oracle.graal.hotspot.amd64;
 
-import static com.oracle.graal.amd64.AMD64.*;
-import static com.oracle.graal.api.code.ValueUtil.*;
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
+import static jdk.internal.jvmci.amd64.AMD64.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.asm.amd64.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.amd64.*;
@@ -38,20 +38,18 @@ import com.oracle.graal.lir.asm.*;
  */
 abstract class AMD64HotSpotEpilogueOp extends AMD64LIRInstruction {
 
-    protected AMD64HotSpotEpilogueOp(LIRInstructionClass<? extends AMD64HotSpotEpilogueOp> c) {
+    protected AMD64HotSpotEpilogueOp(LIRInstructionClass<? extends AMD64HotSpotEpilogueOp> c, AllocatableValue savedRbp) {
         super(c);
+        this.savedRbp = savedRbp;
     }
 
-    /**
-     * The type of location (i.e., stack or register) in which RBP is saved is not known until
-     * initial LIR generation is finished. Until then, we use a placeholder variable so that LIR
-     * verification is successful.
-     */
-    private static final Variable PLACEHOLDER = new Variable(LIRKind.value(Kind.Long), Integer.MAX_VALUE);
-
-    @Use({REG, STACK}) protected AllocatableValue savedRbp = PLACEHOLDER;
+    @Use({REG, STACK}) private AllocatableValue savedRbp;
 
     protected void leaveFrameAndRestoreRbp(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
+        leaveFrameAndRestoreRbp(savedRbp, crb, masm);
+    }
+
+    static void leaveFrameAndRestoreRbp(AllocatableValue savedRbp, CompilationResultBuilder crb, AMD64MacroAssembler masm) {
         if (isStackSlot(savedRbp)) {
             // Restoring RBP from the stack must be done before the frame is removed
             masm.movq(rbp, (AMD64Address) crb.asAddress(savedRbp));

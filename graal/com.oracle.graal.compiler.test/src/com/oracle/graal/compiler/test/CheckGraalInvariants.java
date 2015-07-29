@@ -30,17 +30,20 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.zip.*;
 
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.code.Register.RegisterCategory;
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.code.Register.RegisterCategory;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.api.runtime.*;
 import com.oracle.graal.compiler.*;
 import com.oracle.graal.compiler.CompilerThreadFactory.DebugConfigAccess;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
+import com.oracle.graal.graphbuilderconf.*;
+import com.oracle.graal.graphbuilderconf.GraphBuilderConfiguration.Plugins;
 import com.oracle.graal.java.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
@@ -50,16 +53,34 @@ import com.oracle.graal.phases.VerifyPhase.VerificationError;
 import com.oracle.graal.phases.tiers.*;
 import com.oracle.graal.phases.util.*;
 import com.oracle.graal.phases.verify.*;
-import com.oracle.graal.printer.*;
 import com.oracle.graal.runtime.*;
 import com.oracle.graal.test.*;
 
 /**
- * Checks that all classes in graal.jar (which must be on the class path) comply with global
- * invariants such as using {@link Object#equals(Object)} to compare certain types instead of
+ * Checks that all classes in *graal*.jar and *jvmci*.jar entries on the boot class path comply with
+ * global invariants such as using {@link Object#equals(Object)} to compare certain types instead of
  * identity comparisons.
  */
 public class CheckGraalInvariants extends GraalTest {
+
+    private static boolean shouldVerifyEquals(ResolvedJavaMethod m) {
+        if (m.getName().equals("identityEquals")) {
+            ResolvedJavaType c = m.getDeclaringClass();
+            if (c.getName().equals("Ljdk/internal/jvmci/meta/AbstractValue;") || c.getName().equals("jdk/internal/jvmci/meta/Value")) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean shouldProcess(String classpathEntry) {
+        if (classpathEntry.endsWith(".jar")) {
+            String name = new File(classpathEntry).getName();
+            return name.contains("jvmci") || name.contains("graal");
+        }
+        return false;
+    }
 
     @Test
     public void test() {
@@ -68,8 +89,9 @@ public class CheckGraalInvariants extends GraalTest {
         MetaAccessProvider metaAccess = providers.getMetaAccess();
 
         PhaseSuite<HighTierContext> graphBuilderSuite = new PhaseSuite<>();
-        graphBuilderSuite.appendPhase(new GraphBuilderPhase(GraphBuilderConfiguration.getEagerDefault()));
-        HighTierContext context = new HighTierContext(providers, null, graphBuilderSuite, OptimisticOptimizations.NONE);
+        GraphBuilderConfiguration config = GraphBuilderConfiguration.getEagerDefault(new Plugins(new InvocationPlugins(metaAccess)));
+        graphBuilderSuite.appendPhase(new GraphBuilderPhase(config));
+        HighTierContext context = new HighTierContext(providers, graphBuilderSuite, OptimisticOptimizations.NONE);
 
         Assume.assumeTrue(VerifyPhase.class.desiredAssertionStatus());
 
@@ -79,38 +101,31 @@ public class CheckGraalInvariants extends GraalTest {
         bootclasspath.split(File.pathSeparator);
 
         final List<String> classNames = new ArrayList<>();
-        for (String jarName : new String[]{"graal.jar", "graal-truffle.jar"}) {
-
-            String jar = null;
-            for (String e : bootclasspath.split(File.pathSeparator)) {
-                if (e.endsWith(jarName)) {
-                    jar = e;
-                    break;
-                }
-            }
-            Assert.assertNotNull("Could not find graal.jar on boot class path: " + bootclasspath, jar);
-
-            try {
-                final ZipFile zipFile = new ZipFile(new File(jar));
-                for (final Enumeration<? extends ZipEntry> e = zipFile.entries(); e.hasMoreElements();) {
-                    final ZipEntry zipEntry = e.nextElement();
-                    String name = zipEntry.getName();
-                    if (name.endsWith(".class")) {
-                        String className = name.substring(0, name.length() - ".class".length()).replace('/', '.');
-                        classNames.add(className);
+        for (String path : bootclasspath.split(File.pathSeparator)) {
+            if (shouldProcess(path)) {
+                try {
+                    final ZipFile zipFile = new ZipFile(new File(path));
+                    for (final Enumeration<? extends ZipEntry> entry = zipFile.entries(); entry.hasMoreElements();) {
+                        final ZipEntry zipEntry = entry.nextElement();
+                        String name = zipEntry.getName();
+                        if (name.endsWith(".class")) {
+                            String className = name.substring(0, name.length() - ".class".length()).replace('/', '.');
+                            classNames.add(className);
+                        }
                     }
+                } catch (IOException ex) {
+                    Assert.fail(ex.toString());
                 }
-            } catch (IOException e) {
-                Assert.fail(e.toString());
             }
         }
+        Assert.assertFalse("Could not find graal jars on boot class path: " + bootclasspath, classNames.isEmpty());
 
         // Allows a subset of methods to be checked through use of a system property
         String property = System.getProperty(CheckGraalInvariants.class.getName() + ".filters");
         String[] filters = property == null ? null : property.split(",");
 
         CompilerThreadFactory factory = new CompilerThreadFactory("CheckInvariantsThread", new DebugConfigAccess() {
-            public GraalDebugConfig getDebugConfig() {
+            public JVMCIDebugConfig getDebugConfig() {
                 return DebugEnvironment.initialize(System.out);
             }
         });
@@ -134,7 +149,6 @@ public class CheckGraalInvariants extends GraalTest {
                         // ignore
                     } else {
                         String methodName = className + "." + m.getName();
-                        boolean verifyEquals = !m.isAnnotationPresent(ExcludeFromIdentityComparisonVerification.class);
                         if (matches(filters, methodName)) {
                             executor.execute(() -> {
                                 ResolvedJavaMethod method = metaAccess.lookupJavaMethod(m);
@@ -143,7 +157,7 @@ public class CheckGraalInvariants extends GraalTest {
                                     graphBuilderSuite.apply(graph, context);
                                     // update phi stamps
                                     graph.getNodes().filter(PhiNode.class).forEach(PhiNode::inferStamp);
-                                    checkGraph(context, graph, verifyEquals);
+                                    checkGraph(context, graph);
                                 } catch (VerificationError e) {
                                     errors.add(e.getMessage());
                                 } catch (LinkageError e) {
@@ -197,8 +211,8 @@ public class CheckGraalInvariants extends GraalTest {
     /**
      * Checks the invariants for a single graph.
      */
-    private static void checkGraph(HighTierContext context, StructuredGraph graph, boolean verifyEquals) {
-        if (verifyEquals) {
+    private static void checkGraph(HighTierContext context, StructuredGraph graph) {
+        if (shouldVerifyEquals(graph.method())) {
             new VerifyUsageWithEquals(Value.class).apply(graph, context);
             new VerifyUsageWithEquals(Register.class).apply(graph, context);
             new VerifyUsageWithEquals(RegisterCategory.class).apply(graph, context);

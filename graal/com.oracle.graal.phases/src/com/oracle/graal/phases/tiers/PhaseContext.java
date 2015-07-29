@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.phases.tiers;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.phases.util.*;
 

@@ -24,13 +24,16 @@ package com.oracle.graal.asm.test;
 
 import java.lang.reflect.*;
 
+import jdk.internal.jvmci.code.*;
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.runtime.*;
+import jdk.internal.jvmci.service.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.api.runtime.*;
-import com.oracle.graal.phases.util.*;
-import com.oracle.graal.runtime.*;
+import com.oracle.graal.code.*;
 import com.oracle.graal.test.*;
 
 public abstract class AssemblerTest extends GraalTest {
@@ -43,7 +46,7 @@ public abstract class AssemblerTest extends GraalTest {
     }
 
     public AssemblerTest() {
-        Providers providers = Graal.getRequiredCapability(RuntimeProvider.class).getHostBackend().getProviders();
+        JVMCIBackend providers = JVMCI.getRuntime().getHostJVMCIBackend();
         this.metaAccess = providers.getMetaAccess();
         this.codeCache = providers.getCodeCache();
     }
@@ -54,21 +57,27 @@ public abstract class AssemblerTest extends GraalTest {
 
     protected InstalledCode assembleMethod(Method m, CodeGenTest test) {
         ResolvedJavaMethod method = getMetaAccess().lookupJavaMethod(m);
-        RegisterConfig registerConfig = codeCache.getRegisterConfig();
-        CallingConvention cc = CodeUtil.getCallingConvention(codeCache, CallingConvention.Type.JavaCallee, method, false);
+        try (Scope s = Debug.scope("assembleMethod", method, codeCache)) {
+            RegisterConfig registerConfig = codeCache.getRegisterConfig();
+            CallingConvention cc = CodeUtil.getCallingConvention(codeCache, CallingConvention.Type.JavaCallee, method, false);
 
-        CompilationResult compResult = new CompilationResult();
-        byte[] targetCode = test.generateCode(compResult, codeCache.getTarget(), registerConfig, cc);
-        compResult.setTargetCode(targetCode, targetCode.length);
+            CompilationResult compResult = new CompilationResult();
+            byte[] targetCode = test.generateCode(compResult, codeCache.getTarget(), registerConfig, cc);
+            compResult.setTargetCode(targetCode, targetCode.length);
+            compResult.setTotalFrameSize(0);
 
-        InstalledCode code = codeCache.addMethod(method, compResult, null, null);
+            InstalledCode code = codeCache.addMethod(method, compResult, null, null);
 
-        DisassemblerProvider dis = Graal.getRequiredCapability(RuntimeProvider.class).getHostBackend().getDisassembler();
-        if (dis != null) {
-            String disasm = dis.disassemble(code);
-            Assert.assertTrue(code.toString(), disasm == null || disasm.length() > 0);
+            for (DisassemblerProvider dis : Services.load(DisassemblerProvider.class)) {
+                String disasm1 = dis.disassembleCompiledCode(codeCache, compResult);
+                Assert.assertTrue(compResult.toString(), disasm1 == null || disasm1.length() > 0);
+                String disasm2 = dis.disassembleInstalledCode(codeCache, compResult, code);
+                Assert.assertTrue(code.toString(), disasm2 == null || disasm2.length() > 0);
+            }
+            return code;
+        } catch (Throwable e) {
+            throw Debug.handle(e);
         }
-        return code;
     }
 
     protected Object runTest(String methodName, CodeGenTest test, Object... args) {

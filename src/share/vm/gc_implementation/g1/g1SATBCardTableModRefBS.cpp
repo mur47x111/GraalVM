@@ -23,10 +23,12 @@
  */
 
 #include "precompiled.hpp"
+#include "gc_implementation/g1/g1CollectedHeap.inline.hpp"
 #include "gc_implementation/g1/g1SATBCardTableModRefBS.hpp"
 #include "gc_implementation/g1/heapRegion.hpp"
 #include "gc_implementation/g1/satbQueue.hpp"
 #include "runtime/mutexLocker.hpp"
+#include "runtime/orderAccess.inline.hpp"
 #include "runtime/thread.inline.hpp"
 
 G1SATBCardTableModRefBS::G1SATBCardTableModRefBS(MemRegion whole_heap,
@@ -35,7 +37,6 @@ G1SATBCardTableModRefBS::G1SATBCardTableModRefBS(MemRegion whole_heap,
 {
   _kind = G1SATBCT;
 }
-
 
 void G1SATBCardTableModRefBS::enqueue(oop pre_val) {
   // Nulls should have been already filtered.
@@ -61,6 +62,17 @@ G1SATBCardTableModRefBS::write_ref_array_pre_work(T* dst, int count) {
     if (!oopDesc::is_null(heap_oop)) {
       enqueue(oopDesc::decode_heap_oop_not_null(heap_oop));
     }
+  }
+}
+
+void G1SATBCardTableModRefBS::write_ref_array_pre(oop* dst, int count, bool dest_uninitialized) {
+  if (!dest_uninitialized) {
+    write_ref_array_pre_work(dst, count);
+  }
+}
+void G1SATBCardTableModRefBS::write_ref_array_pre(narrowOop* dst, int count, bool dest_uninitialized) {
+  if (!dest_uninitialized) {
+    write_ref_array_pre_work(dst, count);
   }
 }
 
@@ -112,13 +124,53 @@ void G1SATBCardTableModRefBS::verify_g1_young_region(MemRegion mr) {
 }
 #endif
 
+void G1SATBCardTableLoggingModRefBSChangedListener::on_commit(uint start_idx, size_t num_regions, bool zero_filled) {
+  // Default value for a clean card on the card table is -1. So we cannot take advantage of the zero_filled parameter.
+  MemRegion mr(G1CollectedHeap::heap()->bottom_addr_for_region(start_idx), num_regions * HeapRegion::GrainWords);
+  _card_table->clear(mr);
+}
+
 G1SATBCardTableLoggingModRefBS::
 G1SATBCardTableLoggingModRefBS(MemRegion whole_heap,
                                int max_covered_regions) :
   G1SATBCardTableModRefBS(whole_heap, max_covered_regions),
-  _dcqs(JavaThread::dirty_card_queue_set())
+  _dcqs(JavaThread::dirty_card_queue_set()),
+  _listener()
 {
   _kind = G1SATBCTLogging;
+  _listener.set_card_table(this);
+}
+
+void G1SATBCardTableLoggingModRefBS::initialize(G1RegionToSpaceMapper* mapper) {
+  mapper->set_mapping_changed_listener(&_listener);
+
+  _byte_map_size = mapper->reserved().byte_size();
+
+  _guard_index = cards_required(_whole_heap.word_size()) - 1;
+  _last_valid_index = _guard_index - 1;
+
+  HeapWord* low_bound  = _whole_heap.start();
+  HeapWord* high_bound = _whole_heap.end();
+
+  _cur_covered_regions = 1;
+  _covered[0] = _whole_heap;
+
+  _byte_map = (jbyte*) mapper->reserved().start();
+  byte_map_base = _byte_map - (uintptr_t(low_bound) >> card_shift);
+  assert(byte_for(low_bound) == &_byte_map[0], "Checking start of map");
+  assert(byte_for(high_bound-1) <= &_byte_map[_last_valid_index], "Checking end of map");
+
+  if (TraceCardTableModRefBS) {
+    gclog_or_tty->print_cr("G1SATBCardTableModRefBS::G1SATBCardTableModRefBS: ");
+    gclog_or_tty->print_cr("  "
+                  "  &_byte_map[0]: " INTPTR_FORMAT
+                  "  &_byte_map[_last_valid_index]: " INTPTR_FORMAT,
+                  p2i(&_byte_map[0]),
+                  p2i(&_byte_map[_last_valid_index]));
+    gclog_or_tty->print_cr("  "
+                  "  byte_map_base: " INTPTR_FORMAT,
+                  p2i(byte_map_base));
+  }
 }
 
 void
@@ -200,6 +252,63 @@ G1SATBCardTableLoggingModRefBS::invalidate(MemRegion mr, bool whole_heap) {
           }
         }
       }
+    }
+  }
+}
+
+void G1SATBCardTableModRefBS::write_ref_nmethod_pre(oop* dst, nmethod* nm) {
+  oop obj = oopDesc::load_heap_oop(dst);
+  if (obj != NULL) {
+    G1CollectedHeap* g1h = (G1CollectedHeap*)Universe::heap();
+    HeapRegion* hr = g1h->heap_region_containing(obj);
+    assert(!hr->continuesHumongous(),
+           err_msg("trying to add code root "INTPTR_FORMAT" in continuation of humongous region "HR_FORMAT
+                   " starting at "HR_FORMAT,
+                   (intptr_t)nm, HR_FORMAT_PARAMS(hr), HR_FORMAT_PARAMS(hr->humongous_start_region())));
+    hr->add_strong_code_root(nm);
+  }
+}
+
+class G1EnsureLastRefToRegion : public OopClosure {
+  G1CollectedHeap* _g1h;
+  HeapRegion* _hr;
+  oop* _dst;
+
+  bool _value;
+public:
+  G1EnsureLastRefToRegion(G1CollectedHeap* g1h, HeapRegion* hr, oop* dst) :
+    _g1h(g1h), _hr(hr), _dst(dst), _value(true) {}
+
+  void do_oop(oop* p) {
+    if (_value && p != _dst) {
+      oop obj = oopDesc::load_heap_oop(p);
+      if (obj != NULL) {
+        HeapRegion* hr = _g1h->heap_region_containing(obj);
+        if (hr == _hr) {
+          // Another reference to the same region.
+          _value = false;
+        }
+      }
+    }
+  }
+  void do_oop(narrowOop* p) { ShouldNotReachHere(); }
+  bool value() const        { return _value;  }
+};
+
+void G1SATBCardTableModRefBS::write_ref_nmethod_post(oop* dst, nmethod* nm) {
+  oop obj = oopDesc::load_heap_oop(dst);
+  if (obj != NULL) {
+    G1CollectedHeap* g1h = (G1CollectedHeap*)Universe::heap();
+    HeapRegion* hr = g1h->heap_region_containing(obj);
+    assert(!hr->continuesHumongous(),
+           err_msg("trying to remove code root "INTPTR_FORMAT" in continuation of humongous region "HR_FORMAT
+                   " starting at "HR_FORMAT,
+                   (intptr_t)nm, HR_FORMAT_PARAMS(hr), HR_FORMAT_PARAMS(hr->humongous_start_region())));
+    G1EnsureLastRefToRegion ensure_last_ref(g1h, hr, dst);
+    nm->oops_do(&ensure_last_ref);
+    if (ensure_last_ref.value()) {
+      // Last reference to this region, remove the nmethod from the rset.
+      hr->remove_strong_code_root(nm);
     }
   }
 }

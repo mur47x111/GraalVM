@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,50 +22,49 @@
  */
 package com.oracle.graal.hotspot.stubs;
 
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
 import static com.oracle.graal.hotspot.nodes.DirectCompareAndSwapNode.*;
 import static com.oracle.graal.hotspot.replacements.HotSpotReplacementsUtil.*;
 import static com.oracle.graal.hotspot.stubs.StubUtil.*;
 import static com.oracle.graal.nodes.extended.BranchProbabilityNode.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.graph.Node.ConstantNodeParameter;
 import com.oracle.graal.graph.Node.NodeIntrinsic;
 import com.oracle.graal.hotspot.*;
 import com.oracle.graal.hotspot.meta.*;
 import com.oracle.graal.hotspot.nodes.*;
-import com.oracle.graal.hotspot.nodes.type.*;
 import com.oracle.graal.hotspot.replacements.*;
 import com.oracle.graal.hotspot.word.*;
-import com.oracle.graal.nodes.StructuredGraph.GuardsStage;
-import com.oracle.graal.nodes.spi.*;
+import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.memory.address.*;
 import com.oracle.graal.replacements.*;
 import com.oracle.graal.replacements.Snippet.ConstantParameter;
-import com.oracle.graal.replacements.SnippetTemplate.Arguments;
-import com.oracle.graal.replacements.SnippetTemplate.SnippetInfo;
 import com.oracle.graal.word.*;
 
 /**
  * Stub implementing the fast path for TLAB refill during instance class allocation. This stub is
- * called via {@link NewInstanceStubCall} from the {@linkplain NewObjectSnippets inline} allocation
- * code when TLAB allocation fails. If this stub fails to refill the TLAB or allocate the object, it
- * calls out to the HotSpot C++ runtime for to complete the allocation.
+ * called from the {@linkplain NewObjectSnippets inline} allocation code when TLAB allocation fails.
+ * If this stub fails to refill the TLAB or allocate the object, it calls out to the HotSpot C++
+ * runtime for to complete the allocation.
  */
 public class NewInstanceStub extends SnippetStub {
 
-    public NewInstanceStub(HotSpotProviders providers, TargetDescription target, HotSpotForeignCallLinkage linkage) {
-        super("newInstance", providers, target, linkage);
+    public NewInstanceStub(HotSpotProviders providers, HotSpotForeignCallLinkage linkage) {
+        super("newInstance", providers, linkage);
     }
 
     @Override
-    protected Arguments makeArguments(SnippetInfo stub) {
+    protected Object[] makeConstArgs() {
         HotSpotResolvedObjectType intArrayType = (HotSpotResolvedObjectType) providers.getMetaAccess().lookupJavaType(int[].class);
-
-        Arguments args = new Arguments(stub, GuardsStage.FLOATING_GUARDS, LoweringTool.StandardLoweringStage.HIGH_TIER);
-        args.add("hub", null);
-        args.addConst("intArrayHub", intArrayType.klass(), KlassPointerStamp.klassNonNull());
-        args.addConst("threadRegister", providers.getRegisters().getThreadRegister());
+        int count = method.getSignature().getParameterCount(false);
+        Object[] args = new Object[count];
+        assert checkConstArg(1, "intArrayHub");
+        assert checkConstArg(2, "threadRegister");
+        args[1] = ConstantNode.forConstant(providers.getStampProvider().createHubStamp(true), intArrayType.klass(), null);
+        args[2] = providers.getRegisters().getThreadRegister();
         return args;
     }
 
@@ -187,7 +186,7 @@ public class NewInstanceStub extends SnippetStub {
                 // an int
                 int tlabFreeSpaceInInts = (int) tlabFreeSpaceInBytes >>> 2;
                 int length = ((alignmentReserveInBytes - headerSize) >>> 2) + tlabFreeSpaceInInts;
-                NewObjectSnippets.formatArray(intArrayHub, -1, length, headerSize, top, intArrayMarkWord, false, false, false);
+                NewObjectSnippets.formatArray(intArrayHub, 0, length, headerSize, top, intArrayMarkWord, false, false, false);
 
                 long allocated = thread.readLong(threadAllocatedBytesOffset(), TLAB_THREAD_ALLOCATED_BYTES_LOCATION);
                 allocated = allocated + top.subtract(readTlabStart(thread)).rawValue();
@@ -246,7 +245,7 @@ public class NewInstanceStub extends SnippetStub {
                 return Word.zero();
             }
 
-            if (compareAndSwap(heapTopAddress, 0, heapTop, newHeapTop, HEAP_TOP_LOCATION).equal(heapTop)) {
+            if (compareAndSwap(RawAddressNode.address(heapTopAddress), heapTop, newHeapTop, HEAP_TOP_LOCATION).equal(heapTop)) {
                 return heapTop;
             }
         }

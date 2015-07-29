@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,6 +56,7 @@ public class DiagramViewModel extends RangeSliderModel implements ChangedListene
     private ChangedEvent<DiagramViewModel> viewChangedEvent;
     private ChangedEvent<DiagramViewModel> hiddenNodesChangedEvent;
     private ChangedEvent<DiagramViewModel> viewPropertiesChangedEvent;
+    private boolean showBlocks;
     private boolean showNodeHull;
     private boolean hideDuplicates;
     private ChangedListener<FilterChain> filterChainChangedListener = new ChangedListener<FilterChain>() {
@@ -101,6 +102,8 @@ public class DiagramViewModel extends RangeSliderModel implements ChangedListene
         this.onScreenNodes = newModel.onScreenNodes;
         viewChanged |= (selectedNodes != newModel.selectedNodes);
         this.selectedNodes = newModel.selectedNodes;
+        viewPropertiesChanged |= (showBlocks != newModel.showBlocks);
+        this.showBlocks = newModel.showBlocks;
         viewPropertiesChanged |= (showNodeHull != newModel.showNodeHull);
         this.showNodeHull = newModel.showNodeHull;
 
@@ -117,6 +120,15 @@ public class DiagramViewModel extends RangeSliderModel implements ChangedListene
         if (viewChanged) {
             viewChangedEvent.fire();
         }
+    }
+    
+    public boolean getShowBlocks() {
+        return showBlocks;
+    }
+
+    public void setShowBlocks(boolean b) {
+        showBlocks = b;
+        viewPropertiesChangedEvent.fire();
     }
 
     public boolean getShowNodeHull() {
@@ -152,6 +164,7 @@ public class DiagramViewModel extends RangeSliderModel implements ChangedListene
     public DiagramViewModel(Group g, FilterChain filterChain, FilterChain sequenceFilterChain) {
         super(Arrays.asList("default"));
 
+        this.showBlocks = false;
         this.showNodeHull = true;
         this.group = g;
         filterGraphs();
@@ -246,7 +259,7 @@ public class DiagramViewModel extends RangeSliderModel implements ChangedListene
                         if (last == null) {
                             curColor = Color.green;
                         } else {
-                            if (last.equals(cur)) {
+                            if (last.equals(cur) && last.getProperties().equals(cur.getProperties())) {
                                 if (curColor == Color.black) {
                                     curColor = Color.white;
                                 }
@@ -268,7 +281,6 @@ public class DiagramViewModel extends RangeSliderModel implements ChangedListene
     }
 
     public void showNot(final Set<Integer> nodes) {
-        System.out.println("Shownot called with " + nodes);
         setHiddenNodes(nodes);
     }
 

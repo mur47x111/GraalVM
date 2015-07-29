@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.nodes.calc;
 
-import com.oracle.graal.api.code.*;
+import jdk.internal.jvmci.code.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -31,11 +32,15 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo(shortName = "/")
-public final class IntegerDivNode extends FixedBinaryNode implements Lowerable, LIRLowerable {
+public class IntegerDivNode extends FixedBinaryNode implements Lowerable, LIRLowerable {
     public static final NodeClass<IntegerDivNode> TYPE = NodeClass.create(IntegerDivNode.class);
 
     public IntegerDivNode(ValueNode x, ValueNode y) {
-        super(TYPE, IntegerStamp.OPS.getDiv().foldStamp(x.stamp(), y.stamp()), x, y);
+        this(TYPE, x, y);
+    }
+
+    protected IntegerDivNode(NodeClass<? extends IntegerDivNode> c, ValueNode x, ValueNode y) {
+        super(c, IntegerStamp.OPS.getDiv().foldStamp(x.stamp(), y.stamp()), x, y);
     }
 
     @Override

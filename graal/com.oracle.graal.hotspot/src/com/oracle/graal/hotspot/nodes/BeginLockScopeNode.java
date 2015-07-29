@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,13 +22,15 @@
  */
 package com.oracle.graal.hotspot.nodes;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.hotspot.*;
 import com.oracle.graal.nodeinfo.*;
-import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.word.*;
 
@@ -44,8 +46,8 @@ public final class BeginLockScopeNode extends AbstractMemoryCheckpoint implement
     public static final NodeClass<BeginLockScopeNode> TYPE = NodeClass.create(BeginLockScopeNode.class);
     protected int lockDepth;
 
-    public BeginLockScopeNode(int lockDepth) {
-        super(TYPE, null);
+    public BeginLockScopeNode(@InjectedNodeParameter WordTypes wordTypes, int lockDepth) {
+        super(TYPE, StampFactory.forKind(wordTypes.getWordKind()));
         this.lockDepth = lockDepth;
     }
 
@@ -56,7 +58,7 @@ public final class BeginLockScopeNode extends AbstractMemoryCheckpoint implement
 
     @Override
     public LocationIdentity getLocationIdentity() {
-        return LocationIdentity.ANY_LOCATION;
+        return LocationIdentity.any();
     }
 
     @Override
@@ -68,6 +70,6 @@ public final class BeginLockScopeNode extends AbstractMemoryCheckpoint implement
         gen.setResult(this, result);
     }
 
-    @NodeIntrinsic(setStampFromReturnType = true)
+    @NodeIntrinsic
     public static native Word beginLockScope(@ConstantNodeParameter int lockDepth);
 }

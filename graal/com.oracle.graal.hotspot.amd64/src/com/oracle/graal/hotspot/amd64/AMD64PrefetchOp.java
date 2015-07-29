@@ -24,9 +24,9 @@
 package com.oracle.graal.hotspot.amd64;
 
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
+import jdk.internal.jvmci.common.*;
 
 import com.oracle.graal.asm.amd64.*;
-import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.amd64.*;
 import com.oracle.graal.lir.asm.*;
@@ -59,7 +59,7 @@ public final class AMD64PrefetchOp extends AMD64LIRInstruction {
                 masm.prefetchw(address.toAddress());
                 break;
             default:
-                throw GraalInternalError.shouldNotReachHere("unspported prefetch op " + instr);
+                throw JVMCIError.shouldNotReachHere("unspported prefetch op " + instr);
 
         }
     }

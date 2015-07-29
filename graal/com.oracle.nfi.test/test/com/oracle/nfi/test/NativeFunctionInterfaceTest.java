@@ -22,9 +22,9 @@
  */
 package com.oracle.nfi.test;
 
-import static com.oracle.graal.compiler.common.UnsafeAccess.*;
 import static java.io.File.*;
 import static java.lang.System.*;
+import static jdk.internal.jvmci.common.UnsafeAccess.*;
 import static org.junit.Assert.*;
 import static org.junit.Assume.*;
 
@@ -36,7 +36,6 @@ import org.junit.*;
 import com.oracle.nfi.*;
 import com.oracle.nfi.api.*;
 
-@Ignore
 public class NativeFunctionInterfaceTest {
 
     public final NativeFunctionInterface nfi;
@@ -51,6 +50,12 @@ public class NativeFunctionInterfaceTest {
         long buf = unsafe.allocateMemory(length);
         allocations.add(buf);
         return buf;
+    }
+
+    @Before
+    public void setUp() {
+        // Ignore on SPARC
+        Assume.assumeFalse(System.getProperty("os.arch").toUpperCase().contains("SPARC"));
     }
 
     @After

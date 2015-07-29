@@ -22,12 +22,15 @@
  */
 package com.oracle.graal.hotspot;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import static jdk.internal.jvmci.code.BytecodeFrame.*;
+
 import com.oracle.graal.compiler.gen.*;
-import com.oracle.graal.graph.*;
-import com.oracle.graal.lir.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.spi.*;
+
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
 
 /**
  * Extends {@link DebugInfoBuilder} to allocate the extra debug information required for locks.
@@ -36,8 +39,8 @@ public class HotSpotDebugInfoBuilder extends DebugInfoBuilder {
 
     private final HotSpotLockStack lockStack;
 
-    public HotSpotDebugInfoBuilder(NodeMap<Value> nodeOperands, HotSpotLockStack lockStack) {
-        super(nodeOperands);
+    public HotSpotDebugInfoBuilder(NodeValueMap nodeValueMap, HotSpotLockStack lockStack) {
+        super(nodeValueMap);
         this.lockStack = lockStack;
     }
 
@@ -46,27 +49,25 @@ public class HotSpotDebugInfoBuilder extends DebugInfoBuilder {
     }
 
     @Override
-    protected JavaValue computeLockValue(FrameState state, int lockIndex) {
+    protected Value computeLockValue(FrameState state, int lockIndex) {
         int lockDepth = lockIndex;
         if (state.outerFrameState() != null) {
             lockDepth += state.outerFrameState().nestedLockDepth();
         }
         StackSlotValue slot = lockStack.makeLockSlot(lockDepth);
         ValueNode lock = state.lockAt(lockIndex);
-        JavaValue object = toValue(lock);
-        boolean eliminated = object instanceof VirtualObject && state.monitorIdAt(lockIndex) != null;
+        Value object = toValue(lock);
+        boolean eliminated = object instanceof VirtualObject || state.monitorIdAt(lockIndex) == null;
         assert state.monitorIdAt(lockIndex) == null || state.monitorIdAt(lockIndex).getLockDepth() == lockDepth;
         return new StackLockValue(object, slot, eliminated);
     }
 
     @Override
-    protected LIRFrameState newLIRFrameState(LabelRef exceptionEdge, BytecodeFrame frame, VirtualObject[] virtualObjectsArray) {
-        return new HotSpotLIRFrameState(frame, virtualObjectsArray, exceptionEdge);
-    }
-
-    @Override
     protected BytecodeFrame computeFrameForState(FrameState state) {
-        assert state.bci >= 0 || state.bci == BytecodeFrame.BEFORE_BCI : state.bci;
+        if (isPlaceholderBci(state.bci) && state.bci != BytecodeFrame.BEFORE_BCI) {
+            // This is really a hard error since an incorrect state could crash hotspot
+            throw JVMCIError.shouldNotReachHere("Invalid state " + BytecodeFrame.getPlaceholderBciName(state.bci) + " " + state);
+        }
         return super.computeFrameForState(state);
     }
 }

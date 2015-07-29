@@ -22,8 +22,8 @@
  */
 package com.oracle.graal.compiler.common.spi;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 
 /**
  * A set of providers which are required for LIR and/or code generation. Some may not be present

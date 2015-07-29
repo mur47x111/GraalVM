@@ -24,7 +24,8 @@ package com.oracle.graal.hotspot.sparc;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
+import jdk.internal.jvmci.code.*;
+
 import com.oracle.graal.hotspot.stubs.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.StandardOp.SaveRegistersOp;
@@ -47,8 +48,8 @@ public class SPARCHotSpotLIRGenerationResult extends LIRGenerationResultBase {
      */
     private Map<LIRFrameState, SaveRegistersOp> calleeSaveInfo = new HashMap<>();
 
-    public SPARCHotSpotLIRGenerationResult(LIR lir, FrameMapBuilder frameMapBuilder, Object stub) {
-        super(lir, frameMapBuilder);
+    public SPARCHotSpotLIRGenerationResult(String compilationUnitName, LIR lir, FrameMapBuilder frameMapBuilder, Object stub) {
+        super(compilationUnitName, lir, frameMapBuilder);
         this.stub = stub;
     }
 
@@ -67,5 +68,4 @@ public class SPARCHotSpotLIRGenerationResult extends LIRGenerationResultBase {
     Map<LIRFrameState, SaveRegistersOp> getCalleeSaveInfo() {
         return calleeSaveInfo;
     }
-
 }

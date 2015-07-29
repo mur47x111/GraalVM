@@ -26,8 +26,10 @@ import static com.oracle.graal.compiler.common.GraalOptions.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
+import com.oracle.graal.graph.spi.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.java.*;
@@ -36,7 +38,7 @@ import com.oracle.graal.nodes.spi.Virtualizable.State;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.virtual.*;
 
-class VirtualizerToolImpl implements VirtualizerTool {
+class VirtualizerToolImpl implements VirtualizerTool, CanonicalizerTool {
 
     private final MetaAccessProvider metaAccess;
     private final ConstantReflectionProvider constantReflection;
@@ -154,7 +156,7 @@ class VirtualizerToolImpl implements VirtualizerTool {
     }
 
     @Override
-    public void createVirtualObject(VirtualObjectNode virtualObject, ValueNode[] entryState, List<MonitorIdNode> locks) {
+    public void createVirtualObject(VirtualObjectNode virtualObject, ValueNode[] entryState, List<MonitorIdNode> locks, boolean ensureVirtualized) {
         VirtualUtil.trace("{{%s}} ", current);
         if (!virtualObject.isAlive()) {
             effects.addFloatingNode(virtualObject, "newVirtualObject");
@@ -169,7 +171,7 @@ class VirtualizerToolImpl implements VirtualizerTool {
                 }
             }
         }
-        state.addObject(virtualObject, new ObjectState(virtualObject, entryState, EscapeState.Virtual, locks));
+        state.addObject(virtualObject, new ObjectState(virtualObject, entryState, EscapeState.Virtual, locks, ensureVirtualized));
         closure.addAndMarkAlias(virtualObject, virtualObject);
         PartialEscapeClosure.METRIC_ALLOCATION_REMOVED.increment();
     }
@@ -191,5 +193,22 @@ class VirtualizerToolImpl implements VirtualizerTool {
                 replaceWithValue(resultState.getMaterializedValue());
             }
         }
+    }
+
+    public MetaAccessProvider getMetaAccess() {
+        return metaAccess;
+    }
+
+    public ConstantReflectionProvider getConstantReflection() {
+        return constantReflection;
+    }
+
+    public boolean canonicalizeReads() {
+        return false;
+    }
+
+    @Override
+    public boolean allUsagesAvailable() {
+        return true;
     }
 }

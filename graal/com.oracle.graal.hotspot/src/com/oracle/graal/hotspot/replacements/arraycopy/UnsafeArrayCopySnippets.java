@@ -22,14 +22,14 @@
  */
 package com.oracle.graal.hotspot.replacements.arraycopy;
 
-import static com.oracle.graal.api.meta.LocationIdentity.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 import static com.oracle.graal.hotspot.HotSpotGraalRuntime.*;
 import static com.oracle.graal.hotspot.replacements.HotSpotReplacementsUtil.*;
 import static com.oracle.graal.nodes.extended.BranchProbabilityNode.*;
 import static com.oracle.graal.replacements.SnippetTemplate.*;
+import static jdk.internal.jvmci.meta.LocationIdentity.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.asm.*;
 import com.oracle.graal.hotspot.meta.*;
@@ -91,42 +91,36 @@ public class UnsafeArrayCopySnippets implements Snippets {
             for (long i = 0; i < postLoopBytes; i += elementSize) {
                 srcOffset -= elementSize;
                 destOffset -= elementSize;
-                Object a = UnsafeLoadNode.load(src, arrayBaseOffset + srcOffset, baseKind, locationIdentity);
-                UnsafeStoreNode.store(dest, arrayBaseOffset + destOffset, a, baseKind, locationIdentity);
+                UnsafeCopyNode.copy(src, arrayBaseOffset + srcOffset, dest, arrayBaseOffset + destOffset, baseKind, locationIdentity);
             }
             // Main-loop
             for (long i = 0; i < mainLoopBytes; i += VECTOR_SIZE) {
                 srcOffset -= VECTOR_SIZE;
                 destOffset -= VECTOR_SIZE;
-                Long a = UnsafeLoadNode.load(src, arrayBaseOffset + srcOffset, VECTOR_KIND, locationIdentity);
-                UnsafeStoreNode.store(dest, arrayBaseOffset + destOffset, a, VECTOR_KIND, locationIdentity);
+                UnsafeCopyNode.copy(src, arrayBaseOffset + srcOffset, dest, arrayBaseOffset + destOffset, VECTOR_KIND, locationIdentity);
             }
             // Pre-loop
             for (long i = 0; i < preLoopBytes; i += elementSize) {
                 srcOffset -= elementSize;
                 destOffset -= elementSize;
-                Object a = UnsafeLoadNode.load(src, arrayBaseOffset + srcOffset, baseKind, locationIdentity);
-                UnsafeStoreNode.store(dest, arrayBaseOffset + destOffset, a, baseKind, locationIdentity);
+                UnsafeCopyNode.copy(src, arrayBaseOffset + srcOffset, dest, arrayBaseOffset + destOffset, baseKind, locationIdentity);
             }
         } else {
             // Pre-loop
             for (long i = 0; i < preLoopBytes; i += elementSize) {
-                Object a = UnsafeLoadNode.load(src, arrayBaseOffset + srcOffset, baseKind, locationIdentity);
-                UnsafeStoreNode.store(dest, arrayBaseOffset + destOffset, a, baseKind, locationIdentity);
+                UnsafeCopyNode.copy(src, arrayBaseOffset + srcOffset, dest, arrayBaseOffset + destOffset, baseKind, locationIdentity);
                 srcOffset += elementSize;
                 destOffset += elementSize;
             }
             // Main-loop
             for (long i = 0; i < mainLoopBytes; i += VECTOR_SIZE) {
-                Long a = UnsafeLoadNode.load(src, arrayBaseOffset + srcOffset, VECTOR_KIND, locationIdentity);
-                UnsafeStoreNode.store(dest, arrayBaseOffset + destOffset, a, VECTOR_KIND, locationIdentity);
+                UnsafeCopyNode.copy(src, arrayBaseOffset + srcOffset, dest, arrayBaseOffset + destOffset, VECTOR_KIND, locationIdentity);
                 srcOffset += VECTOR_SIZE;
                 destOffset += VECTOR_SIZE;
             }
             // Post-loop
             for (long i = 0; i < postLoopBytes; i += elementSize) {
-                Object a = UnsafeLoadNode.load(src, arrayBaseOffset + srcOffset, baseKind, locationIdentity);
-                UnsafeStoreNode.store(dest, arrayBaseOffset + destOffset, a, baseKind, locationIdentity);
+                UnsafeCopyNode.copy(src, arrayBaseOffset + srcOffset, dest, arrayBaseOffset + destOffset, baseKind, locationIdentity);
                 srcOffset += elementSize;
                 destOffset += elementSize;
             }
@@ -249,19 +243,19 @@ public class UnsafeArrayCopySnippets implements Snippets {
 
         Unsigned destNonVectorEnd = destStart.add(nonVectorBytes);
         while (destOffset.belowThan(destNonVectorEnd)) {
-            ObjectAccess.writeByte(dest, destOffset, ObjectAccess.readByte(src, srcOffset, ANY_LOCATION), ANY_LOCATION);
+            ObjectAccess.writeByte(dest, destOffset, ObjectAccess.readByte(src, srcOffset, any()), any());
             destOffset = destOffset.add(1);
             srcOffset = srcOffset.add(1);
         }
         // Unsigned destVectorEnd = destEnd.subtract(destEnd.unsignedRemainder(8));
         while (destOffset.belowThan(destVectorEnd)) {
-            ObjectAccess.writeWord(dest, destOffset, ObjectAccess.readWord(src, srcOffset, ANY_LOCATION), ANY_LOCATION);
+            ObjectAccess.writeWord(dest, destOffset, ObjectAccess.readWord(src, srcOffset, any()), any());
             destOffset = destOffset.add(wordSize());
             srcOffset = srcOffset.add(wordSize());
         }
         // Do the last bytes each when it is required to have absolute alignment.
         while (!supportsUnalignedMemoryAccess && destOffset.belowThan(destEnd)) {
-            ObjectAccess.writeByte(dest, destOffset, ObjectAccess.readByte(src, srcOffset, ANY_LOCATION), ANY_LOCATION);
+            ObjectAccess.writeByte(dest, destOffset, ObjectAccess.readByte(src, srcOffset, any()), any());
             destOffset = destOffset.add(1);
             srcOffset = srcOffset.add(1);
         }

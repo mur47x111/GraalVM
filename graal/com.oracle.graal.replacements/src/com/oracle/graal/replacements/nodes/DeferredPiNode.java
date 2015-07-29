@@ -24,7 +24,8 @@ package com.oracle.graal.replacements.nodes;
 
 //JaCoCo Exclude
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -66,5 +67,5 @@ public final class DeferredPiNode extends FloatingNode implements Canonicalizabl
     }
 
     @NodeIntrinsic
-    public static native <T> T piCast(Class<T> type, Object object);
+    public static native Object piCast(Class<?> type, Object object);
 }

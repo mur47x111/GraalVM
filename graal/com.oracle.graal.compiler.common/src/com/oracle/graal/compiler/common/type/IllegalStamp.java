@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,12 +22,15 @@
  */
 package com.oracle.graal.compiler.common.type;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.spi.*;
 
 /**
- * This stamp represents the illegal type. Values with this type can not exist at run time.
+ * This stamp represents the type of the {@link Kind#Illegal} value in the second slot of
+ * {@link Kind#Long} and {@link Kind#Double} values. It can only appear in framestates or virtual
+ * objects.
  */
 public final class IllegalStamp extends Stamp {
 
@@ -41,7 +44,7 @@ public final class IllegalStamp extends Stamp {
 
     @Override
     public LIRKind getLIRKind(LIRKindTool tool) {
-        throw GraalInternalError.shouldNotReachHere("illegal stamp should not reach backend");
+        throw JVMCIError.shouldNotReachHere("illegal stamp should not reach backend");
     }
 
     @Override
@@ -50,33 +53,36 @@ public final class IllegalStamp extends Stamp {
     }
 
     @Override
-    public Stamp illegal() {
+    public Stamp empty() {
         return this;
     }
 
     @Override
     public Stamp constant(Constant c, MetaAccessProvider meta) {
-        throw GraalInternalError.shouldNotReachHere("illegal stamp has no value");
+        assert ((PrimitiveConstant) c).getKind() == Kind.Illegal;
+        return this;
     }
 
     @Override
     public ResolvedJavaType javaType(MetaAccessProvider metaAccess) {
-        throw GraalInternalError.shouldNotReachHere("illegal stamp has no Java type");
+        throw JVMCIError.shouldNotReachHere("illegal stamp has no Java type");
     }
 
     @Override
     public Stamp meet(Stamp other) {
+        assert other instanceof IllegalStamp;
         return this;
     }
 
     @Override
     public Stamp join(Stamp other) {
+        assert other instanceof IllegalStamp;
         return this;
     }
 
     @Override
     public boolean isCompatible(Stamp stamp) {
-        return false;
+        return stamp instanceof IllegalStamp;
     }
 
     @Override
@@ -85,13 +91,19 @@ public final class IllegalStamp extends Stamp {
     }
 
     @Override
-    public boolean isLegal() {
-        return false;
+    public boolean hasValues() {
+        return true;
+    }
+
+    @Override
+    public Stamp improveWith(Stamp other) {
+        assert other instanceof IllegalStamp;
+        return this;
     }
 
     @Override
     public Constant readConstant(MemoryAccessProvider provider, Constant base, long displacement) {
-        throw GraalInternalError.shouldNotReachHere("can't read values of illegal stamp");
+        throw JVMCIError.shouldNotReachHere("can't read values of illegal stamp");
     }
 
     private static final IllegalStamp instance = new IllegalStamp();

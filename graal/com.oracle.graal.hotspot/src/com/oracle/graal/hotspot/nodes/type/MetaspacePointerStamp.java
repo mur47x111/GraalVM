@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,9 @@
  */
 package com.oracle.graal.hotspot.nodes.type;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.spi.*;
 import com.oracle.graal.compiler.common.type.*;
 
@@ -39,40 +40,19 @@ public abstract class MetaspacePointerStamp extends AbstractPointerStamp {
     }
 
     @Override
-    public Stamp meet(Stamp other) {
-        if (!isCompatible(other)) {
-            return StampFactory.illegal();
-        }
+    public Stamp empty() {
+        // there is no empty pointer stamp
         return this;
     }
 
     @Override
-    public Stamp join(Stamp other) {
-        if (!isCompatible(other)) {
-            return StampFactory.illegal();
-        }
-        return this;
-    }
-
-    @Override
-    public Stamp unrestricted() {
-        return this;
-    }
-
-    @Override
-    public Stamp illegal() {
-        // there is no illegal pointer stamp
-        return this;
-    }
-
-    @Override
-    public boolean isLegal() {
+    public boolean hasValues() {
         return true;
     }
 
     @Override
     public ResolvedJavaType javaType(MetaAccessProvider metaAccess) {
-        throw GraalInternalError.shouldNotReachHere("metaspace pointer has no Java type");
+        throw JVMCIError.shouldNotReachHere("metaspace pointer has no Java type");
     }
 
     protected void appendString(StringBuilder str) {

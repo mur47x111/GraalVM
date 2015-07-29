@@ -22,26 +22,24 @@
  */
 package com.oracle.graal.truffle.hotspot.sparc;
 
-import com.oracle.graal.api.code.CallingConvention.Type;
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.api.runtime.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.Annul.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.BranchPredict.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.CC.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.ConditionFlag.*;
+import static jdk.internal.jvmci.code.CallingConvention.Type.*;
+import static jdk.internal.jvmci.meta.Kind.*;
+import static jdk.internal.jvmci.sparc.SPARC.CPUFeature.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.service.*;
+
 import com.oracle.graal.asm.*;
 import com.oracle.graal.asm.sparc.*;
-import com.oracle.graal.asm.sparc.SPARCAssembler.Bpe;
-import com.oracle.graal.asm.sparc.SPARCAssembler.CBcondx;
-import com.oracle.graal.asm.sparc.SPARCAssembler.CC;
-import com.oracle.graal.asm.sparc.SPARCAssembler.ConditionFlag;
-import com.oracle.graal.asm.sparc.SPARCAssembler.Ldx;
-import com.oracle.graal.asm.sparc.SPARCMacroAssembler.Cmp;
-import com.oracle.graal.asm.sparc.SPARCMacroAssembler.Jmp;
-import com.oracle.graal.asm.sparc.SPARCMacroAssembler.Nop;
-import com.oracle.graal.hotspot.*;
+import com.oracle.graal.asm.sparc.SPARCMacroAssembler.*;
 import com.oracle.graal.hotspot.meta.*;
 import com.oracle.graal.lir.asm.*;
 import com.oracle.graal.lir.framemap.*;
-import com.oracle.graal.sparc.SPARC.CPUFeature;
-import com.oracle.graal.sparc.*;
 import com.oracle.graal.truffle.*;
 import com.oracle.graal.truffle.hotspot.*;
 
@@ -55,24 +53,24 @@ public class SPARCOptimizedCallTargetInstumentationFactory implements OptimizedC
             protected void injectTailCallCode(HotSpotVMConfig config, HotSpotRegistersProvider registers) {
                 @SuppressWarnings("hiding")
                 SPARCMacroAssembler asm = (SPARCMacroAssembler) this.asm;
-                try (SPARCScratchRegister scratch = SPARCScratchRegister.get()) {
-                    Register thisRegister = codeCache.getRegisterConfig().getCallingConventionRegisters(Type.JavaCall, Kind.Object)[0];
+                try (ScratchRegister scratch = asm.getScratchRegister()) {
+                    Register thisRegister = codeCache.getRegisterConfig().getCallingConventionRegisters(JavaCall, Object)[0];
                     Register spillRegister = scratch.getRegister();
                     Label doProlog = new Label();
                     SPARCAddress codeBlobAddress = new SPARCAddress(thisRegister, getFieldOffset("address", InstalledCode.class));
                     SPARCAddress verifiedEntryPointAddress = new SPARCAddress(spillRegister, config.nmethodEntryOffset);
 
-                    new Ldx(codeBlobAddress, spillRegister).emit(asm);
-                    if (asm.hasFeature(CPUFeature.CBCOND)) {
-                        new CBcondx(ConditionFlag.Equal, spillRegister, 0, doProlog).emit(asm);
+                    asm.ldx(codeBlobAddress, spillRegister);
+                    if (asm.hasFeature(CBCOND)) {
+                        asm.cbcondx(Equal, spillRegister, 0, doProlog);
                     } else {
-                        new Cmp(spillRegister, 0).emit(asm);
-                        new Bpe(CC.Xcc, doProlog).emit(asm);
-                        new Nop().emit(asm);
+                        asm.cmp(spillRegister, 0);
+                        asm.bpcc(Equal, NOT_ANNUL, doProlog, Xcc, PREDICT_NOT_TAKEN);
+                        asm.nop();
                     }
-                    new Ldx(verifiedEntryPointAddress, spillRegister).emit(asm); // in delay slot
-                    new Jmp(spillRegister).emit(asm);
-                    new Nop().emit(asm);
+                    asm.ldx(verifiedEntryPointAddress, spillRegister); // in delay slot
+                    asm.jmp(spillRegister);
+                    asm.nop();
                     asm.bind(doProlog);
                 }
             }

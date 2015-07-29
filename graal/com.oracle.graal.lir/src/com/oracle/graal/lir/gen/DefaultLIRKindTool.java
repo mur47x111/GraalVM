@@ -22,8 +22,9 @@
  */
 package com.oracle.graal.lir.gen;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.spi.*;
 
 /**
@@ -58,7 +59,7 @@ public class DefaultLIRKindTool implements LIRKindTool {
             case 64:
                 return LIRKind.value(Kind.Double);
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 

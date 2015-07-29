@@ -29,9 +29,9 @@
 #include "classfile/vmSymbols.hpp"
 #include "code/scopeDesc.hpp"
 #include "compiler/compileBroker.hpp"
-#ifdef GRAAL
-#include "graal/graalCompiler.hpp"
-#include "graal/graalRuntime.hpp"
+#if INCLUDE_JVMCI
+#include "jvmci/jvmciCompiler.hpp"
+#include "jvmci/jvmciRuntime.hpp"
 #endif
 #include "interpreter/interpreter.hpp"
 #include "interpreter/linkResolver.hpp"
@@ -62,6 +62,7 @@
 #include "runtime/memprofiler.hpp"
 #include "runtime/mutexLocker.hpp"
 #include "runtime/objectMonitor.hpp"
+#include "runtime/orderAccess.inline.hpp"
 #include "runtime/osThread.hpp"
 #include "runtime/safepoint.hpp"
 #include "runtime/sharedRuntime.hpp"
@@ -237,6 +238,8 @@ Thread::Thread() {
   // This initial value ==> never claimed.
   _oops_do_parity = 0;
 
+  _metadata_on_stack_buffer = NULL;
+
   // the handle mark links itself to last_handle_mark
   new HandleMark(this);
 
@@ -334,8 +337,7 @@ void Thread::record_stack_base_and_size() {
 #if INCLUDE_NMT
   // record thread's native stack, stack grows downward
   address stack_low_addr = stack_base() - stack_size();
-  MemTracker::record_thread_stack(stack_low_addr, stack_size(), this,
-      CURRENT_PC);
+  MemTracker::record_thread_stack(stack_low_addr, stack_size());
 #endif // INCLUDE_NMT
 }
 
@@ -353,7 +355,7 @@ Thread::~Thread() {
 #if INCLUDE_NMT
   if (_stack_base != NULL) {
     address low_stack_addr = stack_base() - stack_size();
-    MemTracker::release_thread_stack(low_stack_addr, stack_size(), this);
+    MemTracker::release_thread_stack(low_stack_addr, stack_size());
 #ifdef ASSERT
     set_stack_base(NULL);
 #endif
@@ -837,11 +839,11 @@ bool Thread::claim_oops_do_par_case(int strong_roots_parity) {
   return false;
 }
 
-void Thread::oops_do(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf) {
+void Thread::oops_do(OopClosure* f, CLDClosure* cld_f, CodeBlobClosure* cf) {
   active_handles()->oops_do(f);
   // Do oop for ThreadShadow
   f->do_oop((oop*)&_pending_exception);
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   f->do_oop((oop*)&_pending_failed_speculation);
 #endif
   handle_area()->oops_do(f);
@@ -867,6 +869,7 @@ void Thread::print_on(outputStream* st) const {
       st->print("os_prio=%d ", os_prio);
     }
     st->print("tid=" INTPTR_FORMAT " ", this);
+    ext().print_on(st);
     osthread()->print_on(st);
   }
   debug_only(if (WizardMode) print_owned_locks_on(st);)
@@ -946,7 +949,7 @@ void Thread::check_for_valid_safepoint_state(bool potential_vm_operation) {
               cur != VMOperationRequest_lock &&
               cur != VMOperationQueue_lock) ||
               cur->rank() == Mutex::special) {
-          warning("Thread holding lock at safepoint that vm can block on: %s", cur->name());
+          fatal(err_msg("Thread holding lock at safepoint that vm can block on: %s", cur->name()));
         }
       }
     }
@@ -1423,32 +1426,32 @@ void WatcherThread::print_on(outputStream* st) const {
 
 // ======= JavaThread ========
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
 
-jlong* JavaThread::_graal_old_thread_counters;
+jlong* JavaThread::_jvmci_old_thread_counters;
 
-bool graal_counters_include(JavaThread* thread) {
+bool jvmci_counters_include(JavaThread* thread) {
   oop threadObj = thread->threadObj();
-  return !GraalCountersExcludeCompiler || !thread->is_Compiler_thread();
+  return !JVMCICountersExcludeCompiler || !thread->is_Compiler_thread();
 }
 
 void JavaThread::collect_counters(typeArrayOop array) {
-  if (GraalCounterSize > 0) {
+  if (JVMCICounterSize > 0) {
     MutexLocker tl(Threads_lock);
     for (int i = 0; i < array->length(); i++) {
-      array->long_at_put(i, _graal_old_thread_counters[i]);
+      array->long_at_put(i, _jvmci_old_thread_counters[i]);
     }
     for (JavaThread* tp = Threads::first(); tp != NULL; tp = tp->next()) {
-      if (graal_counters_include(tp)) {
+      if (jvmci_counters_include(tp)) {
         for (int i = 0; i < array->length(); i++) {
-          array->long_at_put(i, array->long_at(i) + tp->_graal_counters[i]);
+          array->long_at_put(i, array->long_at(i) + tp->_jvmci_counters[i]);
         }
       }
     }
   }
 }
 
-#endif // GRAAL
+#endif
 
 // A JavaThread is a normal Java thread
 
@@ -1476,9 +1479,6 @@ void JavaThread::initialize() {
   set_monitor_chunks(NULL);
   set_next(NULL);
   set_thread_state(_thread_new);
-#if INCLUDE_NMT
-  set_recorder(NULL);
-#endif
   _terminated = _not_terminated;
   _privileged_stack_top = NULL;
   _array_for_gc = NULL;
@@ -1486,16 +1486,16 @@ void JavaThread::initialize() {
   _in_deopt_handler = 0;
   _doing_unsafe_access = false;
   _stack_guard_state = stack_guard_unused;
-#ifdef GRAAL
-  _graal_alternate_call_target = NULL;
-  _graal_implicit_exception_pc = NULL;
-  if (GraalCounterSize > 0) {
-    _graal_counters = NEW_C_HEAP_ARRAY(jlong, GraalCounterSize, mtInternal);
-    memset(_graal_counters, 0, sizeof(jlong) * GraalCounterSize);
+#if INCLUDE_JVMCI
+  _jvmci_alternate_call_target = NULL;
+  _jvmci_implicit_exception_pc = NULL;
+  if (JVMCICounterSize > 0) {
+    _jvmci_counters = NEW_C_HEAP_ARRAY(jlong, JVMCICounterSize, mtInternal);
+    memset(_jvmci_counters, 0, sizeof(jlong) * JVMCICounterSize);
   } else {
-    _graal_counters = NULL;
+    _jvmci_counters = NULL;
   }
-#endif // GRAAL
+#endif
   (void)const_cast<oop&>(_exception_oop = NULL);
   _exception_pc  = 0;
   _exception_handler_pc = 0;
@@ -1541,6 +1541,7 @@ void JavaThread::initialize() {
   _popframe_condition = popframe_inactive;
   _popframe_preserved_args = NULL;
   _popframe_preserved_args_size = 0;
+  _frames_to_pop_failed_realloc = 0;
 
   pd_initialize();
 }
@@ -1564,7 +1565,6 @@ JavaThread::JavaThread(bool is_attaching_via_jni) :
     _jni_attach_state = _not_attaching_via_jni;
   }
   assert(deferred_card_mark().is_empty(), "Default MemRegion ctor");
-  _safepoint_visible = false;
 }
 
 bool JavaThread::reguard_stack(address cur_sp) {
@@ -1627,7 +1627,6 @@ JavaThread::JavaThread(ThreadFunction entry_point, size_t stack_sz) :
   thr_type = entry_point == &compiler_thread_entry ? os::compiler_thread :
                                                      os::java_thread;
   os::create_thread(this, thr_type, stack_sz);
-  _safepoint_visible = false;
   // The _osthread may be NULL here because we ran out of memory (too many threads active).
   // We need to throw and OutOfMemoryError - however we cannot do this here because the caller
   // may hold a lock and all locks must be unlocked before throwing the exception (throwing
@@ -1644,13 +1643,6 @@ JavaThread::~JavaThread() {
   if (TraceThreadEvents) {
       tty->print_cr("terminate thread %p", this);
   }
-
-  // By now, this thread should already be invisible to safepoint,
-  // and its per-thread recorder also collected.
-  assert(!is_safepoint_visible(), "wrong state");
-#if INCLUDE_NMT
-  assert(get_recorder() == NULL, "Already collected");
-#endif // INCLUDE_NMT
 
   // JSR166 -- return the parker to the free list
   Parker::Release(_parker);
@@ -1684,16 +1676,16 @@ JavaThread::~JavaThread() {
   if (_thread_profiler != NULL) delete _thread_profiler;
   if (_thread_stat != NULL) delete _thread_stat;
 
-#ifdef GRAAL
-  if (GraalCounterSize > 0) {
-    if (graal_counters_include(this)) {
-      for (int i = 0; i < GraalCounterSize; i++) {
-        _graal_old_thread_counters[i] += _graal_counters[i];
+#if INCLUDE_JVMCI
+  if (JVMCICounterSize > 0) {
+    if (jvmci_counters_include(this)) {
+      for (int i = 0; i < JVMCICounterSize; i++) {
+        _jvmci_old_thread_counters[i] += _jvmci_counters[i];
       }
     }
-    FREE_C_HEAP_ARRAY(jlong, _graal_counters, mtInternal);
+    FREE_C_HEAP_ARRAY(jlong, _jvmci_counters, mtInternal);
   }
-#endif // GRAAL
+#endif
 }
 
 
@@ -2780,7 +2772,7 @@ public:
   }
 };
 
-void JavaThread::oops_do(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf) {
+void JavaThread::oops_do(OopClosure* f, CLDClosure* cld_f, CodeBlobClosure* cf) {
   // Verify that the deferred card marks have been flushed.
   assert(deferred_card_mark().is_empty(), "Should be empty during GC");
 
@@ -3091,6 +3083,8 @@ void JavaThread::prepare(jobject jni_thread, ThreadPriority prio) {
   // Push the Java priority down to the native thread; needs Threads_lock
   Thread::set_priority(this, prio);
 
+  prepare_ext();
+
   // Add the new thread to the Threads list and set it in motion.
   // We must have threads lock in order to call Threads::add.
   // It is crucial that we do not block before the thread is
@@ -3310,13 +3304,13 @@ CompilerThread::CompilerThread(CompileQueue* queue, CompilerCounters* counters)
 #endif
 }
 
-#ifdef COMPILERGRAAL
+#ifdef COMPILERJVMCI
 bool CompilerThread::can_call_java() const {
-  return _compiler != NULL && _compiler->is_graal();
+  return _compiler != NULL && _compiler->is_jvmci();
 }
 #endif
 
-void CompilerThread::oops_do(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf) {
+void CompilerThread::oops_do(OopClosure* f, CLDClosure* cld_f, CodeBlobClosure* cf) {
   JavaThread::oops_do(f, cld_f, cf);
   if (_scanned_nmethod != NULL && cf != NULL) {
     // Safepoints can occur when the sweeper is scanning an nmethod so
@@ -3401,6 +3395,13 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   jint parse_result = Arguments::parse(args);
   if (parse_result != JNI_OK) return parse_result;
 
+#if INCLUDE_JVMCI
+  OptionValuesTable* options = JVMCIRuntime::parse_arguments();
+  if (options == NULL) {
+    return JNI_ERR;
+  }
+#endif
+
   os::init_before_ergo();
 
   jint ergo_result = Arguments::apply_ergo();
@@ -3433,11 +3434,6 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   // intialize TLS
   ThreadLocalStorage::init();
 
-  // Bootstrap native memory tracking, so it can start recording memory
-  // activities before worker thread is started. This is the first phase
-  // of bootstrapping, VM is currently running in single-thread mode.
-  MemTracker::bootstrap_single_thread();
-
   // Initialize output stream logging
   ostream_init_log();
 
@@ -3460,14 +3456,14 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   // Initialize global data structures and create system classes in heap
   vm_init_globals();
 
-#ifdef GRAAL
-  if (GraalCounterSize > 0) {
-    JavaThread::_graal_old_thread_counters = NEW_C_HEAP_ARRAY(jlong, GraalCounterSize, mtInternal);
-    memset(JavaThread::_graal_old_thread_counters, 0, sizeof(jlong) * GraalCounterSize);
+#if INCLUDE_JVMCI
+  if (JVMCICounterSize > 0) {
+    JavaThread::_jvmci_old_thread_counters = NEW_C_HEAP_ARRAY(jlong, JVMCICounterSize, mtInternal);
+    memset(JavaThread::_jvmci_old_thread_counters, 0, sizeof(jlong) * JVMCICounterSize);
   } else {
-    JavaThread::_graal_old_thread_counters = NULL;
+    JavaThread::_jvmci_old_thread_counters = NULL;
   }
-#endif // GRAAL
+#endif
 
   // Attach the main thread to this os thread
   JavaThread* main_thread = new JavaThread();
@@ -3497,9 +3493,6 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   // Initialize Java-Level synchronization subsystem
   ObjectMonitor::Initialize() ;
 
-  // Second phase of bootstrapping, VM is about entering multi-thread mode
-  MemTracker::bootstrap_multi_thread();
-
   // Initialize global modules
   jint status = init_globals();
   if (status != JNI_OK) {
@@ -3520,9 +3513,6 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   // Any JVMTI raw monitors entered in onload will transition into
   // real raw monitor. VM is setup enough here for raw monitor enter.
   JvmtiExport::transition_pending_onload_raw_monitors();
-
-  // Fully start NMT
-  MemTracker::start();
 
   // Create the VMThread
   { TraceTime timer("Start VMThread", TraceStartupTime);
@@ -3719,16 +3709,13 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
     Chunk::start_chunk_pool_cleaner_task();
   }
 
-#ifdef GRAAL
-  status = GraalRuntime::check_arguments(main_thread);
-  if (status != JNI_OK) {
-    *canTryAgain = false; // don't let caller call JNI_CreateJavaVM again
-    return status;
-  }
+#if INCLUDE_JVMCI
+  JVMCIRuntime::set_options(options, main_thread);
+  delete options;
 #endif
 
   // initialize compiler(s)
-#if defined(COMPILER1) || defined(COMPILER2) || defined(SHARK) || defined(COMPILERGRAAL)
+#if defined(COMPILER1) || defined(COMPILER2) || defined(SHARK) || defined(COMPILERJVMCI)
   CompileBroker::compilation_init();
 #endif
 
@@ -3979,6 +3966,24 @@ void Threads::create_vm_init_libraries() {
   }
 }
 
+JavaThread* Threads::find_java_thread_from_java_tid(jlong java_tid) {
+  assert(Threads_lock->owned_by_self(), "Must hold Threads_lock");
+
+  JavaThread* java_thread = NULL;
+  // Sequential search for now.  Need to do better optimization later.
+  for (JavaThread* thread = Threads::first(); thread != NULL; thread = thread->next()) {
+    oop tobj = thread->threadObj();
+    if (!thread->is_exiting() &&
+        tobj != NULL &&
+        java_tid == java_lang_Thread::thread_id(tobj)) {
+      java_thread = thread;
+      break;
+    }
+  }
+  return java_thread;
+}
+
+
 // Last thread running calls java.lang.Shutdown.shutdown()
 void JavaThread::invoke_shutdown_hooks() {
   HandleMark hm(this);
@@ -4128,11 +4133,11 @@ bool Threads::destroy_vm() {
 
   delete thread;
 
-#ifdef GRAAL
-  if (GraalCounterSize > 0) {
-    FREE_C_HEAP_ARRAY(jlong, JavaThread::_graal_old_thread_counters, mtInternal);
+#if INCLUDE_JVMCI
+  if (JVMCICounterSize > 0) {
+    FREE_C_HEAP_ARRAY(jlong, JavaThread::_jvmci_old_thread_counters, mtInternal);
   }
-#endif // GRAAL
+#endif
 
   // exit_globals() will delete tty
   exit_globals();
@@ -4174,8 +4179,6 @@ void Threads::add(JavaThread* p, bool force_daemon) {
     _number_of_non_daemon_threads++;
     daemon = false;
   }
-
-  p->set_safepoint_visible(true);
 
   ThreadService::add_thread(p, daemon);
 
@@ -4222,13 +4225,6 @@ void Threads::remove(JavaThread* p) {
     // to do callbacks into the safepoint code. However, the safepoint code is not aware
     // of this thread since it is removed from the queue.
     p->set_terminated_value();
-
-    // Now, this thread is not visible to safepoint
-    p->set_safepoint_visible(false);
-    // once the thread becomes safepoint invisible, we can not use its per-thread
-    // recorder. And Threads::do_threads() no longer walks this thread, so we have
-    // to release its per-thread recorder here.
-    MemTracker::thread_exiting(p);
   } // unlock Threads_lock
 
   // Since Events::log uses a lock, we grab it outside the Threads_lock
@@ -4253,22 +4249,22 @@ bool Threads::includes(JavaThread* p) {
 // uses the Threads_lock to gurantee this property. It also makes sure that
 // all threads gets blocked when exiting or starting).
 
-void Threads::oops_do(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf) {
+void Threads::oops_do(OopClosure* f, CLDClosure* cld_f, CodeBlobClosure* cf) {
   ALL_JAVA_THREADS(p) {
     p->oops_do(f, cld_f, cf);
   }
   VMThread::vm_thread()->oops_do(f, cld_f, cf);
 }
 
-void Threads::possibly_parallel_oops_do(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf) {
+void Threads::possibly_parallel_oops_do(OopClosure* f, CLDClosure* cld_f, CodeBlobClosure* cf) {
   // Introduce a mechanism allowing parallel threads to claim threads as
   // root groups.  Overhead should be small enough to use all the time,
   // even in sequential code.
   SharedHeap* sh = SharedHeap::heap();
   // Cannot yet substitute active_workers for n_par_threads
   // because of G1CollectedHeap::verify() use of
-  // SharedHeap::process_strong_roots().  n_par_threads == 0 will
-  // turn off parallelism in process_strong_roots while active_workers
+  // SharedHeap::process_roots().  n_par_threads == 0 will
+  // turn off parallelism in process_roots while active_workers
   // is being used for parallelism elsewhere.
   bool is_par = sh->n_par_threads() > 0;
   assert(!is_par ||

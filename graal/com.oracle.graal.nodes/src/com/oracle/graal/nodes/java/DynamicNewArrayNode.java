@@ -23,10 +23,8 @@
 //JaCoCo Exclude
 package com.oracle.graal.nodes.java;
 
-import java.lang.reflect.*;
-import java.util.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -38,7 +36,7 @@ import com.oracle.graal.nodes.*;
  * compile-time constant.
  */
 @NodeInfo
-public class DynamicNewArrayNode extends AbstractNewArrayNode {
+public class DynamicNewArrayNode extends AbstractNewArrayNode implements Canonicalizable {
     public static final NodeClass<DynamicNewArrayNode> TYPE = NodeClass.create(DynamicNewArrayNode.class);
 
     @Input ValueNode elementType;
@@ -49,18 +47,28 @@ public class DynamicNewArrayNode extends AbstractNewArrayNode {
      */
     protected final Kind knownElementKind;
 
-    public DynamicNewArrayNode(ValueNode elementType, ValueNode length) {
-        this(TYPE, elementType, length, true, null);
+    public DynamicNewArrayNode(ValueNode elementType, ValueNode length, boolean fillContents) {
+        this(TYPE, elementType, length, fillContents, null, null, null);
     }
 
-    public DynamicNewArrayNode(ValueNode elementType, ValueNode length, boolean fillContents, Kind knownElementKind) {
-        this(TYPE, elementType, length, fillContents, knownElementKind);
+    public DynamicNewArrayNode(@InjectedNodeParameter MetaAccessProvider metaAccess, ValueNode elementType, ValueNode length, boolean fillContents, Kind knownElementKind) {
+        this(TYPE, elementType, length, fillContents, knownElementKind, null, metaAccess);
     }
 
-    protected DynamicNewArrayNode(NodeClass<? extends DynamicNewArrayNode> c, ValueNode elementType, ValueNode length, boolean fillContents, Kind knownElementKind) {
-        super(c, StampFactory.objectNonNull(), length, fillContents);
+    private static Stamp computeStamp(Kind knownElementKind, MetaAccessProvider metaAccess) {
+        if (knownElementKind != null && metaAccess != null) {
+            ResolvedJavaType arrayType = metaAccess.lookupJavaType(knownElementKind == Kind.Object ? Object.class : knownElementKind.toJavaClass()).getArrayClass();
+            return StampFactory.declaredNonNull(arrayType);
+        }
+        return StampFactory.objectNonNull();
+    }
+
+    protected DynamicNewArrayNode(NodeClass<? extends DynamicNewArrayNode> c, ValueNode elementType, ValueNode length, boolean fillContents, Kind knownElementKind, FrameState stateBefore,
+                    MetaAccessProvider metaAccess) {
+        super(c, computeStamp(knownElementKind, metaAccess), length, fillContents, stateBefore);
         this.elementType = elementType;
         this.knownElementKind = knownElementKind;
+        assert knownElementKind != Kind.Void && knownElementKind != Kind.Illegal;
     }
 
     public ValueNode getElementType() {
@@ -71,38 +79,45 @@ public class DynamicNewArrayNode extends AbstractNewArrayNode {
         return knownElementKind;
     }
 
-    protected NewArrayNode forConstantType(ResolvedJavaType type) {
-        ValueNode len = length();
-        NewArrayNode ret = graph().add(new NewArrayNode(type, len.isAlive() ? len : graph().addOrUniqueWithInputs(len), fillContents()));
-        if (stateBefore() != null) {
-            ret.setStateBefore(stateBefore());
-        }
-        return ret;
+    @Override
+    public void simplify(SimplifierTool tool) {
+        /*
+         * Do not call the super implementation: we must not eliminate unused allocations because
+         * throwing a NullPointerException or IllegalArgumentException is a possible side effect of
+         * an unused allocation.
+         */
     }
 
     @Override
-    public void simplify(SimplifierTool tool) {
-        if (isAlive() && elementType.isConstant()) {
-            ResolvedJavaType javaType = tool.getConstantReflection().asJavaType(elementType.asConstant());
-            if (javaType != null && !javaType.equals(tool.getMetaAccess().lookupJavaType(void.class))) {
-                NewArrayNode newArray = forConstantType(javaType);
-                List<Node> snapshot = inputs().snapshot();
-                graph().replaceFixedWithFixed(this, newArray);
-                for (Node input : snapshot) {
-                    tool.removeIfUnused(input);
-                }
-                tool.addToWorkList(newArray);
+    public Node canonical(CanonicalizerTool tool) {
+        if (elementType.isConstant()) {
+            ResolvedJavaType type = tool.getConstantReflection().asJavaType(elementType.asConstant());
+            if (type != null && !throwsIllegalArgumentException(type)) {
+                return createNewArrayNode(type);
             }
         }
+        return this;
     }
 
-    @NodeIntrinsic
-    public static Object newArray(Class<?> componentType, int length) {
-        return Array.newInstance(componentType, length);
+    /** Hook for subclasses to instantiate a subclass of {@link NewArrayNode}. */
+    protected NewArrayNode createNewArrayNode(ResolvedJavaType type) {
+        return new NewArrayNode(type, length(), fillContents(), stateBefore());
+    }
+
+    public static boolean throwsIllegalArgumentException(Class<?> elementType) {
+        return elementType == void.class;
+    }
+
+    public static boolean throwsIllegalArgumentException(ResolvedJavaType elementType) {
+        return elementType.getKind() == Kind.Void;
     }
 
     @NodeIntrinsic
     private static native Object newArray(Class<?> componentType, int length, @ConstantNodeParameter boolean fillContents, @ConstantNodeParameter Kind knownElementKind);
+
+    public static Object newArray(Class<?> componentType, int length, Kind knownElementKind) {
+        return newArray(componentType, length, true, knownElementKind);
+    }
 
     public static Object newUninitializedArray(Class<?> componentType, int length, Kind knownElementKind) {
         return newArray(componentType, length, false, knownElementKind);

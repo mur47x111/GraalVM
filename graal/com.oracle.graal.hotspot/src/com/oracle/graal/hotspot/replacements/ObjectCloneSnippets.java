@@ -25,10 +25,11 @@ package com.oracle.graal.hotspot.replacements;
 import java.lang.reflect.*;
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.api.directives.*;
 import com.oracle.graal.hotspot.replacements.arraycopy.*;
-import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.replacements.*;
 
@@ -52,7 +53,7 @@ public class ObjectCloneSnippets implements Snippets {
         try {
             return ObjectCloneSnippets.class.getDeclaredMethod(name, param);
         } catch (SecurityException | NoSuchMethodException e) {
-            throw new GraalInternalError(e);
+            throw new JVMCIError(e);
         }
     }
 
@@ -114,7 +115,8 @@ public class ObjectCloneSnippets implements Snippets {
 
     @Snippet(removeAllFrameStates = true)
     public static Object[] objectArrayClone(Object[] src) {
-        Object[] result = (Object[]) DynamicNewArrayNode.newUninitializedArray(GuardingPiNode.guardingNonNull(src.getClass().getComponentType()), src.length, Kind.Object);
+        /* Since this snippet is lowered early the array must be initialized */
+        Object[] result = (Object[]) DynamicNewArrayNode.newArray(GraalDirectives.guardingNonNull(src.getClass().getComponentType()), src.length, Kind.Object);
         ArrayCopyCallNode.disjointUninitializedArraycopy(src, 0, result, 0, src.length, Kind.Object);
         return result;
     }

@@ -47,34 +47,6 @@ bool CompiledIC::is_icholder_call_site(virtual_call_Relocation* call_site) {
   return is_icholder_entry(call->destination());
 }
 
-//-----------------------------------------------------------------------------
-// High-level access to an inline cache. Guaranteed to be MT-safe.
-
-CompiledIC::CompiledIC(nmethod* nm, NativeCall* call)
-  : _ic_call(call)
-{
-  address ic_call = call->instruction_address();
-
-  assert(ic_call != NULL, "ic_call address must be set");
-  assert(nm != NULL, "must pass nmethod");
-  assert(nm->contains(ic_call), "must be in nmethod");
-
-  // Search for the ic_call at the given address.
-  RelocIterator iter(nm, ic_call, ic_call+1);
-  bool ret = iter.next();
-  assert(ret == true, "relocInfo must exist at this address");
-  assert(iter.addr() == ic_call, "must find ic_call");
-  if (iter.type() == relocInfo::virtual_call_type) {
-    virtual_call_Relocation* r = iter.virtual_call_reloc();
-    _is_optimized = false;
-    _value = nativeMovConstReg_at(r->cached_value());
-  } else {
-    assert(iter.type() == relocInfo::opt_virtual_call_type, "must be a virtual call");
-    _is_optimized = true;
-    _value = NULL;
-  }
-}
-
 // ----------------------------------------------------------------------------
 
 #define __ _masm.
@@ -135,10 +107,15 @@ void CompiledStaticCall::set_to_interpreted(methodHandle callee, address entry) 
   NativeMovConstReg* method_holder = nativeMovConstReg_at(stub);
   NativeJump*        jump          = nativeJump_at(method_holder->next_instruction_address());
 
-  assert(method_holder->data() == 0 || method_holder->data() == (intptr_t)callee(),
+#ifdef ASSERT
+  // read the value once
+  intptr_t data = method_holder->data();
+  address destination = jump->jump_destination();
+  assert(data == 0 || data == (intptr_t)callee(),
          "a) MT-unsafe modification of inline cache");
-  assert(jump->jump_destination() == (address)-1 || jump->jump_destination() == entry,
+  assert(destination == (address)-1 || destination == entry,
          "b) MT-unsafe modification of inline cache");
+#endif
 
   // Update stub.
   method_holder->set_data((intptr_t)callee());

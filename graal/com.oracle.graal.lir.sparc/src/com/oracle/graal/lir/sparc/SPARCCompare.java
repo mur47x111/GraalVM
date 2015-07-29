@@ -22,16 +22,18 @@
  */
 package com.oracle.graal.lir.sparc;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
 import static com.oracle.graal.asm.sparc.SPARCAssembler.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.CC.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.Opfs.*;
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.asm.sparc.*;
-import com.oracle.graal.asm.sparc.SPARCMacroAssembler.Cmp;
-import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.asm.*;
+import com.oracle.graal.lir.sparc.SPARCControlFlow.CompareBranchOp;
 
 public enum SPARCCompare {
     ICMP,
@@ -42,13 +44,14 @@ public enum SPARCCompare {
 
     public static final class CompareOp extends SPARCLIRInstruction {
         public static final LIRInstructionClass<CompareOp> TYPE = LIRInstructionClass.create(CompareOp.class);
+        public static final SizeEstimate SIZE = SizeEstimate.create(1);
 
         @Opcode private final SPARCCompare opcode;
         @Use({REG}) protected Value x;
         @Use({REG, CONST}) protected Value y;
 
         public CompareOp(SPARCCompare opcode, Value x, Value y) {
-            super(TYPE);
+            super(TYPE, SIZE);
             this.opcode = opcode;
             this.x = x;
             this.y = y;
@@ -62,17 +65,16 @@ public enum SPARCCompare {
         @Override
         public void verify() {
             super.verify();
+            assert CompareBranchOp.SUPPORTED_KINDS.contains(x.getKind()) : x.getKind();
+            assert x.getKind().equals(y.getKind()) : x + " " + y;
             // @formatter:off
-            assert  (name().startsWith("I") &&
-                            (!(x.getKind() == Kind.Int) || y.getKind().getStackKind() == Kind.Int) &&
-                            (!(x.getKind() == Kind.Short) || y.getKind().getStackKind() == Kind.Int) &&
-                            (!(x.getKind() == Kind.Byte) || y.getKind().getStackKind() == Kind.Int)) ||
+            assert
+                    (name().startsWith("I") && x.getKind() == Kind.Int && y.getKind().getStackKind() == Kind.Int) ||
                     (name().startsWith("L") && x.getKind() == Kind.Long && y.getKind() == Kind.Long) ||
                     (name().startsWith("A") && x.getKind() == Kind.Object && y.getKind() == Kind.Object) ||
                     (name().startsWith("F") && x.getKind() == Kind.Float && y.getKind() == Kind.Float) ||
                     (name().startsWith("D") && x.getKind() == Kind.Double && y.getKind() == Kind.Double)
                     : "Name; " + name() + " x: " + x + " y: " + y;
-
             // @formatter:on
         }
     }
@@ -81,49 +83,49 @@ public enum SPARCCompare {
         if (isRegister(y)) {
             switch (opcode) {
                 case ICMP:
-                    new Cmp(asIntReg(x), asIntReg(y)).emit(masm);
+                    masm.cmp(asIntReg(x), asIntReg(y));
                     break;
                 case LCMP:
-                    new Cmp(asLongReg(x), asLongReg(y)).emit(masm);
+                    masm.cmp(asLongReg(x), asLongReg(y));
                     break;
                 case ACMP:
-                    new Cmp(asObjectReg(x), asObjectReg(y)).emit(masm);
+                    masm.cmp(asObjectReg(x), asObjectReg(y));
                     break;
                 case FCMP:
-                    new Fcmp(CC.Fcc0, Opfs.Fcmps, asFloatReg(x), asFloatReg(y)).emit(masm);
+                    masm.fcmp(Fcc0, Fcmps, asFloatReg(x), asFloatReg(y));
                     break;
                 case DCMP:
-                    new Fcmp(CC.Fcc0, Opfs.Fcmpd, asDoubleReg(x), asDoubleReg(y)).emit(masm);
+                    masm.fcmp(Fcc0, Fcmpd, asDoubleReg(x), asDoubleReg(y));
                     break;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         } else {
             assert isConstant(y);
             switch (opcode) {
                 case LCMP:
                     assert isSimm13(crb.asLongConst(y));
-                    new Cmp(asLongReg(x), (int) crb.asLongConst(y)).emit(masm);
+                    masm.cmp(asLongReg(x), (int) crb.asLongConst(y));
                     break;
                 case ICMP:
                     assert isSimm13(crb.asIntConst(y));
-                    new Cmp(asIntReg(x), crb.asIntConst(y)).emit(masm);
+                    masm.cmp(asIntReg(x), crb.asIntConst(y));
                     break;
                 case ACMP:
                     if (((JavaConstant) y).isNull()) {
-                        new Cmp(asObjectReg(x), 0).emit(masm);
+                        masm.cmp(asObjectReg(x), 0);
                         break;
                     } else {
-                        throw GraalInternalError.shouldNotReachHere("Only null object constants are allowed in comparisons");
+                        throw JVMCIError.shouldNotReachHere("Only null object constants are allowed in comparisons");
                     }
                 case FCMP:
-                    new Fcmp(CC.Fcc0, Opfs.Fcmps, asFloatReg(x), asFloatReg(y)).emit(masm);
+                    masm.fcmp(Fcc0, Fcmps, asFloatReg(x), asFloatReg(y));
                     break;
                 case DCMP:
-                    new Fcmp(CC.Fcc0, Opfs.Fcmpd, asDoubleReg(x), asDoubleReg(y)).emit(masm);
+                    masm.fcmp(Fcc0, Fcmpd, asDoubleReg(x), asDoubleReg(y));
                     break;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     }

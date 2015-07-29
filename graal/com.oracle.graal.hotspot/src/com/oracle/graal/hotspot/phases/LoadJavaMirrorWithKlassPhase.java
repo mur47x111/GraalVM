@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,19 +22,20 @@
  */
 package com.oracle.graal.hotspot.phases;
 
-import static com.oracle.graal.api.meta.LocationIdentity.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.hotspot.HotSpotVMConfig.*;
+import jdk.internal.jvmci.meta.*;
 import static com.oracle.graal.hotspot.replacements.HotSpotReplacementsUtil.*;
 import static com.oracle.graal.nodes.ConstantNode.*;
+import static jdk.internal.jvmci.meta.LocationIdentity.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.type.*;
-import com.oracle.graal.hotspot.HotSpotVMConfig.CompressEncoding;
-import com.oracle.graal.hotspot.meta.*;
 import com.oracle.graal.hotspot.nodes.*;
 import com.oracle.graal.hotspot.nodes.type.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
+import com.oracle.graal.nodes.memory.address.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.tiers.*;
@@ -63,15 +64,21 @@ public class LoadJavaMirrorWithKlassPhase extends BasePhase<PhaseContext> {
     private ValueNode getClassConstantReplacement(StructuredGraph graph, PhaseContext context, JavaConstant constant) {
         if (constant instanceof HotSpotObjectConstant) {
             ConstantReflectionProvider constantReflection = context.getConstantReflection();
-            ResolvedJavaType c = constantReflection.asJavaType(constant);
-            if (c != null) {
+            ResolvedJavaType type = constantReflection.asJavaType(constant);
+            if (type != null) {
                 MetaAccessProvider metaAccess = context.getMetaAccess();
-                ResolvedJavaType type = c;
-                Constant klass;
-                LocationNode location;
+                Stamp stamp = StampFactory.exactNonNull(metaAccess.lookupJavaType(Class.class));
+
                 if (type instanceof HotSpotResolvedObjectType) {
-                    location = graph.unique(new ConstantLocationNode(CLASS_MIRROR_LOCATION, classMirrorOffset));
-                    klass = ((HotSpotResolvedObjectType) type).klass();
+                    ConstantNode klass = ConstantNode.forConstant(context.getStampProvider().createHubStamp(true), ((HotSpotResolvedObjectType) type).klass(), metaAccess, graph);
+                    AddressNode address = graph.unique(new OffsetAddressNode(klass, ConstantNode.forLong(classMirrorOffset, graph)));
+                    ValueNode read = graph.unique(new FloatingReadNode(address, CLASS_MIRROR_LOCATION, null, stamp));
+
+                    if (((HotSpotObjectConstant) constant).isCompressed()) {
+                        return CompressionNode.compress(read, oopEncoding);
+                    } else {
+                        return read;
+                    }
                 } else {
                     /*
                      * Primitive classes are more difficult since they don't have a corresponding
@@ -79,7 +86,7 @@ public class LoadJavaMirrorWithKlassPhase extends BasePhase<PhaseContext> {
                      */
                     HotSpotResolvedPrimitiveType primitive = (HotSpotResolvedPrimitiveType) type;
                     ResolvedJavaType boxingClass = metaAccess.lookupJavaType(primitive.getKind().toBoxedJavaClass());
-                    klass = ((HotSpotResolvedObjectType) boxingClass).klass();
+                    ConstantNode clazz = ConstantNode.forConstant(boxingClass.getJavaClass(), metaAccess, graph);
                     HotSpotResolvedJavaField[] a = (HotSpotResolvedJavaField[]) boxingClass.getStaticFields();
                     HotSpotResolvedJavaField typeField = null;
                     for (HotSpotResolvedJavaField f : a) {
@@ -89,19 +96,20 @@ public class LoadJavaMirrorWithKlassPhase extends BasePhase<PhaseContext> {
                         }
                     }
                     if (typeField == null) {
-                        throw new GraalInternalError("Can't find TYPE field in class");
+                        throw new JVMCIError("Can't find TYPE field in class");
                     }
-                    location = graph.unique(new ConstantLocationNode(FINAL_LOCATION, typeField.offset()));
-                }
-                ConstantNode klassNode = ConstantNode.forConstant(KlassPointerStamp.klassNonNull(), klass, metaAccess, graph);
 
-                Stamp stamp = StampFactory.exactNonNull(metaAccess.lookupJavaType(Class.class));
-                FloatingReadNode freadNode = graph.unique(new FloatingReadNode(klassNode, location, null, stamp));
+                    if (oopEncoding != null) {
+                        stamp = NarrowOopStamp.compressed((AbstractObjectStamp) stamp, oopEncoding);
+                    }
+                    AddressNode address = graph.unique(new OffsetAddressNode(clazz, ConstantNode.forLong(typeField.offset(), graph)));
+                    ValueNode read = graph.unique(new FloatingReadNode(address, FINAL_LOCATION, null, stamp));
 
-                if (((HotSpotObjectConstant) constant).isCompressed()) {
-                    return CompressionNode.compress(freadNode, oopEncoding);
-                } else {
-                    return freadNode;
+                    if (oopEncoding == null || ((HotSpotObjectConstant) constant).isCompressed()) {
+                        return read;
+                    } else {
+                        return CompressionNode.uncompress(read, oopEncoding);
+                    }
                 }
             }
         }

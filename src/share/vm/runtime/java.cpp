@@ -30,9 +30,9 @@
 #include "compiler/compileBroker.hpp"
 #include "compiler/compilerOracle.hpp"
 #include "interpreter/bytecodeHistogram.hpp"
-#ifdef GRAAL
-#include "graal/graalCompiler.hpp"
-#include "graal/graalRuntime.hpp"
+#if INCLUDE_JVMCI
+#include "jvmci/jvmciCompiler.hpp"
+#include "jvmci/jvmciRuntime.hpp"
 #endif
 #include "memory/genCollectedHeap.hpp"
 #include "memory/oopFactory.hpp"
@@ -61,7 +61,6 @@
 #include "runtime/thread.inline.hpp"
 #include "runtime/timer.hpp"
 #include "runtime/vm_operations.hpp"
-#include "services/memReporter.hpp"
 #include "services/memTracker.hpp"
 #include "trace/tracing.hpp"
 #include "utilities/dtrace.hpp"
@@ -380,12 +379,7 @@ void print_statistics() {
 #endif // ENABLE_ZAP_DEAD_LOCALS
   // Native memory tracking data
   if (PrintNMTStatistics) {
-    if (MemTracker::is_on()) {
-      BaselineTTYOutputer outputer(tty);
-      MemTracker::print_memory_usage(outputer, K, false);
-    } else {
-      tty->print_cr("%s", MemTracker::reason());
-    }
+    MemTracker::final_report(tty);
   }
 }
 
@@ -420,12 +414,7 @@ void print_statistics() {
 
   // Native memory tracking data
   if (PrintNMTStatistics) {
-    if (MemTracker::is_on()) {
-      BaselineTTYOutputer outputer(tty);
-      MemTracker::print_memory_usage(outputer, K, false);
-    } else {
-      tty->print_cr("%s", MemTracker::reason());
-    }
+    MemTracker::final_report(tty);
   }
 }
 
@@ -501,8 +490,8 @@ void before_exit(JavaThread * thread) {
     }
   }
 
-#ifdef GRAAL
-  GraalRuntime::shutdown();
+#if INCLUDE_JVMCI
+  JVMCIRuntime::shutdown();
 #endif
 
   // The only difference between this and Win32's _onexit procs is that
@@ -577,10 +566,6 @@ void before_exit(JavaThread * thread) {
     _before_exit_status = BEFORE_EXIT_DONE;
     BeforeExit_lock->notify_all();
   }
-
-  // Shutdown NMT before exit. Otherwise,
-  // it will run into trouble when system destroys static variables.
-  MemTracker::shutdown(MemTracker::NMT_normal);
 
   if (VerifyStringTableAtExit) {
     int fail_cnt = 0;

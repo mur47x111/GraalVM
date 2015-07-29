@@ -22,15 +22,16 @@
  */
 package com.oracle.graal.lir;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.cfg.*;
-import com.oracle.graal.debug.*;
 import com.oracle.graal.lir.LIRInstruction.OperandFlag;
 import com.oracle.graal.lir.LIRInstruction.OperandMode;
 import com.oracle.graal.lir.StandardOp.MoveOp;
@@ -44,9 +45,10 @@ import com.oracle.graal.lir.phases.*;
 public final class RedundantMoveElimination extends PostAllocationOptimizationPhase {
 
     @Override
-    protected <B extends AbstractBlockBase<B>> void run(TargetDescription target, LIRGenerationResult lirGenRes, List<B> codeEmittingOrder, List<B> linearScanOrder) {
-        Optimization redundantMoveElimination = new Optimization();
-        redundantMoveElimination.doOptimize(lirGenRes.getLIR(), lirGenRes.getFrameMap());
+    protected <B extends AbstractBlockBase<B>> void run(TargetDescription target, LIRGenerationResult lirGenRes, List<B> codeEmittingOrder, List<B> linearScanOrder,
+                    BenchmarkCounterFactory counterFactory) {
+        Optimization redundantMoveElimination = new Optimization(lirGenRes.getFrameMap());
+        redundantMoveElimination.doOptimize(lirGenRes.getLIR());
     }
 
     /**
@@ -96,19 +98,29 @@ public final class RedundantMoveElimination extends PostAllocationOptimizationPh
          */
         int[] eligibleRegs;
 
-        Map<StackSlot, Integer> stackIndices = CollectionsFactory.newMap();
+        /**
+         * A map from the {@link StackSlot} {@link #getOffset offset} to an index into the state.
+         * StackSlots of different kinds that map to the same location will map to the same index.
+         */
+        Map<Integer, Integer> stackIndices = CollectionsFactory.newMap();
 
         int numRegs;
+
+        private final FrameMap frameMap;
 
         /*
          * Pseudo value for a not yet assigned location.
          */
         static final int INIT_VALUE = 0;
 
+        public Optimization(FrameMap frameMap) {
+            this.frameMap = frameMap;
+        }
+
         /**
          * The main method doing the elimination of redundant moves.
          */
-        private void doOptimize(LIR lir, FrameMap frameMap) {
+        private void doOptimize(LIR lir) {
 
             try (Indent indent = Debug.logAndIndent("eliminate redundant moves")) {
 
@@ -163,8 +175,9 @@ public final class RedundantMoveElimination extends PostAllocationOptimizationPh
                             }
                         } else if (isStackSlot(dest)) {
                             StackSlot stackSlot = (StackSlot) dest;
-                            if (!stackIndices.containsKey(stackSlot) && stackIndices.size() < maxStackLocations) {
-                                stackIndices.put(stackSlot, stackIndices.size());
+                            Integer offset = getOffset(stackSlot);
+                            if (!stackIndices.containsKey(offset) && stackIndices.size() < maxStackLocations) {
+                                stackIndices.put(offset, stackIndices.size());
                             }
                         }
                     }
@@ -180,6 +193,10 @@ public final class RedundantMoveElimination extends PostAllocationOptimizationPh
                 BlockData data = new BlockData(numLocations);
                 blockData.put(block, data);
             }
+        }
+
+        private int getOffset(StackSlot stackSlot) {
+            return stackSlot.getOffset(frameMap.totalFrameSize());
         }
 
         /**
@@ -478,7 +495,7 @@ public final class RedundantMoveElimination extends PostAllocationOptimizationPh
             }
             if (isStackSlot(location)) {
                 StackSlot slot = (StackSlot) location;
-                Integer index = stackIndices.get(slot);
+                Integer index = stackIndices.get(getOffset(slot));
                 if (index != null) {
                     return index.intValue() + numRegs;
                 }

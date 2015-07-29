@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,11 +22,12 @@
  */
 package com.oracle.graal.lir.sparc;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.sparc.*;
+
 import com.oracle.graal.asm.*;
 import com.oracle.graal.lir.framemap.*;
-import com.oracle.graal.sparc.*;
 
 /**
  * SPARC specific frame map.
@@ -35,7 +36,6 @@ import com.oracle.graal.sparc.*;
  *
  * <pre>
  *   Base       Contents
- *
  *            :                                :  -----
  *   caller   | incoming overflow argument n   |    ^
  *   frame    :     ...                        :    | positive
@@ -75,9 +75,9 @@ import com.oracle.graal.sparc.*;
  */
 public final class SPARCFrameMap extends FrameMap {
 
-    public SPARCFrameMap(CodeCacheProvider codeCache, RegisterConfig registerConfig) {
-        super(codeCache, registerConfig);
-        // offset relative to sp + total frame size
+    public SPARCFrameMap(CodeCacheProvider codeCache, RegisterConfig registerConfig, ReferenceMapBuilderFactory referenceMapFactory) {
+        super(codeCache, registerConfig, referenceMapFactory);
+        // Initial spill size is set to register save area size (SPARC register window)
         initialSpillSize = 0;
         spillSize = initialSpillSize;
     }
@@ -89,7 +89,12 @@ public final class SPARCFrameMap extends FrameMap {
 
     @Override
     public int currentFrameSize() {
-        return alignFrameSize(calleeSaveAreaSize() + returnAddressSize() + outgoingSize + spillSize);
+        return alignFrameSize(calleeSaveAreaSize() + outgoingSize + spillSize);
+    }
+
+    @Override
+    protected int calleeSaveAreaSize() {
+        return SPARC.REGISTER_SAFE_AREA_SIZE;
     }
 
     @Override
@@ -115,16 +120,15 @@ public final class SPARCFrameMap extends FrameMap {
         return SPARC.spillSlotSize(getTarget(), kind.getPlatformKind());
     }
 
-    /**
-     * We must add the calleSaveAreaSize() when it is a in or out parameter.
-     */
     @Override
     public int offsetForStackSlot(StackSlot slot) {
-        int offset = super.offsetForStackSlot(slot);
-        if (slot.getRawOffset() >= 0) { // If In or Out parameter
-            offset += calleeSaveAreaSize();
-        }
-        return offset;
+        // @formatter:off
+        assert (!slot.getRawAddFrameSize() && slot.getRawOffset() <  outgoingSize + SPARC.REGISTER_SAFE_AREA_SIZE) ||
+               (slot.getRawAddFrameSize() && slot.getRawOffset()  <  0 && -slot.getRawOffset() <= spillSize) ||
+               (slot.getRawAddFrameSize() && slot.getRawOffset()  >= 0) :
+                   String.format("RawAddFrameSize: %b RawOffset: 0x%x spillSize: 0x%x outgoingSize: 0x%x", slot.getRawAddFrameSize(), slot.getRawOffset(), spillSize, outgoingSize);
+        // @formatter:on
+        return super.offsetForStackSlot(slot);
     }
 
     @Override

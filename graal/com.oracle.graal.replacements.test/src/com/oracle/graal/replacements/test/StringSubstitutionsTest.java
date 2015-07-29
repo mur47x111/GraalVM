@@ -22,10 +22,11 @@
  */
 package com.oracle.graal.replacements.test;
 
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.replacements.*;
 import com.oracle.graal.replacements.nodes.*;
@@ -38,10 +39,10 @@ public class StringSubstitutionsTest extends MethodSubstitutionTest {
     public void testSubstitution(String testMethodName, Class<?> intrinsicClass, Class<?> holder, String methodName, boolean optional, Object[] args1, Object[] args2) {
         ResolvedJavaMethod realMethod = getResolvedJavaMethod(holder, methodName);
         ResolvedJavaMethod testMethod = getResolvedJavaMethod(testMethodName);
-        StructuredGraph graph = test(testMethodName);
+        StructuredGraph graph = testGraph(testMethodName);
 
         // Check to see if the resulting graph contains the expected node
-        StructuredGraph replacement = getReplacements().getMethodSubstitution(realMethod);
+        StructuredGraph replacement = getReplacements().getSubstitution(realMethod, -1);
         if (replacement == null && !optional) {
             assertInGraph(graph, intrinsicClass);
         }

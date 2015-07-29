@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,15 +22,15 @@
  */
 package com.oracle.graal.nodes.java;
 
-import static com.oracle.graal.compiler.common.UnsafeAccess.*;
+import jdk.internal.jvmci.meta.*;
 import sun.misc.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
+import com.oracle.graal.nodes.memory.address.*;
 import com.oracle.graal.nodes.spi.*;
 
 /**
@@ -40,26 +40,16 @@ import com.oracle.graal.nodes.spi.*;
 public final class AtomicReadAndAddNode extends AbstractMemoryCheckpoint implements LIRLowerable, MemoryCheckpoint.Single {
 
     public static final NodeClass<AtomicReadAndAddNode> TYPE = NodeClass.create(AtomicReadAndAddNode.class);
-    @Input ValueNode object;
-    @Input ValueNode offset;
+    @Input(InputType.Association) AddressNode address;
     @Input ValueNode delta;
 
     protected final LocationIdentity locationIdentity;
 
-    public AtomicReadAndAddNode(ValueNode object, ValueNode offset, ValueNode delta, LocationIdentity locationIdentity) {
+    public AtomicReadAndAddNode(AddressNode address, ValueNode delta, LocationIdentity locationIdentity) {
         super(TYPE, StampFactory.forKind(delta.getKind()));
-        this.object = object;
-        this.offset = offset;
+        this.address = address;
         this.delta = delta;
         this.locationIdentity = locationIdentity;
-    }
-
-    public ValueNode object() {
-        return object;
-    }
-
-    public ValueNode offset() {
-        return offset;
     }
 
     public ValueNode delta() {
@@ -71,19 +61,7 @@ public final class AtomicReadAndAddNode extends AbstractMemoryCheckpoint impleme
     }
 
     public void generate(NodeLIRBuilderTool gen) {
-        LocationNode location = graph().unique(new IndexedLocationNode(getLocationIdentity(), 0, offset, 1));
-        Value address = location.generateAddress(gen, gen.getLIRGeneratorTool(), gen.operand(object()));
-        Value result = gen.getLIRGeneratorTool().emitAtomicReadAndAdd(address, gen.operand(delta));
+        Value result = gen.getLIRGeneratorTool().emitAtomicReadAndAdd(gen.operand(address), gen.operand(delta));
         gen.setResult(this, result);
-    }
-
-    @NodeIntrinsic
-    public static int getAndAddInt(Object object, long offset, int delta, @ConstantNodeParameter @SuppressWarnings("unused") LocationIdentity locationIdentity) {
-        return unsafe.getAndAddInt(object, offset, delta);
-    }
-
-    @NodeIntrinsic
-    public static long getAndAddLong(Object object, long offset, long delta, @ConstantNodeParameter @SuppressWarnings("unused") LocationIdentity locationIdentity) {
-        return unsafe.getAndAddLong(object, offset, delta);
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,13 +27,18 @@ import static com.oracle.graal.hotspot.replacements.HotSpotReplacementsUtil.*;
 
 import java.util.*;
 
+import jdk.internal.jvmci.common.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.hotspot.nodes.*;
 import com.oracle.graal.hotspot.replacements.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.HeapAccess.BarrierType;
 import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.java.*;
+import com.oracle.graal.nodes.memory.*;
+import com.oracle.graal.nodes.memory.HeapAccess.BarrierType;
+import com.oracle.graal.nodes.memory.address.*;
+import com.oracle.graal.nodes.type.*;
 import com.oracle.graal.phases.*;
 
 /**
@@ -75,12 +80,12 @@ public class WriteBarrierVerificationPhase extends Phase {
                 throw new AssertionError("Write barrier must be present " + write);
             }
             if (useG1GC()) {
-                if (!(currentNode instanceof G1PostWriteBarrier) || (!validateBarrier((FixedAccessNode) write, (WriteBarrier) currentNode))) {
+                if (!(currentNode instanceof G1PostWriteBarrier) || (!validateBarrier((FixedAccessNode) write, (ObjectWriteBarrier) currentNode))) {
                     expandFrontier(frontier, currentNode);
                 }
             } else {
-                if (!(currentNode instanceof SerialWriteBarrier) || (!validateBarrier((FixedAccessNode) write, (WriteBarrier) currentNode)) ||
-                                ((currentNode instanceof SerialWriteBarrier) && !validateBarrier((FixedAccessNode) write, (WriteBarrier) currentNode))) {
+                if (!(currentNode instanceof SerialWriteBarrier) || (!validateBarrier((FixedAccessNode) write, (ObjectWriteBarrier) currentNode)) ||
+                                ((currentNode instanceof SerialWriteBarrier) && !validateBarrier((FixedAccessNode) write, (ObjectWriteBarrier) currentNode))) {
                     expandFrontier(frontier, currentNode);
                 }
             }
@@ -92,15 +97,20 @@ public class WriteBarrierVerificationPhase extends Phase {
         final Node previous = node.predecessor();
         final boolean validatePreBarrier = HotSpotReplacementsUtil.useG1GC() && (isObjectWrite(node) || !((ArrayRangeWriteNode) node).isInitialization());
         if (isObjectWrite(node)) {
-            return next instanceof WriteBarrier && validateBarrier((FixedAccessNode) node, (WriteBarrier) next) &&
-                            (!validatePreBarrier || (previous instanceof WriteBarrier && validateBarrier((FixedAccessNode) node, (WriteBarrier) previous)));
-
+            return (isObjectBarrier(node, next) || StampTool.isPointerAlwaysNull(getValueWritten(node))) && (!validatePreBarrier || isObjectBarrier(node, previous));
         } else if (isObjectArrayRangeWrite(node)) {
-            return ((next instanceof ArrayRangeWriteBarrier) && ((ArrayRangeWriteNode) node).getArray() == ((ArrayRangeWriteBarrier) next).getObject()) &&
-                            (!validatePreBarrier || ((previous instanceof ArrayRangeWriteBarrier) && ((ArrayRangeWriteNode) node).getArray() == ((ArrayRangeWriteBarrier) previous).getObject()));
+            return (isArrayBarrier(node, next) || StampTool.isPointerAlwaysNull(getValueWritten(node))) && (!validatePreBarrier || isArrayBarrier(node, previous));
         } else {
             return true;
         }
+    }
+
+    private static boolean isObjectBarrier(FixedWithNextNode node, final Node next) {
+        return next instanceof ObjectWriteBarrier && validateBarrier((FixedAccessNode) node, (ObjectWriteBarrier) next);
+    }
+
+    private static boolean isArrayBarrier(FixedWithNextNode node, final Node next) {
+        return (next instanceof ArrayRangeWriteBarrier) && ((ArrayRangeWriteNode) node).getArray() == ((ArrayRangeWriteBarrier) next).getObject();
     }
 
     private static boolean isObjectWrite(Node node) {
@@ -129,11 +139,25 @@ public class WriteBarrierVerificationPhase extends Phase {
         return ((node instanceof DeoptimizingNode) && ((DeoptimizingNode) node).canDeoptimize()) || (node instanceof LoopBeginNode);
     }
 
-    private static boolean validateBarrier(FixedAccessNode write, WriteBarrier barrier) {
-        assert write instanceof WriteNode || write instanceof LoweredCompareAndSwapNode || write instanceof LoweredAtomicReadAndWriteNode : "Node must be of type requiring a write barrier " + write;
-        if ((barrier.getObject() == write.object()) && (!barrier.usePrecise() || (barrier.usePrecise() && barrier.getLocation() == write.location()))) {
-            return true;
+    private static ValueNode getValueWritten(FixedWithNextNode write) {
+        if (write instanceof WriteNode) {
+            return ((WriteNode) write).value();
+        } else if (write instanceof LoweredCompareAndSwapNode) {
+            return ((LoweredCompareAndSwapNode) write).getNewValue();
+        } else if (write instanceof LoweredAtomicReadAndWriteNode) {
+            return ((LoweredAtomicReadAndWriteNode) write).getNewValue();
+        } else {
+            throw JVMCIError.shouldNotReachHere(String.format("unexpected write node %s", write));
         }
-        return false;
+    }
+
+    private static boolean validateBarrier(FixedAccessNode write, ObjectWriteBarrier barrier) {
+        assert write instanceof WriteNode || write instanceof LoweredCompareAndSwapNode || write instanceof LoweredAtomicReadAndWriteNode : "Node must be of type requiring a write barrier " + write;
+        if (!barrier.usePrecise()) {
+            if (barrier.getAddress() instanceof OffsetAddressNode && write.getAddress() instanceof OffsetAddressNode) {
+                return ((OffsetAddressNode) barrier.getAddress()).getBase() == ((OffsetAddressNode) write.getAddress()).getBase();
+            }
+        }
+        return barrier.getAddress() == write.getAddress();
     }
 }

@@ -22,12 +22,16 @@
  */
 package com.oracle.graal.nodes;
 
+import static jdk.internal.jvmci.code.BytecodeFrame.*;
+
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.bytecode.*;
+import jdk.internal.jvmci.code.*;
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.bytecode.*;
+import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.iterators.*;
 import com.oracle.graal.nodeinfo.*;
@@ -40,11 +44,27 @@ import com.oracle.graal.nodes.virtual.*;
  *
  * This can be used as debug or deoptimization information.
  */
-@NodeInfo(nameTemplate = "FrameState@{p#method/s}:{p#bci}")
+@NodeInfo(nameTemplate = "@{p#method/s}:{p#bci}")
 public final class FrameState extends VirtualState implements IterableNodeType {
     public static final NodeClass<FrameState> TYPE = NodeClass.create(FrameState.class);
 
     private static final DebugMetric METRIC_FRAMESTATE_COUNT = Debug.metric("FrameStateCount");
+
+    /**
+     * Marker value for the second slot of values that occupy two local variable or expression stack
+     * slots. The marker value is used by the bytecode parser, but replaced with {@code null} in the
+     * {@link #values} of the {@link FrameState}.
+     */
+    public static final ValueNode TWO_SLOT_MARKER = new TwoSlotMarker();
+
+    @NodeInfo
+    private static final class TwoSlotMarker extends ValueNode {
+        public static final NodeClass<TwoSlotMarker> TYPE = NodeClass.create(TwoSlotMarker.class);
+
+        protected TwoSlotMarker() {
+            super(TYPE, StampFactory.forKind(Kind.Illegal));
+        }
+    }
 
     protected final int localsSize;
 
@@ -115,6 +135,19 @@ public final class FrameState extends VirtualState implements IterableNodeType {
                         bci == BytecodeFrame.INVALID_FRAMESTATE_BCI;
     }
 
+    /**
+     * Creates a placeholder frame state with a single element on the stack representing a return
+     * value. This allows the parsing of an intrinsic to communicate the returned value in a
+     * {@link StateSplit#stateAfter() stateAfter} to the inlining call site.
+     *
+     * @param bci this must be {@link BytecodeFrame#AFTER_BCI}
+     */
+    public FrameState(int bci, ValueNode returnValue) {
+        this(null, null, bci, 0, returnValue.getKind().getSlotCount(), 0, false, false, null, Collections.<EscapeObjectState> emptyList());
+        assert bci == BytecodeFrame.AFTER_BCI;
+        this.values.initialize(0, returnValue);
+    }
+
     public FrameState(FrameState outerFrameState, ResolvedJavaMethod method, int bci, ValueNode[] locals, ValueNode[] stack, int stackSize, ValueNode[] locks, List<MonitorIdNode> monitorIds,
                     boolean rethrowException, boolean duringCall) {
         this(outerFrameState, method, bci, locals.length, stackSize, locks.length, rethrowException, duringCall, monitorIds, Collections.<EscapeObjectState> emptyList());
@@ -124,13 +157,23 @@ public final class FrameState extends VirtualState implements IterableNodeType {
     private void createValues(ValueNode[] locals, ValueNode[] stack, ValueNode[] locks) {
         int index = 0;
         for (int i = 0; i < locals.length; ++i) {
-            this.values.initialize(index++, locals[i]);
+            ValueNode value = locals[i];
+            if (value == TWO_SLOT_MARKER) {
+                value = null;
+            }
+            this.values.initialize(index++, value);
         }
         for (int i = 0; i < stackSize; ++i) {
-            this.values.initialize(index++, stack[i]);
+            ValueNode value = stack[i];
+            if (value == TWO_SLOT_MARKER) {
+                value = null;
+            }
+            this.values.initialize(index++, value);
         }
         for (int i = 0; i < locks.length; ++i) {
-            this.values.initialize(index++, locks[i]);
+            ValueNode value = locks[i];
+            assert value != TWO_SLOT_MARKER;
+            this.values.initialize(index++, value);
         }
     }
 
@@ -149,6 +192,17 @@ public final class FrameState extends VirtualState implements IterableNodeType {
     public void setOuterFrameState(FrameState x) {
         updateUsages(this.outerFrameState, x);
         this.outerFrameState = x;
+    }
+
+    public BytecodePosition toBytecodePosition() {
+        return toBytecodePosition(this);
+    }
+
+    public static BytecodePosition toBytecodePosition(FrameState fs) {
+        if (fs == null) {
+            return null;
+        }
+        return new BytecodePosition(toBytecodePosition(fs.outerFrameState()), fs.method(), fs.bci);
     }
 
     /**
@@ -223,25 +277,34 @@ public final class FrameState extends VirtualState implements IterableNodeType {
     }
 
     /**
-     * Creates a copy of this frame state with one stack element of type popKind popped from the
-     * stack and the values in pushedValues pushed on the stack. The pushedValues will be formatted
-     * correctly in slot encoding: a long or double will be followed by a null slot.
+     * Creates a copy of this frame state with one stack element of type {@code popKind} popped from
+     * the stack.
      */
     public FrameState duplicateModifiedDuringCall(int newBci, Kind popKind) {
-        return duplicateModified(newBci, rethrowException, true, popKind);
+        return duplicateModified(graph(), newBci, rethrowException, true, popKind, null, null);
     }
 
-    public FrameState duplicateModified(int newBci, boolean newRethrowException, Kind popKind, ValueNode... pushedValues) {
-        return duplicateModified(newBci, newRethrowException, duringCall, popKind, pushedValues);
+    public FrameState duplicateModifiedBeforeCall(int newBci, Kind popKind, Kind[] pushedSlotKinds, ValueNode[] pushedValues) {
+        return duplicateModified(graph(), newBci, rethrowException, false, popKind, pushedSlotKinds, pushedValues);
+    }
+
+    /**
+     * Creates a copy of this frame state with one stack element of type {@code popKind} popped from
+     * the stack and the values in {@code pushedValues} pushed on the stack. The
+     * {@code pushedValues} will be formatted correctly in slot encoding: a long or double will be
+     * followed by a null slot.
+     */
+    public FrameState duplicateModified(int newBci, boolean newRethrowException, Kind popKind, Kind[] pushedSlotKinds, ValueNode[] pushedValues) {
+        return duplicateModified(graph(), newBci, newRethrowException, duringCall, popKind, pushedSlotKinds, pushedValues);
     }
 
     /**
      * Creates a copy of this frame state with the top of stack replaced with with
      * {@code pushedValue} which must be of type {@code popKind}.
      */
-    public FrameState duplicateModified(Kind popKind, ValueNode pushedValue) {
+    public FrameState duplicateModified(Kind popKind, Kind pushedSlotKind, ValueNode pushedValue) {
         assert pushedValue != null && pushedValue.getKind() == popKind;
-        return duplicateModified(bci, rethrowException, duringCall, popKind, pushedValue);
+        return duplicateModified(graph(), bci, rethrowException, duringCall, popKind, new Kind[]{pushedSlotKind}, new ValueNode[]{pushedValue});
     }
 
     /**
@@ -250,7 +313,7 @@ public final class FrameState extends VirtualState implements IterableNodeType {
      * correctly in slot encoding: a long or double will be followed by a null slot. The bci will be
      * changed to newBci.
      */
-    private FrameState duplicateModified(int newBci, boolean newRethrowException, boolean newDuringCall, Kind popKind, ValueNode... pushedValues) {
+    public FrameState duplicateModified(StructuredGraph graph, int newBci, boolean newRethrowException, boolean newDuringCall, Kind popKind, Kind[] pushedSlotKinds, ValueNode[] pushedValues) {
         ArrayList<ValueNode> copy;
         if (newRethrowException && !rethrowException && popKind == Kind.Void) {
             assert popKind == Kind.Void;
@@ -266,17 +329,20 @@ public final class FrameState extends VirtualState implements IterableNodeType {
                 copy.remove(copy.size() - 1);
             }
         }
-        for (ValueNode node : pushedValues) {
-            copy.add(node);
-            if (node.getKind().needsTwoSlots()) {
-                copy.add(null);
+        if (pushedValues != null) {
+            assert pushedSlotKinds.length == pushedValues.length;
+            for (int i = 0; i < pushedValues.length; i++) {
+                copy.add(pushedValues[i]);
+                if (pushedSlotKinds[i].needsTwoSlots()) {
+                    copy.add(null);
+                }
             }
         }
         int newStackSize = copy.size() - localsSize;
         copy.addAll(values.subList(localsSize + stackSize, values.size()));
 
         assert checkStackDepth(bci, stackSize, duringCall, rethrowException, newBci, newStackSize, newDuringCall, newRethrowException);
-        return graph().add(new FrameState(outerFrameState(), method, newBci, copy, localsSize, newStackSize, newRethrowException, newDuringCall, monitorIds, virtualObjectMappings));
+        return graph.add(new FrameState(outerFrameState(), method, newBci, copy, localsSize, newStackSize, newRethrowException, newDuringCall, monitorIds, virtualObjectMappings));
     }
 
     /**
@@ -284,6 +350,9 @@ public final class FrameState extends VirtualState implements IterableNodeType {
      * is that a stateAfter is being transformed into a stateDuring, so the stack depth may change.
      */
     private boolean checkStackDepth(int oldBci, int oldStackSize, boolean oldDuringCall, boolean oldRethrowException, int newBci, int newStackSize, boolean newDuringCall, boolean newRethrowException) {
+        if (BytecodeFrame.isPlaceholderBci(oldBci)) {
+            return true;
+        }
         /*
          * It would be nice to have a complete check of the shape of the FrameState based on a
          * dataflow of the bytecodes but for now just check for obvious expression stack depth
@@ -396,7 +465,11 @@ public final class FrameState extends VirtualState implements IterableNodeType {
         String nl = CodeUtil.NEW_LINE;
         FrameState fs = frameState;
         while (fs != null) {
-            MetaUtil.appendLocation(sb, fs.method, fs.bci).append(nl);
+            MetaUtil.appendLocation(sb, fs.method, fs.bci);
+            if (BytecodeFrame.isPlaceholderBci(fs.bci)) {
+                sb.append("//").append(getPlaceholderBciName(fs.bci));
+            }
+            sb.append(nl);
             sb.append("locals: [");
             for (int i = 0; i < fs.localsSize(); i++) {
                 sb.append(i == 0 ? "" : ", ").append(fs.localAt(i) == null ? "_" : fs.localAt(i).toString(Verbosity.Id));
@@ -420,7 +493,11 @@ public final class FrameState extends VirtualState implements IterableNodeType {
         if (verbosity == Verbosity.Debugger) {
             return toString(this);
         } else if (verbosity == Verbosity.Name) {
-            return super.toString(Verbosity.Name) + "@" + bci;
+            String res = super.toString(Verbosity.Name) + "@" + bci;
+            if (BytecodeFrame.isPlaceholderBci(bci)) {
+                res += "[" + getPlaceholderBciName(bci) + "]";
+            }
+            return res;
         } else {
             return super.toString(verbosity);
         }
@@ -437,18 +514,8 @@ public final class FrameState extends VirtualState implements IterableNodeType {
                 properties.put("sourceLine", ste.getLineNumber());
             }
         }
-        if (bci == BytecodeFrame.AFTER_BCI) {
-            properties.put("bci", "AFTER_BCI");
-        } else if (bci == BytecodeFrame.AFTER_EXCEPTION_BCI) {
-            properties.put("bci", "AFTER_EXCEPTION_BCI");
-        } else if (bci == BytecodeFrame.INVALID_FRAMESTATE_BCI) {
-            properties.put("bci", "INVALID_FRAMESTATE_BCI");
-        } else if (bci == BytecodeFrame.BEFORE_BCI) {
-            properties.put("bci", "BEFORE_BCI");
-        } else if (bci == BytecodeFrame.UNKNOWN_BCI) {
-            properties.put("bci", "UNKNOWN_BCI");
-        } else if (bci == BytecodeFrame.UNWIND_BCI) {
-            properties.put("bci", "UNWIND_BCI");
+        if (isPlaceholderBci(bci)) {
+            properties.put("bci", getPlaceholderBciName(bci));
         }
         properties.put("locksSize", values.size() - stackSize - localsSize);
         return properties;
@@ -456,6 +523,11 @@ public final class FrameState extends VirtualState implements IterableNodeType {
 
     @Override
     public boolean verify() {
+        if (virtualObjectMappingCount() > 0) {
+            for (EscapeObjectState state : virtualObjectMappings()) {
+                assertTrue(state != null, "must be non-null");
+            }
+        }
         assertTrue(locksSize() == monitorIdCount(), "mismatch in number of locks");
         for (ValueNode value : values) {
             assertTrue(value == null || !value.isDeleted(), "frame state must not contain deleted nodes");

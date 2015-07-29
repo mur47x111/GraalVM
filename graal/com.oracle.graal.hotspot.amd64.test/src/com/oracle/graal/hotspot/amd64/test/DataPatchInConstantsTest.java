@@ -23,13 +23,14 @@
 
 package com.oracle.graal.hotspot.amd64.test;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import jdk.internal.jvmci.amd64.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
 import org.junit.*;
 
-import com.oracle.graal.amd64.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.asm.amd64.*;
 import com.oracle.graal.graph.*;

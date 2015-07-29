@@ -23,10 +23,11 @@
 package com.oracle.graal.hotspot.phases;
 
 import static com.oracle.graal.phases.common.DeadCodeEliminationPhase.Optionality.*;
-
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.compiler.Compiler;
 import com.oracle.graal.debug.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.iterators.*;
 import com.oracle.graal.loop.*;
@@ -41,7 +42,7 @@ public class OnStackReplacementPhase extends Phase {
 
     @Override
     protected void run(StructuredGraph graph) {
-        if (graph.getEntryBCI() == StructuredGraph.INVOCATION_ENTRY_BCI) {
+        if (graph.getEntryBCI() == Compiler.INVOCATION_ENTRY_BCI) {
             // This happens during inlining in a OSR method, because the same phase plan will be
             // used.
             return;
@@ -55,7 +56,7 @@ public class OnStackReplacementPhase extends Phase {
                 throw new BailoutException("No OnStackReplacementNode generated");
             }
             if (osrNodes.count() > 1) {
-                throw new GraalInternalError("Multiple OnStackReplacementNodes generated");
+                throw new JVMCIError("Multiple OnStackReplacementNodes generated");
             }
             if (osr.stateAfter().locksSize() != 0) {
                 throw new BailoutException("OSR with locks not supported");
@@ -76,6 +77,7 @@ public class OnStackReplacementPhase extends Phase {
             }
 
             LoopTransformations.peel(osrLoop);
+            osr.replaceAtUsages(InputType.Guard, AbstractBeginNode.prevBegin((FixedNode) osr.predecessor()));
             for (Node usage : osr.usages().snapshot()) {
                 ProxyNode proxy = (ProxyNode) usage;
                 proxy.replaceAndDelete(proxy.value());
@@ -107,6 +109,8 @@ public class OnStackReplacementPhase extends Phase {
                 assert value == null || value instanceof OSRLocalNode;
             }
         }
+        osr.replaceAtUsages(InputType.Guard, osrStart);
+        assert osr.usages().isEmpty();
 
         GraphUtil.killCFG(start);
 

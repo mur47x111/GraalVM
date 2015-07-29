@@ -25,7 +25,8 @@ package com.oracle.graal.lir.constopt;
 import java.util.*;
 import java.util.function.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.StandardOp.MoveOp;

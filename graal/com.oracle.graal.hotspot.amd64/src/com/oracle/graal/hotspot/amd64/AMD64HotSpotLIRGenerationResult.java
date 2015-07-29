@@ -24,7 +24,8 @@ package com.oracle.graal.hotspot.amd64;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
+import jdk.internal.jvmci.code.*;
+
 import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.hotspot.stubs.*;
 import com.oracle.graal.lir.*;
@@ -48,8 +49,8 @@ public class AMD64HotSpotLIRGenerationResult extends LIRGenerationResultBase {
      */
     private Map<LIRFrameState, SaveRegistersOp> calleeSaveInfo = CollectionsFactory.newMap();
 
-    public AMD64HotSpotLIRGenerationResult(LIR lir, FrameMapBuilder frameMapBuilder, Object stub) {
-        super(lir, frameMapBuilder);
+    public AMD64HotSpotLIRGenerationResult(String compilationUnitName, LIR lir, FrameMapBuilder frameMapBuilder, Object stub) {
+        super(compilationUnitName, lir, frameMapBuilder);
         this.stub = stub;
     }
 

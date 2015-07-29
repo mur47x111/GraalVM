@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,16 +22,17 @@
  */
 package com.oracle.graal.compiler.test;
 
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.type.*;
-import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
 import com.oracle.graal.nodes.calc.*;
-import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
+import com.oracle.graal.nodes.memory.address.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.type.*;
 import com.oracle.graal.phases.common.*;
@@ -70,17 +71,17 @@ public class PushNodesThroughPiTest extends GraalCompilerTest {
         try (Scope s = Debug.scope("PushThroughPi", new DebugDumpScope(snippet))) {
             StructuredGraph graph = compileTestSnippet(snippet);
             for (ReadNode rn : graph.getNodes().filter(ReadNode.class)) {
-                if (rn.location() instanceof ConstantLocationNode && rn.object().stamp() instanceof ObjectStamp) {
-                    long disp = ((ConstantLocationNode) rn.location()).getDisplacement();
-                    ResolvedJavaType receiverType = StampTool.typeOrNull(rn.object());
-                    ResolvedJavaField field = receiverType.findInstanceFieldWithOffset(disp, rn.getKind());
+                OffsetAddressNode address = (OffsetAddressNode) rn.getAddress();
+                long disp = address.getOffset().asJavaConstant().asLong();
 
-                    assert field != null : "Node " + rn + " tries to access a field which doesn't exists for this type";
-                    if (field.getName().equals("x")) {
-                        Assert.assertTrue(rn.object() instanceof ParameterNode);
-                    } else {
-                        Assert.assertTrue(rn.object().toString(), rn.object() instanceof PiNode);
-                    }
+                ResolvedJavaType receiverType = StampTool.typeOrNull(address.getBase());
+                ResolvedJavaField field = receiverType.findInstanceFieldWithOffset(disp, rn.getKind());
+
+                assert field != null : "Node " + rn + " tries to access a field which doesn't exists for this type";
+                if (field.getName().equals("x")) {
+                    Assert.assertTrue(address.getBase() instanceof ParameterNode);
+                } else {
+                    Assert.assertTrue(address.getBase().toString(), address.getBase() instanceof PiNode);
                 }
             }
 
@@ -93,7 +94,7 @@ public class PushNodesThroughPiTest extends GraalCompilerTest {
     private StructuredGraph compileTestSnippet(final String snippet) {
         StructuredGraph graph = parseEager(snippet, AllowAssumptions.YES);
         PhaseContext context = new PhaseContext(getProviders());
-        CanonicalizerPhase canonicalizer = new CanonicalizerPhase(true);
+        CanonicalizerPhase canonicalizer = new CanonicalizerPhase();
         new LoweringPhase(canonicalizer, LoweringTool.StandardLoweringStage.HIGH_TIER).apply(graph, context);
         canonicalizer.apply(graph, context);
         new PushThroughPiPhase().apply(graph);

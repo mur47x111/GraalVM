@@ -317,11 +317,11 @@ static DoNothingClosure do_nothing;
 static void add_derived_oop(oop* base, oop* derived) {
 #ifndef TIERED
   COMPILER1_PRESENT(ShouldNotReachHere();)
-  COMPILERGRAAL_PRESENT(ShouldNotReachHere();)
+  COMPILERJVMCI_PRESENT(ShouldNotReachHere();)
 #endif // TIERED
-#ifdef COMPILER2
+#if defined(COMPILER2) || INCLUDE_JVMCI
   DerivedPointerTable::add(derived, base);
-#endif // COMPILER2
+#endif // COMPILER2 || JVMCI
 }
 
 
@@ -379,7 +379,7 @@ void OopMapSet::all_do(const frame *fr, const RegisterMap *reg_map,
     if (!oms.is_done()) {
 #ifndef TIERED
       COMPILER1_PRESENT(ShouldNotReachHere();)
-      COMPILERGRAAL_PRESENT(ShouldNotReachHere();)
+      COMPILERJVMCI_PRESENT(ShouldNotReachHere();)
 #endif // !TIERED
       // Protect the operation on the derived pointers.  This
       // protects the addition of derived pointers to the shared
@@ -388,68 +388,71 @@ void OopMapSet::all_do(const frame *fr, const RegisterMap *reg_map,
       do {
         omv = oms.current();
         oop* loc = fr->oopmapreg_to_location(omv.reg(),reg_map);
-        if ( loc != NULL ) {
-          oop *base_loc    = fr->oopmapreg_to_location(omv.content_reg(), reg_map);
-          oop *derived_loc = loc;
-          oop val = *base_loc;
-          if (val == (oop)NULL || Universe::is_narrow_oop_base(val)) {
-            // Ignore NULL oops and decoded NULL narrow oops which
-            // equal to Universe::narrow_oop_base when a narrow oop
-            // implicit null check is used in compiled code.
-            // The narrow_oop_base could be NULL or be the address
-            // of the page below heap depending on compressed oops mode.
-          } else
-            derived_oop_fn(base_loc, derived_loc);
+        guarantee(loc != NULL, "missing saved register");
+        oop *base_loc    = fr->oopmapreg_to_location(omv.content_reg(), reg_map);
+        oop *derived_loc = loc;
+        oop val = *base_loc;
+        if (val == (oop)NULL || Universe::is_narrow_oop_base(val)) {
+          // Ignore NULL oops and decoded NULL narrow oops which
+          // equal to Universe::narrow_oop_base when a narrow oop
+          // implicit null check is used in compiled code.
+          // The narrow_oop_base could be NULL or be the address
+          // of the page below heap depending on compressed oops mode.
+        } else {
+          derived_oop_fn(base_loc, derived_loc);
         }
         oms.next();
       }  while (!oms.is_done());
     }
   }
 
-  // We want coop, value and oop oop_types
+  // We want narrowoop and oop oop_types
   int mask = OopMapValue::oop_value | OopMapValue::narrowoop_value;
   {
     for (OopMapStream oms(map,mask); !oms.is_done(); oms.next()) {
       omv = oms.current();
       oop* loc = fr->oopmapreg_to_location(omv.reg(),reg_map);
-      if ( loc != NULL ) {
-        if ( omv.type() == OopMapValue::oop_value ) {
-          oop val = *loc;
-          if (val == (oop)NULL || Universe::is_narrow_oop_base(val)) {
-            // Ignore NULL oops and decoded NULL narrow oops which
-            // equal to Universe::narrow_oop_base when a narrow oop
-            // implicit null check is used in compiled code.
-            // The narrow_oop_base could be NULL or be the address
-            // of the page below heap depending on compressed oops mode.
-            continue;
-          }
-#ifdef ASSERT
-          if ((((uintptr_t)loc & (sizeof(*loc)-1)) != 0) ||
-             !Universe::heap()->is_in_or_null(*loc)) {
-            tty->print_cr("# Found non oop pointer.  Dumping state at failure");
-            // try to dump out some helpful debugging information
-            trace_codeblob_maps(fr, reg_map);
-            omv.print();
-            tty->print_cr("register r");
-            omv.reg()->print();
-            tty->print_cr("loc = %p *loc = %p\n", loc, (address)*loc);
-            // do the real assert.
-            assert(Universe::heap()->is_in_or_null(*loc), "found non oop pointer");
-          }
-#endif // ASSERT
-          oop_fn->do_oop(loc);
-        } else if ( omv.type() == OopMapValue::narrowoop_value ) {
-          narrowOop *nl = (narrowOop*)loc;
-#ifndef VM_LITTLE_ENDIAN
-          if (!omv.reg()->is_stack()) {
-            // compressed oops in registers only take up 4 bytes of an
-            // 8 byte register but they are in the wrong part of the
-            // word so adjust loc to point at the right place.
-            nl = (narrowOop*)((address)nl + 4);
-          }
-#endif
-          oop_fn->do_oop(nl);
+      // It should be an error if no location can be found for a
+      // register mentioned as contained an oop of some kind.  Maybe
+      // this was allowed previously because value_value items might
+      // be missing?
+      guarantee(loc != NULL, "missing saved register");
+      if ( omv.type() == OopMapValue::oop_value ) {
+        oop val = *loc;
+        if (val == (oop)NULL || Universe::is_narrow_oop_base(val)) {
+          // Ignore NULL oops and decoded NULL narrow oops which
+          // equal to Universe::narrow_oop_base when a narrow oop
+          // implicit null check is used in compiled code.
+          // The narrow_oop_base could be NULL or be the address
+          // of the page below heap depending on compressed oops mode.
+          continue;
         }
+#ifdef ASSERT
+        if ((((uintptr_t)loc & (sizeof(*loc)-1)) != 0) ||
+            !Universe::heap()->is_in_or_null(*loc)) {
+          tty->print_cr("# Found non oop pointer.  Dumping state at failure");
+          // try to dump out some helpful debugging information
+          trace_codeblob_maps(fr, reg_map);
+          omv.print();
+          tty->print_cr("register r");
+          omv.reg()->print();
+          tty->print_cr("loc = %p *loc = %p\n", loc, (address)*loc);
+          // do the real assert.
+          assert(Universe::heap()->is_in_or_null(*loc), "found non oop pointer");
+        }
+#endif // ASSERT
+        oop_fn->do_oop(loc);
+      } else if ( omv.type() == OopMapValue::narrowoop_value ) {
+        narrowOop *nl = (narrowOop*)loc;
+#ifndef VM_LITTLE_ENDIAN
+        if (!omv.reg()->is_stack()) {
+          // compressed oops in registers only take up 4 bytes of an
+          // 8 byte register but they are in the wrong part of the
+          // word so adjust loc to point at the right place.
+          nl = (narrowOop*)((address)nl + 4);
+        }
+#endif
+        oop_fn->do_oop(nl);
       }
     }
   }
@@ -463,7 +466,6 @@ void OopMapSet::update_register_map(const frame *fr, RegisterMap *reg_map) {
   assert(cb != NULL, "no codeblob");
 
   // Any reg might be saved by a safepoint handler (see generate_handler_blob).
-  const int max_saved_on_entry_reg_count = ConcreteRegisterImpl::number_of_registers;
   assert( reg_map->_update_for_id == NULL || fr->is_older(reg_map->_update_for_id),
          "already updated this map; do not 'update' it twice!" );
   debug_only(reg_map->_update_for_id = fr->id());
@@ -473,40 +475,28 @@ void OopMapSet::update_register_map(const frame *fr, RegisterMap *reg_map) {
           !cb->caller_must_gc_arguments(reg_map->thread())),
          "include_argument_oops should already be set");
 
-  int nof_callee = 0;
-  oop*        locs[2*max_saved_on_entry_reg_count+1];
-  VMReg regs[2*max_saved_on_entry_reg_count+1];
-  // ("+1" because max_saved_on_entry_reg_count might be zero)
-
   // Scan through oopmap and find location of all callee-saved registers
   // (we do not do update in place, since info could be overwritten)
 
   address pc = fr->pc();
-
   OopMap* map  = cb->oop_map_for_return_address(pc);
+  assert(map != NULL, "no ptr map found");
+  DEBUG_ONLY(int nof_callee = 0;)
 
-  assert(map != NULL, " no ptr map found");
-
-  OopMapValue omv;
-  for(OopMapStream oms(map,OopMapValue::callee_saved_value); !oms.is_done(); oms.next()) {
-    omv = oms.current();
-    assert(nof_callee < 2*max_saved_on_entry_reg_count, "overflow");
-    regs[nof_callee] = omv.content_reg();
-    locs[nof_callee] = fr->oopmapreg_to_location(omv.reg(),reg_map);
-    nof_callee++;
+  for (OopMapStream oms(map, OopMapValue::callee_saved_value); !oms.is_done(); oms.next()) {
+    OopMapValue omv = oms.current();
+    VMReg reg = omv.content_reg();
+    oop* loc = fr->oopmapreg_to_location(omv.reg(), reg_map);
+    reg_map->set_location(reg, (address) loc);
+    DEBUG_ONLY(nof_callee++;)
   }
 
   // Check that runtime stubs save all callee-saved registers
 #ifdef COMPILER2
-  assert(cb->is_compiled_by_c1() || cb->is_compiled_by_graal() || !cb->is_runtime_stub() ||
+  assert(cb->is_compiled_by_c1() || cb->is_compiled_by_jvmci() || !cb->is_runtime_stub() ||
          (nof_callee >= SAVED_ON_ENTRY_REG_COUNT || nof_callee >= C_SAVED_ON_ENTRY_REG_COUNT),
          "must save all");
 #endif // COMPILER2
-
-  // Copy found callee-saved register to reg_map
-  for(int i = 0; i < nof_callee; i++) {
-    reg_map->set_location(regs[i], (address)locs[i]);
-  }
 }
 
 //=============================================================================
@@ -517,14 +507,14 @@ void OopMapSet::update_register_map(const frame *fr, RegisterMap *reg_map) {
 bool OopMap::has_derived_pointer() const {
 #ifndef TIERED
   COMPILER1_PRESENT(return false);
-  COMPILERGRAAL_PRESENT(return false);
+  COMPILERJVMCI_PRESENT(return false);
 #endif // !TIERED
-#ifdef COMPILER2
+#if defined(COMPILER2) || INCLUDE_JVMCI
   OopMapStream oms((OopMap*)this,OopMapValue::derived_oop_value);
   return oms.is_done();
 #else
   return false;
-#endif // COMPILER2
+#endif // COMPILER2 || JVMCI
 }
 
 #endif //PRODUCT
@@ -591,7 +581,7 @@ void OopMapSet::print_on(outputStream* st) const {
 
 //------------------------------DerivedPointerTable---------------------------
 
-#ifdef COMPILER2
+#if defined(COMPILER2) || INCLUDE_JVMCI
 
 class DerivedPointerEntry : public CHeapObj<mtCompiler> {
  private:
@@ -684,4 +674,4 @@ void DerivedPointerTable::update_pointers() {
   _active = false;
 }
 
-#endif // COMPILER2
+#endif // COMPILER2 || JVMCI

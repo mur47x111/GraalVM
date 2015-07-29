@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,24 +22,26 @@
  */
 package com.oracle.graal.lir.gen;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
 import static com.oracle.graal.lir.LIRValueUtil.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.debug.*;
+
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.options.*;
+
 import com.oracle.graal.asm.*;
-import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.compiler.common.spi.*;
 import com.oracle.graal.compiler.common.type.*;
-import com.oracle.graal.debug.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.StandardOp.BlockEndOp;
 import com.oracle.graal.lir.StandardOp.LabelOp;
-import com.oracle.graal.options.*;
 
 /**
  * This class traverses the HIR instructions and generates LIR instructions from them.
@@ -177,13 +179,14 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
         return res.getFrameMapBuilder().getRegisterConfig().getReturnRegister((Kind) kind.getPlatformKind()).asValue(kind);
     }
 
-    public void append(LIRInstruction op) {
+    public <I extends LIRInstruction> I append(I op) {
         if (Options.PrintIRWithLIR.getValue() && !TTY.isSuppressed()) {
             TTY.println(op.toStringWithIdPrefix());
             TTY.println();
         }
         assert LIRVerifier.verify(op);
-        res.getLIR().getLIRforBlock(currentBlock).add(op);
+        res.getLIR().getLIRforBlock(getCurrentBlock()).add(op);
+        return op;
     }
 
     public boolean hasBlockEnd(AbstractBlockBase<?> block) {
@@ -194,35 +197,55 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
         return ops.get(ops.size() - 1) instanceof BlockEndOp;
     }
 
-    public final void doBlockStart(AbstractBlockBase<?> block) {
-        if (Options.PrintIRWithLIR.getValue()) {
-            TTY.print(block.toString());
+    private final class BlockScopeImpl extends BlockScope {
+
+        private BlockScopeImpl(AbstractBlockBase<?> block) {
+            currentBlock = block;
         }
 
-        currentBlock = block;
+        private void doBlockStart() {
+            if (Options.PrintIRWithLIR.getValue()) {
+                TTY.print(currentBlock.toString());
+            }
 
-        // set up the list of LIR instructions
-        assert res.getLIR().getLIRforBlock(block) == null : "LIR list already computed for this block";
-        res.getLIR().setLIRforBlock(block, new ArrayList<LIRInstruction>());
+            // set up the list of LIR instructions
+            assert res.getLIR().getLIRforBlock(currentBlock) == null : "LIR list already computed for this block";
+            res.getLIR().setLIRforBlock(currentBlock, new ArrayList<LIRInstruction>());
 
-        append(new LabelOp(new Label(block.getId()), block.isAligned()));
+            append(new LabelOp(new Label(currentBlock.getId()), currentBlock.isAligned()));
 
-        if (Options.TraceLIRGeneratorLevel.getValue() >= 1) {
-            TTY.println("BEGIN Generating LIR for block B" + block.getId());
+            if (Options.TraceLIRGeneratorLevel.getValue() >= 1) {
+                TTY.println("BEGIN Generating LIR for block B" + currentBlock.getId());
+            }
         }
+
+        private void doBlockEnd() {
+            if (Options.TraceLIRGeneratorLevel.getValue() >= 1) {
+                TTY.println("END Generating LIR for block B" + currentBlock.getId());
+            }
+
+            if (Options.PrintIRWithLIR.getValue()) {
+                TTY.println();
+            }
+            currentBlock = null;
+        }
+
+        @Override
+        public AbstractBlockBase<?> getCurrentBlock() {
+            return currentBlock;
+        }
+
+        @Override
+        public void close() {
+            doBlockEnd();
+        }
+
     }
 
-    public final void doBlockEnd(AbstractBlockBase<?> block) {
-
-        if (Options.TraceLIRGeneratorLevel.getValue() >= 1) {
-            TTY.println("END Generating LIR for block B" + block.getId());
-        }
-
-        currentBlock = null;
-
-        if (Options.PrintIRWithLIR.getValue()) {
-            TTY.println();
-        }
+    public final BlockScope getBlockScope(AbstractBlockBase<?> block) {
+        BlockScopeImpl blockScope = new BlockScopeImpl(block);
+        blockScope.doBlockStart();
+        return blockScope;
     }
 
     public void emitIncomingValues(Value[] params) {
@@ -258,7 +281,7 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
             } else if (isStackSlot(value)) {
                 return StackSlot.get(stackKind, asStackSlot(value).getRawOffset(), asStackSlot(value).getRawAddFrameSize());
             } else {
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
             }
         }
         return value;
@@ -267,7 +290,7 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
     @Override
     public Variable emitForeignCall(ForeignCallLinkage linkage, LIRFrameState frameState, Value... args) {
         LIRFrameState state = null;
-        if (linkage.canDeoptimize()) {
+        if (linkage.needsDebugInfo()) {
             if (frameState != null) {
                 state = frameState;
             } else {
@@ -375,7 +398,7 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
         } else if (base.getLIRKind().isReference(0) && displacement == 0L && index.equals(Value.ILLEGAL)) {
             return LIRKind.reference(target().wordKind);
         } else {
-            return LIRKind.derivedReference(target().wordKind);
+            return LIRKind.unknownReference(target().wordKind);
         }
     }
 
@@ -389,5 +412,99 @@ public abstract class LIRGenerator implements LIRGeneratorTool {
 
     public void emitBlackhole(Value operand) {
         append(new StandardOp.BlackholeOp(operand));
+    }
+
+    public LIRInstruction createBenchmarkCounter(String name, String group, Value increment) {
+        throw JVMCIError.unimplemented();
+    }
+
+    public LIRInstruction createMultiBenchmarkCounter(String[] names, String[] groups, Value[] increments) {
+        throw JVMCIError.unimplemented();
+    }
+
+    // automatic derived reference handling
+
+    protected abstract Variable emitAdd(LIRKind resultKind, Value a, Value b, boolean setFlags);
+
+    public final Variable emitAdd(Value aVal, Value bVal, boolean setFlags) {
+        LIRKind resultKind;
+        Value a = aVal;
+        Value b = bVal;
+
+        if (a.getKind().isNumericInteger()) {
+            LIRKind aKind = a.getLIRKind();
+            LIRKind bKind = b.getLIRKind();
+            assert a.getPlatformKind() == b.getPlatformKind();
+
+            if (aKind.isUnknownReference()) {
+                resultKind = aKind;
+            } else if (bKind.isUnknownReference()) {
+                resultKind = bKind;
+            } else if (aKind.isValue() && bKind.isValue()) {
+                resultKind = aKind;
+            } else if (aKind.isValue()) {
+                if (bKind.isDerivedReference()) {
+                    resultKind = bKind;
+                } else {
+                    AllocatableValue allocatable = asAllocatable(b);
+                    resultKind = bKind.makeDerivedReference(allocatable);
+                    b = allocatable;
+                }
+            } else if (bKind.isValue()) {
+                if (aKind.isDerivedReference()) {
+                    resultKind = aKind;
+                } else {
+                    AllocatableValue allocatable = asAllocatable(a);
+                    resultKind = aKind.makeDerivedReference(allocatable);
+                    a = allocatable;
+                }
+            } else {
+                resultKind = aKind.makeUnknownReference();
+            }
+        } else {
+            resultKind = LIRKind.combine(a, b);
+        }
+
+        return emitAdd(resultKind, a, b, setFlags);
+    }
+
+    protected abstract Variable emitSub(LIRKind resultKind, Value a, Value b, boolean setFlags);
+
+    public final Variable emitSub(Value aVal, Value bVal, boolean setFlags) {
+        LIRKind resultKind;
+        Value a = aVal;
+        Value b = bVal;
+
+        if (a.getKind().isNumericInteger()) {
+            LIRKind aKind = a.getLIRKind();
+            LIRKind bKind = b.getLIRKind();
+            assert a.getPlatformKind() == b.getPlatformKind();
+
+            if (aKind.isUnknownReference()) {
+                resultKind = aKind;
+            } else if (bKind.isUnknownReference()) {
+                resultKind = bKind;
+            }
+
+            if (aKind.isValue() && bKind.isValue()) {
+                resultKind = aKind;
+            } else if (bKind.isValue()) {
+                if (aKind.isDerivedReference()) {
+                    resultKind = aKind;
+                } else {
+                    AllocatableValue allocatable = asAllocatable(a);
+                    resultKind = aKind.makeDerivedReference(allocatable);
+                    a = allocatable;
+                }
+            } else if (aKind.isDerivedReference() && bKind.isDerivedReference() && aKind.getDerivedReferenceBase().equals(bKind.getDerivedReferenceBase())) {
+                resultKind = LIRKind.value(a.getPlatformKind());
+            } else {
+                resultKind = aKind.makeUnknownReference();
+            }
+        } else {
+            resultKind = LIRKind.combine(a, b);
+        }
+
+        return emitSub(resultKind, a, b, setFlags);
     }
 }

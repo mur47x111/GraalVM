@@ -23,15 +23,16 @@
 package com.oracle.graal.phases.common.inlining.walker;
 
 import static com.oracle.graal.compiler.common.GraalOptions.*;
-import static com.oracle.graal.phases.common.inlining.walker.CallsiteHolderDummy.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.compiler.common.type.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.meta.Assumptions.*;
+
+import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.java.*;
@@ -108,16 +109,16 @@ public class InliningData {
         return (arg instanceof AbstractNewObjectNode) || (arg instanceof AllocatedObjectNode) || (arg instanceof VirtualObjectNode);
     }
 
-    private String checkTargetConditionsHelper(ResolvedJavaMethod method) {
+    private String checkTargetConditionsHelper(ResolvedJavaMethod method, int invokeBci) {
         if (method == null) {
             return "the method is not resolved";
-        } else if (method.isNative() && (!Intrinsify.getValue() || !InliningUtil.canIntrinsify(context.getReplacements(), method))) {
+        } else if (method.isNative() && (!Intrinsify.getValue() || !InliningUtil.canIntrinsify(context.getReplacements(), method, invokeBci))) {
             return "it is a non-intrinsic native method";
         } else if (method.isAbstract()) {
             return "it is an abstract method";
         } else if (!method.getDeclaringClass().isInitialized()) {
             return "the method's class is not initialized";
-        } else if (!method.canBeInlined() && !context.getReplacements().isForcedSubstitution(method)) {
+        } else if (!method.canBeInlined()) {
             return "it is marked non-inlinable";
         } else if (countRecursiveInlining(method) > MaximumRecursiveInlining.getValue()) {
             return "it exceeds the maximum recursive inlining depth";
@@ -129,7 +130,7 @@ public class InliningData {
     }
 
     private boolean checkTargetConditions(Invoke invoke, ResolvedJavaMethod method) {
-        final String failureMessage = checkTargetConditionsHelper(method);
+        final String failureMessage = checkTargetConditionsHelper(method, invoke.bci());
         if (failureMessage == null) {
             return true;
         } else {
@@ -194,17 +195,17 @@ public class InliningData {
         }
 
         if (callTarget.graph().getAssumptions() != null) {
-            ResolvedJavaType uniqueSubtype = holder.findUniqueConcreteSubtype();
-            if (uniqueSubtype != null) {
-                ResolvedJavaMethod resolvedMethod = uniqueSubtype.resolveConcreteMethod(targetMethod, contextType);
+            AssumptionResult<ResolvedJavaType> leafConcreteSubtype = holder.findLeafConcreteSubtype();
+            if (leafConcreteSubtype != null) {
+                ResolvedJavaMethod resolvedMethod = leafConcreteSubtype.getResult().resolveConcreteMethod(targetMethod, contextType);
                 if (resolvedMethod != null) {
-                    return getAssumptionInlineInfo(invoke, resolvedMethod, new Assumptions.ConcreteSubtype(holder, uniqueSubtype));
+                    return getAssumptionInlineInfo(invoke, resolvedMethod, leafConcreteSubtype);
                 }
             }
 
-            ResolvedJavaMethod concrete = holder.findUniqueConcreteMethod(targetMethod);
+            AssumptionResult<ResolvedJavaMethod> concrete = holder.findUniqueConcreteMethod(targetMethod);
             if (concrete != null) {
-                return getAssumptionInlineInfo(invoke, concrete, new Assumptions.ConcreteMethod(targetMethod, holder, concrete));
+                return getAssumptionInlineInfo(invoke, concrete.getResult(), concrete);
             }
         }
 
@@ -213,12 +214,8 @@ public class InliningData {
     }
 
     private InlineInfo getTypeCheckedInlineInfo(Invoke invoke, ResolvedJavaMethod targetMethod) {
-        JavaTypeProfile typeProfile;
-        ValueNode receiver = invoke.callTarget().arguments().get(0);
-        if (receiver instanceof TypeProfileProxyNode) {
-            TypeProfileProxyNode typeProfileProxyNode = (TypeProfileProxyNode) receiver;
-            typeProfile = typeProfileProxyNode.getProfile();
-        } else {
+        JavaTypeProfile typeProfile = ((MethodCallTargetNode) invoke.callTarget()).getProfile();
+        if (typeProfile == null) {
             InliningUtil.logNotInlined(invoke, inliningDepth(), targetMethod, "no type profile exists");
             return null;
         }
@@ -333,11 +330,11 @@ public class InliningData {
                     return null;
                 }
             }
-            return new MultiTypeGuardInlineInfo(invoke, concreteMethods, concreteMethodsProbabilities, usedTypes, typesToConcretes, notRecordedTypeProbability);
+            return new MultiTypeGuardInlineInfo(invoke, concreteMethods, usedTypes, typesToConcretes, notRecordedTypeProbability);
         }
     }
 
-    private InlineInfo getAssumptionInlineInfo(Invoke invoke, ResolvedJavaMethod concrete, Assumptions.Assumption takenAssumption) {
+    private InlineInfo getAssumptionInlineInfo(Invoke invoke, ResolvedJavaMethod concrete, AssumptionResult<?> takenAssumption) {
         assert concrete.isConcrete();
         if (checkTargetConditions(invoke, concrete)) {
             return new AssumptionInlineInfo(invoke, concrete, takenAssumption);
@@ -385,8 +382,8 @@ public class InliningData {
         } catch (BailoutException bailout) {
             throw bailout;
         } catch (AssertionError | RuntimeException e) {
-            throw new GraalInternalError(e).addContext(calleeInfo.toString());
-        } catch (GraalInternalError e) {
+            throw new JVMCIError(e).addContext(calleeInfo.toString());
+        } catch (JVMCIError e) {
             throw e.addContext(calleeInfo.toString());
         } catch (Throwable e) {
             throw Debug.handle(e);
@@ -559,7 +556,7 @@ public class InliningData {
         assert graphQueue.size() <= maxGraphs;
         for (int i = 0; i < info.numberOfMethods(); i++) {
             CallsiteHolder ch = methodInvocation.buildCallsiteHolderForElement(i);
-            assert (ch == DUMMY_CALLSITE_HOLDER) || !contains(ch.graph());
+            assert !contains(ch.graph());
             graphQueue.push(ch);
             assert graphQueue.size() <= maxGraphs;
         }
@@ -732,12 +729,8 @@ public class InliningData {
             }
             CallsiteHolder queuedTargetCH = iter.next();
             Inlineable targetIE = currentInvocation().callee().inlineableElementAt(i);
-            if (targetIE instanceof InlineableMacroNode) {
-                assert queuedTargetCH == DUMMY_CALLSITE_HOLDER;
-            } else {
-                InlineableGraph targetIG = (InlineableGraph) targetIE;
-                assert queuedTargetCH.method().equals(targetIG.getGraph().method());
-            }
+            InlineableGraph targetIG = (InlineableGraph) targetIE;
+            assert queuedTargetCH.method().equals(targetIG.getGraph().method());
         }
         return true;
     }

@@ -558,6 +558,27 @@ inline double fabsd(double value) {
   return fabs(value);
 }
 
+//----------------------------------------------------------------------------------------------------
+// Special casts
+// Cast floats into same-size integers and vice-versa w/o changing bit-pattern
+typedef union {
+  jfloat f;
+  jint i;
+} FloatIntConv;
+
+typedef union {
+  jdouble d;
+  jlong l;
+  julong ul;
+} DoubleLongConv;
+
+inline jint    jint_cast    (jfloat  x)  { return ((FloatIntConv*)&x)->i; }
+inline jfloat  jfloat_cast  (jint    x)  { return ((FloatIntConv*)&x)->f; }
+
+inline jlong   jlong_cast   (jdouble x)  { return ((DoubleLongConv*)&x)->l;  }
+inline julong  julong_cast  (jdouble x)  { return ((DoubleLongConv*)&x)->ul; }
+inline jdouble jdouble_cast (jlong   x)  { return ((DoubleLongConv*)&x)->d;  }
+
 inline jint low (jlong value)                    { return jint(value); }
 inline jint high(jlong value)                    { return jint(value >> 32); }
 
@@ -873,20 +894,20 @@ enum CompLevel {
   CompLevel_simple            = 1,         // C1
   CompLevel_limited_profile   = 2,         // C1, invocation & backedge counters
   CompLevel_full_profile      = 3,         // C1, invocation & backedge counters + mdo
-  CompLevel_full_optimization = 4,         // C2, Shark or Graal
+  CompLevel_full_optimization = 4,         // C2, Shark or JVMCI
 
-#if defined(COMPILER2) || defined(SHARK) || defined(COMPILERGRAAL)
-  CompLevel_highest_tier      = CompLevel_full_optimization,  // pure C2 and tiered or Graal and tiered
+#if defined(COMPILER2) || defined(SHARK) || defined(COMPILERJVMCI)
+  CompLevel_highest_tier      = CompLevel_full_optimization,  // pure C2 and tiered or JVMCI and tiered
 #elif defined(COMPILER1)
-  CompLevel_highest_tier      = CompLevel_simple,             // pure C1 or Graal
+  CompLevel_highest_tier      = CompLevel_simple,             // pure C1 or JVMCI
 #else
   CompLevel_highest_tier      = CompLevel_none,
 #endif
 
 #if defined(TIERED)
   CompLevel_initial_compile   = CompLevel_full_profile        // tiered
-#elif defined(COMPILER1) || defined(COMPILERGRAAL)
-  CompLevel_initial_compile   = CompLevel_simple              // pure C1 or Graal
+#elif defined(COMPILER1) || defined(COMPILERJVMCI)
+  CompLevel_initial_compile   = CompLevel_simple              // pure C1 or JVMCI
 #elif defined(COMPILER2) || defined(SHARK)
   CompLevel_initial_compile   = CompLevel_full_optimization   // pure C2
 #else

@@ -26,7 +26,8 @@ import static com.oracle.graal.truffle.TruffleCompilerOptions.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
+import jdk.internal.jvmci.code.*;
+
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.truffle.*;
 import com.oracle.truffle.api.nodes.*;
@@ -52,7 +53,7 @@ public final class TraceCompilationPolymorphismListener extends AbstractDebugCom
             props.put("simpleName", node.getClass().getSimpleName());
             props.put("subtree", "\n" + NodeUtil.printCompactTreeToString(node));
             String msg = cost == NodeCost.MEGAMORPHIC ? "megamorphic" : "polymorphic";
-            log(0, msg, node.toString(), props);
+            log(target, 0, msg, node.toString(), props);
         });
     }
 

@@ -22,20 +22,21 @@
  */
 package com.oracle.graal.printer;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
 import java.io.*;
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.compiler.gen.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.java.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.alloc.lsra.*;
-import com.oracle.graal.lir.alloc.lsra.Interval.*;
+import com.oracle.graal.lir.alloc.lsra.Interval.UsePosList;
 import com.oracle.graal.lir.stackslotalloc.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
@@ -313,7 +314,7 @@ class CFGPrinter extends CompilationPrinter {
         out.print("tid ").print(nodeToString(node)).println(COLUMN_END);
 
         if (nodeLirGenerator != null) {
-            Value operand = nodeLirGenerator.getNodeOperands().get(node);
+            Value operand = nodeLirGenerator.hasOperand(node) ? nodeLirGenerator.operand(node) : null;
             if (operand != null) {
                 out.print("result ").print(operand.toString()).println(COLUMN_END);
             }
@@ -417,11 +418,10 @@ class CFGPrinter extends CompilationPrinter {
 
     private String stateValueToString(ValueNode value) {
         String result = nodeToString(value);
-        if (nodeLirGenerator != null && nodeLirGenerator.getNodeOperands() != null && value != null) {
-            Value operand = nodeLirGenerator.getNodeOperands().get(value);
-            if (operand != null) {
-                result += ": " + operand;
-            }
+        if (nodeLirGenerator != null && value != null && nodeLirGenerator.hasOperand(value)) {
+            Value operand = nodeLirGenerator.operand(value);
+            assert operand != null;
+            result += ": " + operand;
         }
         return result;
     }
@@ -455,9 +455,9 @@ class CFGPrinter extends CompilationPrinter {
                 inst.forEachState(state -> {
                     if (state.hasDebugInfo()) {
                         DebugInfo di = state.debugInfo();
-                        stateString.append(debugInfoToString(di.getBytecodePosition(), di.getReferenceMap(), di.getCalleeSaveInfo(), target.arch));
+                        stateString.append(debugInfoToString(di.getBytecodePosition(), di.getReferenceMap(), state.getLiveBasePointers(), di.getCalleeSaveInfo()));
                     } else {
-                        stateString.append(debugInfoToString(state.topFrame, null, null, target.arch));
+                        stateString.append(debugInfoToString(state.topFrame, null, state.getLiveBasePointers(), null));
                     }
                 });
                 if (stateString.length() > 0) {
@@ -576,7 +576,8 @@ class CFGPrinter extends CompilationPrinter {
             out.printf("\"[%s|%c]\"", interval.getOperand(), interval.getOperand().getKind().getTypeChar());
         }
 
-        out.printf("%s -1 ", interval.getOperand());
+        StackInterval hint = interval.locationHint();
+        out.printf("%s %s ", interval.getOperand(), hint != null ? hint.getOperand() : -1);
 
         out.printf("[%d, %d[", interval.from(), interval.to());
 
@@ -604,7 +605,7 @@ class CFGPrinter extends CompilationPrinter {
         printedNodes = null;
     }
 
-    private void printScheduledBlock(Block block, List<ValueNode> nodesFor) {
+    private void printScheduledBlock(Block block, List<Node> nodesFor) {
         printBlockProlog(block);
         begin("IR");
         out.println("HIR");

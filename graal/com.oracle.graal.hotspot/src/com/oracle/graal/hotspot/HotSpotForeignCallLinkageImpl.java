@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,9 +27,11 @@ import static com.oracle.graal.hotspot.HotSpotGraalRuntime.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.code.CallingConvention.Type;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.code.CallingConvention.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.target.*;
 import com.oracle.graal.hotspot.meta.*;
 import com.oracle.graal.hotspot.stubs.*;
@@ -38,17 +40,7 @@ import com.oracle.graal.word.*;
 /**
  * The details required to link a HotSpot runtime or stub call.
  */
-public class HotSpotForeignCallLinkageImpl implements HotSpotForeignCallLinkage, HotSpotProxified {
-
-    /**
-     * The descriptor of the call.
-     */
-    private final ForeignCallDescriptor descriptor;
-
-    /**
-     * The entry point address of this call's target.
-     */
-    private long address;
+public class HotSpotForeignCallLinkageImpl extends HotSpotForeignCallTarget implements HotSpotForeignCallLinkage, HotSpotProxified {
 
     /**
      * Non-null (eventually) iff this is a call to a compiled {@linkplain Stub stub}.
@@ -91,7 +83,7 @@ public class HotSpotForeignCallLinkageImpl implements HotSpotForeignCallLinkage,
      *            temporaries which are always destroyed)
      * @param outgoingCcType outgoing (caller) calling convention type
      * @param incomingCcType incoming (callee) calling convention type (can be null)
-     * @param transition specifies if this is a {@linkplain #canDeoptimize() leaf} call
+     * @param transition specifies if this is a {@linkplain #needsDebugInfo() leaf} call
      * @param reexecutable specifies if the call can be re-executed without (meaningful) side
      *            effects. Deoptimization will not return to a point before a call that cannot be
      *            re-executed.
@@ -134,10 +126,10 @@ public class HotSpotForeignCallLinkageImpl implements HotSpotForeignCallLinkage,
 
     public HotSpotForeignCallLinkageImpl(ForeignCallDescriptor descriptor, long address, RegisterEffect effect, Transition transition, CallingConvention outgoingCallingConvention,
                     CallingConvention incomingCallingConvention, boolean reexecutable, LocationIdentity... killedLocations) {
+        super(descriptor, address);
         this.address = address;
         this.effect = effect;
         this.transition = transition;
-        this.descriptor = descriptor;
         this.outgoingCallingConvention = outgoingCallingConvention;
         this.incomingCallingConvention = incomingCallingConvention;
         this.reexecutable = reexecutable;
@@ -231,7 +223,7 @@ public class HotSpotForeignCallLinkageImpl implements HotSpotForeignCallLinkage,
     }
 
     @Override
-    public boolean canDeoptimize() {
+    public boolean needsDebugInfo() {
         return transition == Transition.NOT_LEAF;
     }
 
@@ -240,14 +232,19 @@ public class HotSpotForeignCallLinkageImpl implements HotSpotForeignCallLinkage,
     }
 
     public boolean needsJavaFrameAnchor() {
-        return canDeoptimize() || transition == Transition.LEAF_SP;
+        if (transition == Transition.NOT_LEAF || transition == Transition.STACK_INSPECTABLE_LEAF) {
+            if (stub != null) {
+                // The stub will do the JavaFrameAnchor management
+                // around the runtime call(s) it makes
+                return false;
+            } else {
+                return true;
+            }
+        }
+        return false;
     }
 
-    public CompilationResult getStubCompilationResult(final Backend backend) {
-        return stub.getCompilationResult(backend);
-    }
-
-    public Stub getStub() {
-        return stub;
+    public String getSymbol() {
+        return stub == null ? null : stub.toString();
     }
 }

@@ -24,8 +24,9 @@ package com.oracle.graal.phases.common.inlining.info;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.Assumptions.Assumption;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.meta.Assumptions.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.CallTargetNode.InvokeKind;
 import com.oracle.graal.nodes.*;
@@ -38,9 +39,9 @@ import com.oracle.graal.phases.util.*;
  */
 public class AssumptionInlineInfo extends ExactInlineInfo {
 
-    private final Assumption takenAssumption;
+    private final AssumptionResult<?> takenAssumption;
 
-    public AssumptionInlineInfo(Invoke invoke, ResolvedJavaMethod concrete, Assumption takenAssumption) {
+    public AssumptionInlineInfo(Invoke invoke, ResolvedJavaMethod concrete, AssumptionResult<?> takenAssumption) {
         super(invoke, concrete);
         this.takenAssumption = takenAssumption;
     }

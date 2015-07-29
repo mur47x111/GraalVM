@@ -22,13 +22,12 @@
  */
 package com.oracle.graal.compiler.test;
 
-import static org.junit.Assert.*;
-
 import java.util.*;
+
+import com.oracle.graal.debug.*;
 
 import org.junit.*;
 
-import com.oracle.graal.debug.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
 import com.oracle.graal.nodes.cfg.*;

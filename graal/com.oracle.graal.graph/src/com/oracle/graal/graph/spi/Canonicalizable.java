@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.graph.spi;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 
 /**

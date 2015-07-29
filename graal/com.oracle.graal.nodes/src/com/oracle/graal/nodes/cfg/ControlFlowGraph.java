@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,9 +24,10 @@ package com.oracle.graal.nodes.cfg;
 
 import java.util.*;
 
-import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.compiler.common.cfg.*;
+import jdk.internal.jvmci.common.*;
 import com.oracle.graal.debug.*;
+
+import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 
@@ -40,7 +41,7 @@ public class ControlFlowGraph implements AbstractControlFlowGraph<Block> {
 
     public final StructuredGraph graph;
 
-    private final NodeMap<Block> nodeToBlock;
+    private NodeMap<Block> nodeToBlock;
     private List<Block> reversePostOrder;
     private List<Loop<Block>> loops;
 
@@ -78,6 +79,10 @@ public class ControlFlowGraph implements AbstractControlFlowGraph<Block> {
         return reversePostOrder.get(0);
     }
 
+    public Iterable<Block> reversePostOrder() {
+        return reversePostOrder;
+    }
+
     public Iterable<Block> postOrder() {
         return new Iterable<Block>() {
 
@@ -112,6 +117,10 @@ public class ControlFlowGraph implements AbstractControlFlowGraph<Block> {
 
     public Block blockFor(Node node) {
         return nodeToBlock.get(node);
+    }
+
+    public double frequencyFor(FixedNode node) {
+        return blockFor(node).probability();
     }
 
     public List<Loop<Block>> getLoops() {
@@ -185,7 +194,7 @@ public class ControlFlowGraph implements AbstractControlFlowGraph<Block> {
                 stack.remove(stack.size() - 1);
                 postOrder.add(block);
             } else {
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
             }
         } while (!stack.isEmpty());
 
@@ -297,24 +306,56 @@ public class ControlFlowGraph implements AbstractControlFlowGraph<Block> {
         }
     }
 
-    private static void computeLoopBlocks(Block block, Loop<Block> loop) {
-        if (block.getLoop() == loop) {
-            return;
-        }
-        assert block.loop == loop.getParent();
-        block.loop = loop;
+    private static void computeLoopBlocks(Block ablock, Loop<Block> aloop) {
+        final int process = 0;
+        final int stepOut = 1;
+        class Frame {
+            final Iterator<Block> blocks;
+            final Loop<Block> loop;
+            final Frame parent;
 
-        assert !loop.getBlocks().contains(block);
-        loop.getBlocks().add(block);
-
-        if (block != loop.getHeader()) {
-            for (Block pred : block.getPredecessors()) {
-                computeLoopBlocks(pred, loop);
+            public Frame(Iterator<Block> blocks, Loop<Block> loop, Frame parent) {
+                this.blocks = blocks;
+                this.loop = loop;
+                this.parent = parent;
             }
+        }
+        int state = process;
+        Frame c = new Frame(Arrays.asList(ablock).iterator(), aloop, null);
+        while (c != null) {
+            int nextState = state;
+            if (state == process) {
+                Loop<Block> loop = c.loop;
+                Block block = c.blocks.next();
+                if (block.getLoop() == loop) {
+                    nextState = stepOut;
+                } else {
+                    assert block.loop == loop.getParent();
+                    block.loop = c.loop;
+
+                    assert !c.loop.getBlocks().contains(block);
+                    c.loop.getBlocks().add(block);
+
+                    if (block != c.loop.getHeader()) {
+                        c = new Frame(block.getPredecessors().iterator(), loop, c);
+                    } else {
+                        nextState = stepOut;
+                    }
+                }
+            } else if (state == stepOut) {
+                if (c.blocks.hasNext()) {
+                    nextState = process;
+                } else {
+                    c = c.parent;
+                }
+            } else {
+                JVMCIError.shouldNotReachHere();
+            }
+            state = nextState;
         }
     }
 
-    private void computePostdominators() {
+    public void computePostdominators() {
         outer: for (Block block : postOrder()) {
             if (block.isLoopEnd()) {
                 // We do not want the loop header registered as the postdominator of the loop end.
@@ -360,5 +401,9 @@ public class ControlFlowGraph implements AbstractControlFlowGraph<Block> {
             }
         }
         return iterA;
+    }
+
+    public void setNodeToBlock(NodeMap<Block> nodeMap) {
+        this.nodeToBlock = nodeMap;
     }
 }

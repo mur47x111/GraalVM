@@ -24,34 +24,14 @@ package com.oracle.graal.hotspot.replacements;
 
 import static com.oracle.graal.hotspot.replacements.HotSpotReplacementsUtil.*;
 
-import com.oracle.graal.api.replacements.*;
-import com.oracle.graal.hotspot.word.*;
-import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.java.*;
-import com.oracle.graal.nodes.spi.*;
+// JaCoCo Exclude
 
 /**
  * Substitutions for {@link java.lang.Object} methods.
  */
-@ClassSubstitution(java.lang.Object.class)
 public class ObjectSubstitutions {
 
-    @MethodSubstitution(isStatic = false, forced = true)
-    public static Class<?> getClass(final Object thisObj) {
-        KlassPointer hub = loadHub(GuardingPiNode.guardingNonNull(thisObj));
-        return HubGetClassNode.readClass(hub);
-    }
-
-    @MethodSubstitution(isStatic = false)
     public static int hashCode(final Object thisObj) {
         return computeHashCode(thisObj);
     }
-
-    @MethodSubstitution(value = "<init>", isStatic = false, forced = true)
-    public static void init(Object thisObj) {
-        RegisterFinalizerNode.register(thisObj);
-    }
-
-    @MacroSubstitution(macro = ObjectCloneNode.class, isStatic = false, forced = true)
-    public static native Object clone(Object obj);
 }

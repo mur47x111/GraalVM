@@ -22,17 +22,19 @@
  */
 package com.oracle.graal.lir.alloc.lsra;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
 import static com.oracle.graal.compiler.common.GraalOptions.*;
 import static com.oracle.graal.lir.LIRValueUtil.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.debug.*;
+
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.util.*;
-import com.oracle.graal.debug.*;
 import com.oracle.graal.lir.*;
 
 /**
@@ -95,7 +97,7 @@ public final class Interval {
                 case Stack:
                     return stack;
             }
-            throw GraalInternalError.shouldNotReachHere();
+            throw JVMCIError.shouldNotReachHere();
         }
 
         /**
@@ -414,7 +416,7 @@ public final class Interval {
         }
 
         public void setRegisterPriority(int index, RegisterPriority registerPriority) {
-            list.set(index * 2, registerPriority.ordinal());
+            list.set((index << 1) + 1, registerPriority.ordinal());
         }
 
         @Override
@@ -873,7 +875,7 @@ public final class Interval {
                 Interval lastChild = splitChildren.get(splitChildren.size() - 1);
                 msg.append(" (first = ").append(firstChild).append(", last = ").append(lastChild).append(")");
             }
-            throw new GraalInternalError("Linear Scan Error: %s", msg);
+            throw new JVMCIError("Linear Scan Error: %s", msg);
         }
 
         if (!splitChildren.isEmpty()) {

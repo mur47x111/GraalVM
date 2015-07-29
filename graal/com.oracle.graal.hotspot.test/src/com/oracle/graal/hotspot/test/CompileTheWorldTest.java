@@ -22,7 +22,7 @@
  */
 package com.oracle.graal.hotspot.test;
 
-import static com.oracle.graal.compiler.common.GraalOptions.*;
+import static jdk.internal.jvmci.compiler.Compiler.*;
 
 import org.junit.*;
 
@@ -40,8 +40,8 @@ public class CompileTheWorldTest extends GraalCompilerTest {
         boolean originalSetting = ExitVMOnException.getValue();
         // Compile a couple classes in rt.jar
         String file = System.getProperty("java.home") + "/lib/rt.jar";
-        new CompileTheWorld(file, new Config(null), 1, 5, false).compile();
-        ExitVMOnException.setValue(originalSetting);
+        new CompileTheWorld(file, new Config(null), 1, 5, null, null, false).compile();
+        assert ExitVMOnException.getValue() == originalSetting;
     }
 
 }

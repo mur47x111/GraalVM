@@ -34,6 +34,7 @@
 #include "runtime/compilationPolicy.hpp"
 #include "runtime/deoptimization.hpp"
 #include "runtime/handles.inline.hpp"
+#include "runtime/orderAccess.inline.hpp"
 
 PRAGMA_FORMAT_MUTE_WARNINGS_FOR_GCC
 
@@ -419,7 +420,7 @@ void ReceiverTypeData::clean_weak_klass_links(BoolObjectClosure* is_alive_cl) {
   }
 }
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
 void VirtualCallData::clean_weak_klass_links(BoolObjectClosure* is_alive_cl) {
   ReceiverTypeData::clean_weak_klass_links(is_alive_cl);
   for (uint row = 0; row < method_row_limit(); row++) {
@@ -439,7 +440,7 @@ void VirtualCallData::clean_weak_method_links() {
     }
   }
 }
-#endif // GRAAL
+#endif // INCLUDE_JVMCI
 
 #ifndef PRODUCT
 void ReceiverTypeData::print_receiver_data_on(outputStream* st) const {
@@ -448,7 +449,7 @@ void ReceiverTypeData::print_receiver_data_on(outputStream* st) const {
   for (row = 0; row < row_limit(); row++) {
     if (receiver(row) != NULL)  entries++;
   }
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   st->print_cr("count(%u) nonprofiled_count(%u) entries(%u)", count(), nonprofiled_count(), entries);
 #else
   st->print_cr("count(%u) entries(%u)", count(), entries);
@@ -472,7 +473,7 @@ void ReceiverTypeData::print_data_on(outputStream* st, const char* extra) const 
   print_receiver_data_on(st);
 }
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
 void VirtualCallData::print_method_data_on(outputStream* st) const {
   uint row;
   int entries = 0;
@@ -500,7 +501,7 @@ void VirtualCallData::print_method_data_on(outputStream* st) const {
 void VirtualCallData::print_data_on(outputStream* st, const char* extra) const {
   print_shared(st, "VirtualCallData", extra);
   print_receiver_data_on(st);
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   print_method_data_on(st);
 #endif
 }
@@ -739,7 +740,7 @@ MethodData* MethodData::allocate(ClassLoaderData* loader_data, methodHandle meth
 }
 
 int MethodData::bytecode_cell_count(Bytecodes::Code code) {
-#if defined(COMPILER1) && !(defined(COMPILER2) || defined(GRAAL))
+#if defined(COMPILER1) && !(defined(COMPILER2) || INCLUDE_JVMCI)
   return no_profile_data;
 #else
   switch (code) {
@@ -868,7 +869,7 @@ bool MethodData::is_speculative_trap_bytecode(Bytecodes::Code code) {
   return false;
 }
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
 int MethodData::compute_extra_data_count(int data_size, int empty_bc_count, bool needs_speculative_traps) {
   if (!ProfileTraps) return 0;
 
@@ -928,7 +929,7 @@ int MethodData::compute_allocation_size_in_bytes(methodHandle method) {
   while ((c = stream.next()) >= 0) {
     int size_in_bytes = compute_data_size(&stream);
     data_size += size_in_bytes;
-    if (size_in_bytes == 0 GRAAL_ONLY(&& Bytecodes::can_trap(c)))  empty_bc_count += 1;
+    if (size_in_bytes == 0 JVMCI_ONLY(&& Bytecodes::can_trap(c)))  empty_bc_count += 1;
     needs_speculative_traps = needs_speculative_traps || is_speculative_trap_bytecode(c);
   }
   int object_size = in_bytes(data_offset()) + data_size;
@@ -962,7 +963,7 @@ int MethodData::compute_allocation_size_in_words(methodHandle method) {
 // the segment in bytes.
 int MethodData::initialize_data(BytecodeStream* stream,
                                        int data_index) {
-#if defined(COMPILER1) && !(defined(COMPILER2) || defined(GRAAL))
+#if defined(COMPILER1) && !(defined(COMPILER2) || INCLUDE_JVMCI)
   return 0;
 #else
   int cell_count = -1;
@@ -1175,7 +1176,7 @@ void MethodData::initialize() {
   while ((c = stream.next()) >= 0) {
     int size_in_bytes = initialize_data(&stream, data_size);
     data_size += size_in_bytes;
-    if (size_in_bytes == 0 GRAAL_ONLY(&& Bytecodes::can_trap(c)))  empty_bc_count += 1;
+    if (size_in_bytes == 0 JVMCI_ONLY(&& Bytecodes::can_trap(c)))  empty_bc_count += 1;
     needs_speculative_traps = needs_speculative_traps || is_speculative_trap_bytecode(c);
   }
   _data_size = data_size;
@@ -1233,11 +1234,10 @@ void MethodData::init() {
   _backedge_counter_start = 0;
   _num_loops = 0;
   _num_blocks = 0;
-  _highest_comp_level = 0;
-  _highest_osr_comp_level = 0;
-  _would_profile = true;
-#ifdef GRAAL
-  _graal_node_count = 0;
+  _would_profile = unknown;
+
+#if INCLUDE_JVMCI
+  _jvmci_ir_size = 0;
 #endif
 
 #if INCLUDE_RTM_OPT

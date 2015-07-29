@@ -25,7 +25,8 @@ package com.oracle.graal.nodes.spi;
 import java.lang.reflect.*;
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.nodes.*;
 
@@ -37,19 +38,21 @@ public interface Replacements {
     /**
      * Gets the snippet graph derived from a given method.
      *
+     * @param args arguments to the snippet if available, otherwise {@code null}
      * @return the snippet graph, if any, that is derived from {@code method}
      */
-    StructuredGraph getSnippet(ResolvedJavaMethod method);
+    StructuredGraph getSnippet(ResolvedJavaMethod method, Object[] args);
 
     /**
      * Gets the snippet graph derived from a given method.
      *
      * @param recursiveEntry if the snippet contains a call to this method, it's considered as
      *            recursive call and won't be processed for {@linkplain MethodSubstitution
-     *            substitutions} or {@linkplain MacroSubstitution macro nodes}.
+     *            substitutions}.
+     * @param args arguments to the snippet if available, otherwise {@code null}
      * @return the snippet graph, if any, that is derived from {@code method}
      */
-    StructuredGraph getSnippet(ResolvedJavaMethod method, ResolvedJavaMethod recursiveEntry);
+    StructuredGraph getSnippet(ResolvedJavaMethod method, ResolvedJavaMethod recursiveEntry, Object[] args);
 
     /**
      * Registers a method as snippet.
@@ -57,40 +60,60 @@ public interface Replacements {
     void registerSnippet(ResolvedJavaMethod method);
 
     /**
-     * Notifies this object during snippet specialization once the specialized snippet's constant
-     * parameters have been replaced with constant values.
+     * Gets a graph that is a substitution for a given method.
      *
-     * @param specializedSnippet the snippet in the process of being specialized. This is a copy of
-     *            the unspecialized snippet graph created during snippet preparation.
-     */
-    void notifyAfterConstantsBound(StructuredGraph specializedSnippet);
-
-    /**
-     * Gets the graph that is a substitution for a given method.
-     *
+     * @param invokeBci the call site BCI if this request is made for inlining a substitute
+     *            otherwise {@code -1}
      * @return the graph, if any, that is a substitution for {@code method}
      */
-    StructuredGraph getMethodSubstitution(ResolvedJavaMethod method);
+    default StructuredGraph getSubstitution(ResolvedJavaMethod method, int invokeBci) {
+        return getSubstitution(method, false, invokeBci);
+    }
 
     /**
-     * Gets the method that is a substitution for a given method.
+     * Gets a graph that is a substitution for a given method.
      *
-     * @return the method, if any, that is a substitution for {@code method}
+     * @param fromBytecodeOnly only return a graph created by parsing the bytecode of another method
+     * @param invokeBci the call site BCI if this request is made for inlining a substitute
+     *            otherwise {@code -1}
+     * @return the graph, if any, that is a substitution for {@code method}
      */
-    ResolvedJavaMethod getMethodSubstitutionMethod(ResolvedJavaMethod method);
+    StructuredGraph getSubstitution(ResolvedJavaMethod method, boolean fromBytecodeOnly, int invokeBci);
 
     /**
-     * Gets the node class with which a method invocation should be replaced.
+     * Gets a method that is a substitution for a given method.
      *
-     * @param method target of an invocation
-     * @return the {@linkplain MacroSubstitution#macro() macro node class} associated with
-     *         {@code method} or null if there is no such association
+     * @return the method, if any, whose bytecode are a substitution for {@code method}
      */
-    Class<? extends FixedWithNextNode> getMacroSubstitution(ResolvedJavaMethod method);
+    ResolvedJavaMethod getSubstitutionMethod(ResolvedJavaMethod method);
 
     /**
-     * Registers all the {@linkplain MethodSubstitution method} and {@linkplain MacroSubstitution
-     * macro} substitutions defined by a given class.
+     * Determines if there is a {@linkplain #getSubstitution(ResolvedJavaMethod, int) substitution
+     * graph} for a given method.
+     *
+     * @param invokeBci the call site BCI if this request is made for inlining a substitute
+     *            otherwise {@code -1}
+     * @return true iff there is a substitution graph available for {@code method}
+     */
+    default boolean hasSubstitution(ResolvedJavaMethod method, int invokeBci) {
+        return hasSubstitution(method, false, invokeBci);
+    }
+
+    /**
+     * Determines if there is a {@linkplain #getSubstitution(ResolvedJavaMethod, int) substitution
+     * graph} for a given method.
+     *
+     * @param fromBytecodeOnly only consider graphs created by parsing the bytecode of another
+     *            method
+     * @param invokeBci the call site BCI if this request is made for inlining a substitute
+     *            otherwise {@code -1}
+     * @return true iff there is a substitution graph available for {@code method}
+     */
+    boolean hasSubstitution(ResolvedJavaMethod method, boolean fromBytecodeOnly, int invokeBci);
+
+    /**
+     * Registers all the {@linkplain MethodSubstitution method} substitutions defined by a given
+     * class.
      *
      * @param original the original class for which substitutions are being registered. This must be
      *            the same type denoted by the {@link ClassSubstitution} annotation on
@@ -106,11 +129,6 @@ public interface Replacements {
      * snippet.
      */
     Collection<ResolvedJavaMethod> getAllReplacements();
-
-    /**
-     * Determines whether the replacement of this method is flagged as being inlined always.
-     */
-    boolean isForcedSubstitution(ResolvedJavaMethod methodAt);
 
     /**
      * Register snippet templates.

@@ -24,7 +24,8 @@ package com.oracle.graal.phases.common.inlining.walker;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.phases.common.inlining.info.*;
@@ -123,15 +124,11 @@ public class MethodInvocation {
 
     public CallsiteHolder buildCallsiteHolderForElement(int index) {
         Inlineable elem = callee.inlineableElementAt(index);
-        if (elem instanceof InlineableGraph) {
-            InlineableGraph ig = (InlineableGraph) elem;
-            final double invokeProbability = probability * callee.probabilityAt(index);
-            final double invokeRelevance = relevance * callee.relevanceAt(index);
-            return new CallsiteHolderExplorable(ig.getGraph(), invokeProbability, invokeRelevance, freshlyInstantiatedArguments);
-        } else {
-            assert elem instanceof InlineableMacroNode;
-            return CallsiteHolderDummy.DUMMY_CALLSITE_HOLDER;
-        }
+        assert elem instanceof InlineableGraph;
+        InlineableGraph ig = (InlineableGraph) elem;
+        final double invokeProbability = probability * callee.probabilityAt(index);
+        final double invokeRelevance = relevance * callee.relevanceAt(index);
+        return new CallsiteHolderExplorable(ig.getGraph(), invokeProbability, invokeRelevance, freshlyInstantiatedArguments);
     }
 
     @Override

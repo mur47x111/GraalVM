@@ -275,28 +275,33 @@ public class BinaryParser implements GraphParser {
         hashStack = new LinkedList<>();
         this.monitor = monitor;
         try {
-            this.digest = MessageDigest.getInstance("SHA-256");
+            this.digest = MessageDigest.getInstance("SHA-1");
         } catch (NoSuchAlgorithmException e) {
         }
     }
     
     private void fill() throws IOException {
+        // All the data between lastPosition and position has been
+        // used so add it to the digest.
+        int position = buffer.position();
+        buffer.position(lastPosition);
+        byte[] remaining = new byte[position - buffer.position()];
+        buffer.get(remaining);
+        digest.update(remaining);
+        assert position == buffer.position();
+
         buffer.compact();
         if (channel.read(buffer) < 0) {
             throw new EOFException();
         }
         buffer.flip();
+        lastPosition = buffer.position();
     }
     
     private void ensureAvailable(int i) throws IOException {
         while (buffer.remaining() < i) {
             fill();
         }
-        buffer.mark();
-        byte[] result = new byte[i];
-        buffer.get(result);
-        digest.update(result);
-        buffer.reset();
     }
     
     private int readByte() throws IOException {
@@ -650,6 +655,8 @@ public class BinaryParser implements GraphParser {
         }
         return group;
     }
+
+    int lastPosition = 0;
     
     private InputGraph parseGraph() throws IOException {
         if (monitor != null) {
@@ -657,7 +664,17 @@ public class BinaryParser implements GraphParser {
         }
         String title = readPoolObject(String.class);
         digest.reset();
+        lastPosition = buffer.position();
         InputGraph graph = parseGraph(title);
+
+        int position = buffer.position();
+        buffer.position(lastPosition);
+        byte[] remaining = new byte[position - buffer.position()];
+        buffer.get(remaining);
+        digest.update(remaining);
+        assert position == buffer.position();
+        lastPosition = buffer.position();
+        
         byte[] d = digest.digest();
         byte[] hash = hashStack.peek();
         if (hash != null && Arrays.equals(hash, d)) {
@@ -674,6 +691,9 @@ public class BinaryParser implements GraphParser {
         parseNodes(graph);
         parseBlocks(graph);
         graph.ensureNodesInBlocks();
+        for (InputNode node : graph.getNodes()) {
+            node.internProperties();
+        }
         return graph;
     }
     
@@ -687,8 +707,17 @@ public class BinaryParser implements GraphParser {
             int nodeCount = readInt();
             for (int j = 0; j < nodeCount; j++) {
                 int nodeId = readInt();
-                block.addNode(nodeId);
-                graph.getNode(nodeId).getProperties().setProperty("block", name);
+                if (nodeId < 0) {
+                    continue;
+                }
+                final Properties properties = graph.getNode(nodeId).getProperties();
+                final String oldBlock = properties.get("block");
+                if(oldBlock != null) {
+                    properties.setProperty("block", oldBlock + ", " + name);
+                } else {
+                    block.addNode(nodeId);
+                    properties.setProperty("block", name);
+                }
             }
             int edgeCount = readInt();
             for (int j = 0; j < edgeCount; j++) {
@@ -706,7 +735,8 @@ public class BinaryParser implements GraphParser {
     private void parseNodes(InputGraph graph) throws IOException {
         int count = readInt();
         Map<String, Object> props = new HashMap<>();
-        List<Edge> edges = new LinkedList<>();
+        List<Edge> inputEdges = new ArrayList<>(count);
+        List<Edge> succEdges = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             int id = readInt();
             InputNode node = new InputNode(id);
@@ -733,7 +763,7 @@ public class BinaryParser implements GraphParser {
                     props.put(key, value);
                 }
             }
-            int edgesStart = edges.size();
+            ArrayList<Edge> currentEdges = new ArrayList<>();
             int portNum = 0;
             for (TypedPort p : nodeClass.inputs) {
                 if (p.isList) {
@@ -741,14 +771,18 @@ public class BinaryParser implements GraphParser {
                     for (int j = 0; j < size; j++) {
                         int in = readInt();
                         if (in >= 0) {
-                            edges.add(new Edge(in, id, (char) (preds + portNum), p.name + "[" + j + "]", p.type.toString(Length.S), true));
+                            Edge e = new Edge(in, id, (char) (preds + portNum), p.name + "[" + j + "]", p.type.toString(Length.S), true);
+                            currentEdges.add(e);
+                            inputEdges.add(e);
                             portNum++;
                         }
                     }
                 } else {
                     int in = readInt();
                     if (in >= 0) {
-                        edges.add(new Edge(in, id, (char) (preds + portNum), p.name, p.type.toString(Length.S), true));
+                        Edge e = new Edge(in, id, (char) (preds + portNum), p.name, p.type.toString(Length.S), true);
+                        currentEdges.add(e);
+                        inputEdges.add(e);
                         portNum++;
                     }
                 }
@@ -761,19 +795,23 @@ public class BinaryParser implements GraphParser {
                     for (int j = 0; j < size; j++) {
                         int sux = readInt();
                         if (sux >= 0) {
-                            edges.add(new Edge(id, sux, (char) portNum, p.name + "[" + j + "]", "Successor", false));
+                            Edge e = new Edge(id, sux, (char) portNum, p.name + "[" + j + "]", "Successor", false);
+                            currentEdges.add(e);
+                            succEdges.add(e);
                             portNum++;
                         }
                     }
                 } else {
                     int sux = readInt();
                     if (sux >= 0) {
-                        edges.add(new Edge(id, sux, (char) portNum, p.name, "Successor", false));
+                        Edge e = new Edge(id, sux, (char) portNum, p.name, "Successor", false);
+                        currentEdges.add(e);
+                        succEdges.add(e);
                         portNum++;
                     }
                 }
             }
-            properties.setProperty("name", createName(edges.subList(edgesStart, edges.size()), props, nodeClass.nameTemplate));
+            properties.setProperty("name", createName(currentEdges, props, nodeClass.nameTemplate));
             properties.setProperty("class", nodeClass.className);
             switch (nodeClass.className) {
                 case "BeginNode":
@@ -786,16 +824,28 @@ public class BinaryParser implements GraphParser {
             graph.addNode(node);
             props.clear();
         }
-        for (Edge e : edges) {
-            char fromIndex = e.input ? 1 : e.num;
-            char toIndex = e.input ? e.num : 0;
+        
+        Set<InputNode> nodesWithSuccessor = new HashSet<>();
+        
+        for (Edge e : succEdges) {
+            assert !e.input;
+            char fromIndex = e.num;
+            nodesWithSuccessor.add(graph.getNode(e.from));
+            char toIndex = 0;
+            graph.addEdge(InputEdge.createImmutable(fromIndex, toIndex, e.from, e.to, e.label, e.type));
+        }
+        for (Edge e : inputEdges) {
+            assert e.input;
+            char fromIndex = (char) (nodesWithSuccessor.contains(graph.getNode(e.from)) ? 1 : 0);
+            char toIndex = e.num;
             graph.addEdge(InputEdge.createImmutable(fromIndex, toIndex, e.from, e.to, e.label, e.type));
         }
     }
     
+    static final Pattern templatePattern = Pattern.compile("\\{(p|i)#([a-zA-Z0-9$_]+)(/(l|m|s))?\\}");
+    
     private String createName(List<Edge> edges, Map<String, Object> properties, String template) {
-        Pattern p = Pattern.compile("\\{(p|i)#([a-zA-Z0-9$_]+)(/(l|m|s))?\\}");
-        Matcher m = p.matcher(template);
+        Matcher m = templatePattern.matcher(template);
         StringBuffer sb = new StringBuffer();
         while (m.find()) {
             String name = m.group(2);
@@ -805,7 +855,7 @@ public class BinaryParser implements GraphParser {
                 case "i":
                     StringBuilder inputString = new StringBuilder();
                     for(Edge edge : edges) {
-                        if (name.equals(edge.label)) {
+                        if (edge.label.startsWith(name) && (name.length() == edge.label.length() || edge.label.charAt(name.length()) == '[')) {
                             if (inputString.length() > 0) {
                                 inputString.append(", ");
                             }

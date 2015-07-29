@@ -37,9 +37,9 @@ public class CompilerThreadFactory implements ThreadFactory {
     public interface DebugConfigAccess {
         /**
          * Get a thread-local debug configuration for the current thread. This will be null if
-         * debugging is {@linkplain Debug#isEnabled() disabled}.
+         * debugging is disabled.
          */
-        GraalDebugConfig getDebugConfig();
+        JVMCIDebugConfig getDebugConfig();
     }
 
     protected final String threadNamePrefix;

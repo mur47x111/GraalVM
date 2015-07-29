@@ -24,9 +24,10 @@ package com.oracle.graal.replacements.test;
 
 import java.lang.reflect.*;
 
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.test.*;
 
 /**
@@ -55,6 +56,7 @@ public class DynamicNewArrayTest extends GraalCompilerTest {
     @Test
     public void test4() {
         test("dynamic", Boolean.class, -7);
+        test("dynamicSynchronized", Boolean.class, -7);
     }
 
     @Test
@@ -93,6 +95,10 @@ public class DynamicNewArrayTest extends GraalCompilerTest {
     }
 
     public static Object dynamic(Class<?> elementType, int length) {
+        return Array.newInstance(elementType, length);
+    }
+
+    public static synchronized Object dynamicSynchronized(Class<?> elementType, int length) {
         return Array.newInstance(elementType, length);
     }
 }

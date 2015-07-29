@@ -25,8 +25,9 @@ package com.oracle.graal.virtual.phases.ea;
 import java.lang.reflect.*;
 import java.util.*;
 
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
 import com.oracle.graal.debug.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 
@@ -39,6 +40,10 @@ public class EffectList implements Iterable<EffectList.Effect> {
     public interface Effect {
         default boolean isVisible() {
             return true;
+        }
+
+        default boolean isCfgKill() {
+            return false;
         }
 
         void apply(StructuredGraph graph, ArrayList<Node> obsoleteNodes);
@@ -158,20 +163,22 @@ public class EffectList implements Iterable<EffectList.Effect> {
         return size == 0;
     }
 
-    public void apply(StructuredGraph graph, ArrayList<Node> obsoleteNodes) {
+    public void apply(StructuredGraph graph, ArrayList<Node> obsoleteNodes, boolean cfgKills) {
         for (int i = 0; i < size(); i++) {
             Effect effect = effects[i];
-            try {
-                effect.apply(graph, obsoleteNodes);
-            } catch (Throwable t) {
-                StringBuilder str = new StringBuilder();
-                toString(str, i);
-                throw new GraalInternalError(t).addContext("effect", str);
-            }
-            if (effect.isVisible() && Debug.isLogEnabled()) {
-                StringBuilder str = new StringBuilder();
-                toString(str, i);
-                Debug.log("    %s", str);
+            if (effect.isCfgKill() == cfgKills) {
+                try {
+                    effect.apply(graph, obsoleteNodes);
+                } catch (Throwable t) {
+                    StringBuilder str = new StringBuilder();
+                    toString(str, i);
+                    throw new JVMCIError(t).addContext("effect", str);
+                }
+                if (effect.isVisible() && Debug.isLogEnabled()) {
+                    StringBuilder str = new StringBuilder();
+                    toString(str, i);
+                    Debug.log("    %s", str);
+                }
             }
         }
     }

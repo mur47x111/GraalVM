@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.nodes;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -37,6 +38,7 @@ public abstract class AbstractFixedGuardNode extends DeoptimizingFixedWithNextNo
     @Input(InputType.Condition) protected LogicNode condition;
     protected final DeoptimizationReason reason;
     protected final DeoptimizationAction action;
+    protected JavaConstant speculation;
     protected boolean negated;
 
     public LogicNode condition() {
@@ -48,9 +50,11 @@ public abstract class AbstractFixedGuardNode extends DeoptimizingFixedWithNextNo
         condition = x;
     }
 
-    protected AbstractFixedGuardNode(NodeClass<? extends AbstractFixedGuardNode> c, LogicNode condition, DeoptimizationReason deoptReason, DeoptimizationAction action, boolean negated) {
+    protected AbstractFixedGuardNode(NodeClass<? extends AbstractFixedGuardNode> c, LogicNode condition, DeoptimizationReason deoptReason, DeoptimizationAction action, JavaConstant speculation,
+                    boolean negated) {
         super(c, StampFactory.forVoid());
         this.action = action;
+        this.speculation = speculation;
         this.negated = negated;
         this.condition = condition;
         this.reason = deoptReason;
@@ -62,6 +66,10 @@ public abstract class AbstractFixedGuardNode extends DeoptimizingFixedWithNextNo
 
     public DeoptimizationAction getAction() {
         return action;
+    }
+
+    public JavaConstant getSpeculation() {
+        return speculation;
     }
 
     public boolean isNegated() {

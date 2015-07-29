@@ -22,15 +22,16 @@
  */
 package com.oracle.graal.nodes;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
-import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
 
 /**
  * The start node of a graph.
  */
-@NodeInfo(allowedUsageTypes = {InputType.Memory})
+@NodeInfo(allowedUsageTypes = {InputType.Memory}, nameTemplate = "Start")
 public class StartNode extends BeginStateSplitNode implements MemoryCheckpoint.Single {
     public static final NodeClass<StartNode> TYPE = NodeClass.create(StartNode.class);
 
@@ -44,6 +45,6 @@ public class StartNode extends BeginStateSplitNode implements MemoryCheckpoint.S
 
     @Override
     public LocationIdentity getLocationIdentity() {
-        return LocationIdentity.ANY_LOCATION;
+        return LocationIdentity.any();
     }
 }

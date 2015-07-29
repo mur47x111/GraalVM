@@ -22,11 +22,12 @@
  */
 package com.oracle.graal.api.directives.test;
 
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.code.*;
 import com.oracle.graal.api.directives.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.test.*;
 
 public class DeoptimizeDirectiveTest extends GraalCompilerTest {

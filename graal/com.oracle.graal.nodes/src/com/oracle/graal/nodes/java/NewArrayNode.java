@@ -24,7 +24,8 @@ package com.oracle.graal.nodes.java;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
@@ -44,11 +45,15 @@ public class NewArrayNode extends AbstractNewArrayNode implements VirtualizableA
     public static final NodeClass<NewArrayNode> TYPE = NodeClass.create(NewArrayNode.class);
 
     public NewArrayNode(ResolvedJavaType elementType, ValueNode length, boolean fillContents) {
-        super(TYPE, StampFactory.exactNonNull(elementType.getArrayClass()), length, fillContents);
+        this(elementType, length, fillContents, null);
     }
 
-    protected NewArrayNode(NodeClass<? extends NewArrayNode> c, ResolvedJavaType elementType, ValueNode length, boolean fillContents) {
-        super(c, StampFactory.exactNonNull(elementType.getArrayClass()), length, fillContents);
+    public NewArrayNode(ResolvedJavaType elementType, ValueNode length, boolean fillContents, FrameState stateBefore) {
+        this(TYPE, elementType, length, fillContents, stateBefore);
+    }
+
+    protected NewArrayNode(NodeClass<? extends NewArrayNode> c, ResolvedJavaType elementType, ValueNode length, boolean fillContents, FrameState stateBefore) {
+        super(c, StampFactory.exactNonNull(elementType.getArrayClass()), length, fillContents, stateBefore);
     }
 
     @NodeIntrinsic
@@ -69,8 +74,9 @@ public class NewArrayNode extends AbstractNewArrayNode implements VirtualizableA
 
     @Override
     public void virtualize(VirtualizerTool tool) {
-        if (length().asConstant() != null) {
-            final int constantLength = length().asJavaConstant().asInt();
+        ValueNode replacedLength = tool.getReplacedValue(length());
+        if (replacedLength.asConstant() != null) {
+            final int constantLength = replacedLength.asJavaConstant().asInt();
             if (constantLength >= 0 && constantLength < tool.getMaximumEntryCount()) {
                 ValueNode[] state = new ValueNode[constantLength];
                 ConstantNode defaultForKind = constantLength == 0 ? null : defaultElementValue();
@@ -78,7 +84,7 @@ public class NewArrayNode extends AbstractNewArrayNode implements VirtualizableA
                     state[i] = defaultForKind;
                 }
                 VirtualObjectNode virtualObject = createVirtualArrayNode(constantLength);
-                tool.createVirtualObject(virtualObject, state, Collections.<MonitorIdNode> emptyList());
+                tool.createVirtualObject(virtualObject, state, Collections.<MonitorIdNode> emptyList(), false);
                 tool.replaceWithVirtual(virtualObject);
             }
         }

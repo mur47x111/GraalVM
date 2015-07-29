@@ -22,15 +22,13 @@
  */
 package com.oracle.graal.lir.framemap;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 
 /**
  * Represents a {@link VirtualStackSlot virtual stack slot} for a specific {@link LIRKind kind}.
  */
 public class SimpleVirtualStackSlot extends VirtualStackSlot {
-
-    private static final long serialVersionUID = 7654295701165421750L;
 
     public SimpleVirtualStackSlot(int id, LIRKind lirKind) {
         super(id, lirKind);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,29 +23,33 @@
 package com.oracle.graal.compiler.test;
 
 import static com.oracle.graal.compiler.common.GraalOptions.*;
+import static com.oracle.graal.graph.test.matchers.NodeIterableCount.*;
+import static org.hamcrest.core.IsInstanceOf.*;
 import static org.junit.Assert.*;
 
 import java.util.*;
 
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.options.*;
+import jdk.internal.jvmci.options.OptionValue.*;
+
 import org.junit.*;
 
-import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
+import com.oracle.graal.api.directives.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.iterators.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
+import com.oracle.graal.nodes.StructuredGraph.*;
 import com.oracle.graal.nodes.cfg.*;
-import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.util.*;
-import com.oracle.graal.options.*;
-import com.oracle.graal.options.OptionValue.OverrideScope;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.inlining.*;
 import com.oracle.graal.phases.schedule.*;
-import com.oracle.graal.phases.schedule.SchedulePhase.SchedulingStrategy;
+import com.oracle.graal.phases.schedule.SchedulePhase.*;
 import com.oracle.graal.phases.tiers.*;
 
 /**
@@ -250,6 +254,118 @@ public class MemoryScheduleTest extends GraphScheduleTest {
         assertDeepEquals(10, schedule.getCFG().getBlocks().size());
         assertReadWithinStartBlock(schedule, false);
         assertReadWithinAllReturnBlocks(schedule, false);
+    }
+
+    /**
+     * Here the read should not float out of the loop.
+     */
+    public static int testLoop6Snippet(int a, int b, MemoryScheduleTest obj) {
+        int ret = 0;
+        int bb = b;
+        for (int i = 0; i < a; i++) {
+            ret = obj.hash;
+            if (a > 10) {
+                bb++;
+            } else {
+                bb--;
+                for (int j = 0; j < b; ++j) {
+                    obj.hash = 3;
+                }
+            }
+            ret = ret / 10;
+        }
+        return ret + bb;
+    }
+
+    @Test
+    public void testLoop6() {
+        SchedulePhase schedule = getFinalSchedule("testLoop6Snippet", TestMode.WITHOUT_FRAMESTATES);
+        assertDeepEquals(13, schedule.getCFG().getBlocks().size());
+        assertReadWithinStartBlock(schedule, false);
+        assertReadWithinAllReturnBlocks(schedule, false);
+    }
+
+    /**
+     * Here the read should not float out of the loop.
+     */
+    public static int testLoop7Snippet(int a, int b, MemoryScheduleTest obj) {
+        int ret = 0;
+        int bb = b;
+        for (int i = 0; i < a; i++) {
+            ret = obj.hash;
+            if (a > 10) {
+                bb++;
+            } else {
+                bb--;
+                for (int k = 0; k < a; ++k) {
+                    if (k % 2 == 1) {
+                        for (int j = 0; j < b; ++j) {
+                            obj.hash = 3;
+                        }
+                    }
+                }
+            }
+            ret = ret / 10;
+        }
+        return ret + bb;
+    }
+
+    @Test
+    public void testLoop7() {
+        SchedulePhase schedule = getFinalSchedule("testLoop7Snippet", TestMode.WITHOUT_FRAMESTATES);
+        assertDeepEquals(18, schedule.getCFG().getBlocks().size());
+        assertReadWithinStartBlock(schedule, false);
+        assertReadWithinAllReturnBlocks(schedule, false);
+    }
+
+    /**
+     * Here the read should not float to the end.
+     */
+    public static int testLoop8Snippet(int a, int b) {
+        int result = container.a;
+        for (int i = 0; i < a; i++) {
+            if (b < 0) {
+                container.b = 10;
+                break;
+            } else {
+                for (int j = 0; j < b; j++) {
+                    container.a = 0;
+                }
+            }
+        }
+        GraalDirectives.controlFlowAnchor();
+        return result;
+    }
+
+    @Test
+    public void testLoop8() {
+        SchedulePhase schedule = getFinalSchedule("testLoop8Snippet", TestMode.WITHOUT_FRAMESTATES);
+        assertDeepEquals(10, schedule.getCFG().getBlocks().size());
+        assertReadWithinStartBlock(schedule, true);
+        assertReadWithinAllReturnBlocks(schedule, false);
+    }
+
+    /**
+     * Here the read should float after the loop.
+     */
+    public static int testLoop9Snippet(int a, int b) {
+        container.a = b;
+        for (int i = 0; i < a; i++) {
+            container.a = i;
+        }
+        GraalDirectives.controlFlowAnchor();
+        return container.a;
+    }
+
+    @Test
+    public void testLoop9() {
+        SchedulePhase schedule = getFinalSchedule("testLoop9Snippet", TestMode.WITHOUT_FRAMESTATES);
+        StructuredGraph graph = schedule.getCFG().getStartBlock().getBeginNode().graph();
+        assertThat(graph.getNodes(ReturnNode.TYPE), hasCount(1));
+        ReturnNode ret = graph.getNodes(ReturnNode.TYPE).first();
+        assertThat(ret.result(), instanceOf(FloatingReadNode.class));
+        Block readBlock = schedule.getNodeToBlockMap().get(ret.result());
+        Assert.assertEquals(0, readBlock.getLoopDepth());
     }
 
     /**
@@ -599,8 +715,8 @@ public class MemoryScheduleTest extends GraphScheduleTest {
         final StructuredGraph graph = parseEager(snippet, AllowAssumptions.NO);
         try (Scope d = Debug.scope("FloatingReadTest", graph)) {
             try (OverrideScope s = OptionValue.override(OptScheduleOutOfLoops, schedulingStrategy == SchedulingStrategy.LATEST_OUT_OF_LOOPS, OptImplicitNullChecks, false)) {
-                HighTierContext context = new HighTierContext(getProviders(), null, getDefaultGraphBuilderSuite(), OptimisticOptimizations.ALL);
-                CanonicalizerPhase canonicalizer = new CanonicalizerPhase(true);
+                HighTierContext context = getDefaultHighTierContext();
+                CanonicalizerPhase canonicalizer = new CanonicalizerPhase();
                 canonicalizer.apply(graph, context);
                 if (mode == TestMode.INLINED_WITHOUT_FRAMESTATES) {
                     new InliningPhase(canonicalizer).apply(graph, context);
@@ -622,7 +738,7 @@ public class MemoryScheduleTest extends GraphScheduleTest {
                 new FloatingReadPhase().apply(graph);
                 new RemoveValueProxyPhase().apply(graph);
 
-                MidTierContext midContext = new MidTierContext(getProviders(), getCodeCache().getTarget(), OptimisticOptimizations.ALL, graph.method().getProfilingInfo(), null);
+                MidTierContext midContext = new MidTierContext(getProviders(), getCodeCache().getTarget(), OptimisticOptimizations.ALL, graph.method().getProfilingInfo());
                 new GuardLoweringPhase().apply(graph, midContext);
                 new LoweringPhase(canonicalizer, LoweringTool.StandardLoweringStage.MID_TIER).apply(graph, midContext);
                 new LoweringPhase(canonicalizer, LoweringTool.StandardLoweringStage.LOW_TIER).apply(graph, midContext);

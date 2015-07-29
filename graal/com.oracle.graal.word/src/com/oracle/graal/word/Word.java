@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,17 +22,19 @@
  */
 package com.oracle.graal.word;
 
-import static com.oracle.graal.compiler.common.UnsafeAccess.*;
+import static jdk.internal.jvmci.common.UnsafeAccess.*;
 
 import java.lang.annotation.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.calc.*;
-import com.oracle.graal.nodes.HeapAccess.BarrierType;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
+import com.oracle.graal.nodes.memory.HeapAccess.BarrierType;
+import com.oracle.graal.nodes.memory.address.AddressNode.Address;
 
 public abstract class Word implements Signed, Unsigned, Pointer {
 
@@ -72,7 +74,8 @@ public abstract class Word implements Signed, Unsigned, Pointer {
          FROM_UNSIGNED,
          FROM_SIGNED,
          FROM_OBJECT,
-         FROM_ARRAY,
+         FROM_WORDBASE,
+         FROM_ADDRESS,
          TO_OBJECT,
          TO_RAW_VALUE,
     }
@@ -170,11 +173,14 @@ public abstract class Word implements Signed, Unsigned, Pointer {
         return unbox();
     }
 
+    @Operation(opcode = Opcode.FROM_WORDBASE)
+    public static native Word fromWordBase(WordBase val);
+
     @Operation(opcode = Opcode.FROM_OBJECT)
     public static native Pointer fromObject(Object val);
 
-    @Operation(opcode = Opcode.FROM_ARRAY)
-    public static native Pointer fromArray(Object oop, Object location);
+    @Operation(opcode = Opcode.FROM_ADDRESS)
+    public static native Pointer fromAddress(Address address);
 
     @Override
     @Operation(opcode = Opcode.TO_OBJECT)
@@ -1083,17 +1089,17 @@ public abstract class Word implements Signed, Unsigned, Pointer {
 
     @Override
     public final boolean equals(Object obj) {
-        throw GraalInternalError.shouldNotReachHere("equals must not be called on words");
+        throw JVMCIError.shouldNotReachHere("equals must not be called on words");
     }
 
     @Override
     public final int hashCode() {
-        throw GraalInternalError.shouldNotReachHere("hashCode must not be called on words");
+        throw JVMCIError.shouldNotReachHere("hashCode must not be called on words");
     }
 
     @Override
     public String toString() {
-        throw GraalInternalError.shouldNotReachHere("toString must not be called on words");
+        throw JVMCIError.shouldNotReachHere("toString must not be called on words");
     }
 }
 

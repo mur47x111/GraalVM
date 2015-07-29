@@ -22,14 +22,12 @@
  */
 package com.oracle.graal.hotspot.amd64;
 
-import static com.oracle.graal.amd64.AMD64.*;
+import static jdk.internal.jvmci.amd64.AMD64.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.gen.*;
-import com.oracle.graal.hotspot.amd64.AMD64HotSpotLIRGenerator.SaveRbp;
-import com.oracle.graal.hotspot.meta.*;
-import com.oracle.graal.lir.StandardOp.NoOp;
 import com.oracle.graal.lir.gen.*;
 
 public class AMD64HotSpotBytecodeLIRBuilder extends BytecodeLIRBuilder {
@@ -40,14 +38,6 @@ public class AMD64HotSpotBytecodeLIRBuilder extends BytecodeLIRBuilder {
 
     private AMD64HotSpotLIRGenerator getGen() {
         return (AMD64HotSpotLIRGenerator) gen;
-    }
-
-    private SaveRbp getSaveRbp() {
-        return getGen().saveRbp;
-    }
-
-    private void setSaveRbp(SaveRbp saveRbp) {
-        getGen().saveRbp = saveRbp;
     }
 
     @Override
@@ -68,8 +58,7 @@ public class AMD64HotSpotBytecodeLIRBuilder extends BytecodeLIRBuilder {
 
         gen.emitIncomingValues(params);
 
-        setSaveRbp(((AMD64HotSpotLIRGenerator) gen).new SaveRbp(new NoOp(gen.getCurrentBlock(), gen.getResult().getLIR().getLIRforBlock(gen.getCurrentBlock()).size())));
-        gen.append(getSaveRbp().placeholder);
+        getGen().emitSaveRbp();
 
         Signature sig = method.getSignature();
         boolean isStatic = method.isStatic();

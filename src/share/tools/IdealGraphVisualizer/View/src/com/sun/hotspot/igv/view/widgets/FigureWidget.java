@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -62,11 +62,7 @@ import org.openide.util.Lookup;
 public class FigureWidget extends Widget implements Properties.Provider, PopupMenuProvider, DoubleClickHandler {
 
     public static final boolean VERTICAL_LAYOUT = true;
-    //public static final int MAX_STRING_LENGTH = 20;
     private static final double LABEL_ZOOM_FACTOR = 0.3;
-    private static final double ZOOM_FACTOR = 0.1;
-    private Font font;
-    private Font boldFont;
     private Figure figure;
     private Widget leftWidget;
     private Widget rightWidget;
@@ -74,7 +70,7 @@ public class FigureWidget extends Widget implements Properties.Provider, PopupMe
     private ArrayList<LabelWidget> labelWidgets;
     private DiagramScene diagramScene;
     private boolean boundary;
-    private Node node;
+    private final Node node;
     private Widget dummyTop;
 
     public void setBoundary(boolean b) {
@@ -89,60 +85,50 @@ public class FigureWidget extends Widget implements Properties.Provider, PopupMe
         return node;
     }
 
-	@Override
-	public boolean isHitAt(Point localLocation) {
-		return middleWidget.isHitAt(localLocation);
-	}
-    
+    @Override
+    public boolean isHitAt(Point localLocation) {
+        return middleWidget.isHitAt(localLocation);
+    }
 
     public FigureWidget(final Figure f, WidgetAction hoverAction, WidgetAction selectAction, DiagramScene scene, Widget parent) {
-
         super(scene);
 
         assert this.getScene() != null;
         assert this.getScene().getView() != null;
 
         this.figure = f;
-        font = f.getDiagram().getFont();
-        boldFont = f.getDiagram().getFont().deriveFont(Font.BOLD);
         this.setCheckClipping(true);
         this.diagramScene = scene;
         parent.addChild(this);
 
-	Widget outer = new Widget(scene);
-	outer.setBackground(f.getColor());
-	outer.setLayout(LayoutFactory.createOverlayLayout());
-	
+        Widget outer = new Widget(scene);
+        outer.setBackground(f.getColor());
+        outer.setLayout(LayoutFactory.createOverlayLayout());
+
         middleWidget = new Widget(scene);
         middleWidget.setLayout(LayoutFactory.createVerticalFlowLayout(LayoutFactory.SerialAlignment.CENTER, 0));
         middleWidget.setBackground(f.getColor());
         middleWidget.setOpaque(true);
-        //middleWidget.setBorder(BorderFactory.createLineBorder(Color.BLACK));
         middleWidget.getActions().addAction(new DoubleClickAction(this));
-	middleWidget.setCheckClipping(true);
-
-        labelWidgets = new ArrayList<>();
-
-        String[] strings = figure.getLines();
+        middleWidget.setCheckClipping(true);
 
         dummyTop = new Widget(scene);
         dummyTop.setMinimumSize(new Dimension(Figure.INSET / 2, 1));
         middleWidget.addChild(dummyTop);
 
+        String[] strings = figure.getLines();
+        labelWidgets = new ArrayList<>(strings.length);
 
-        for (String cur : strings) {
-
-            String displayString = cur;
-
+        for (String displayString : strings) {
             LabelWidget lw = new LabelWidget(scene);
             labelWidgets.add(lw);
             middleWidget.addChild(lw);
             lw.setLabel(displayString);
-            lw.setFont(font);
-            lw.setForeground(Color.BLACK);
+            lw.setFont(figure.getDiagram().getFont());
+            lw.setForeground(getTextColor());
             lw.setAlignment(LabelWidget.Alignment.CENTER);
             lw.setVerticalAlignment(LabelWidget.VerticalAlignment.CENTER);
-	    lw.setBorder(BorderFactory.createEmptyBorder());
+            lw.setBorder(BorderFactory.createEmptyBorder());
         }
 
         Widget dummyBottom = new Widget(scene);
@@ -150,7 +136,6 @@ public class FigureWidget extends Widget implements Properties.Provider, PopupMe
         middleWidget.addChild(dummyBottom);
 
         middleWidget.setPreferredBounds(new Rectangle(0, Figure.SLOT_WIDTH - Figure.OVERLAPPING, f.getWidth(), f.getHeight()));
-	//outer.addChild(middleWidget);
         this.addChild(middleWidget);
 
         // Initialize node for property sheet
@@ -178,49 +163,22 @@ public class FigureWidget extends Widget implements Properties.Provider, PopupMe
     protected void notifyStateChanged(ObjectState previousState, ObjectState state) {
         super.notifyStateChanged(previousState, state);
 
+        Font font = this.figure.getDiagram().getFont();
+        if (state.isSelected()) {
+            font = this.figure.getDiagram().getBoldFont();
+        }
+
         Color borderColor = Color.BLACK;
-	Color innerBorderColor = getFigure().getColor();
-        int thickness = 1;
-        boolean repaint = false;
-        Font f = font;
-        if (state.isSelected() || state.isHighlighted()) {
-            thickness = 2;
-	}
-	if(state.isSelected()) {
-            f = boldFont;
-		innerBorderColor = borderColor;
-        } else {
-	}
-
+        Color innerBorderColor = getFigure().getColor();
         if (state.isHighlighted()) {
-		innerBorderColor = borderColor = Color.BLUE;
-		repaint = true;
-        } else {
-		repaint = true;
-	}
-
-        if (state.isHovered() != previousState.isHovered()) {
-
-		/*
-            if (state.isHovered()) {
-                diagramScene.addAllHighlighted(this.getFigure().getSource().getSourceNodesAsSet());
-            } else {
-                diagramScene.removeAllHighlighted(this.getFigure().getSource().getSourceNodesAsSet());
-            }*/
-            repaint = true;
+            innerBorderColor = borderColor = Color.BLUE;
         }
 
-        if (state.isSelected() != previousState.isSelected()) {
-            repaint = true;
+        middleWidget.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(borderColor, 1), BorderFactory.createLineBorder(innerBorderColor, 1)));
+        for (LabelWidget labelWidget : labelWidgets) {
+            labelWidget.setFont(font);
         }
-
-        if (repaint) {
-            middleWidget.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(borderColor, 1), BorderFactory.createLineBorder(innerBorderColor, 1)));
-            for (LabelWidget labelWidget : labelWidgets) {
-                labelWidget.setFont(f);
-            }
-            repaint();
-        }
+        repaint();
     }
 
     public String getName() {
@@ -236,6 +194,16 @@ public class FigureWidget extends Widget implements Properties.Provider, PopupMe
         return figure;
     }
 
+    private Color getTextColor() {
+        Color bg = figure.getColor();
+        double brightness = bg.getRed() * 0.21 + bg.getGreen() * 0.72 + bg.getBlue() * 0.07;
+        if (brightness < 150) {
+            return Color.WHITE;
+        } else {
+            return Color.BLACK;
+        }
+    }
+
     @Override
     protected void paintChildren() {
         Composite oldComposite = null;
@@ -246,7 +214,6 @@ public class FigureWidget extends Widget implements Properties.Provider, PopupMe
         }
 
         if (diagramScene.getZoomFactor() < LABEL_ZOOM_FACTOR) {
-
             for (LabelWidget labelWidget : labelWidgets) {
                 labelWidget.setVisible(false);
             }
@@ -254,28 +221,35 @@ public class FigureWidget extends Widget implements Properties.Provider, PopupMe
             for (LabelWidget labelWidget : labelWidgets) {
                 labelWidget.setVisible(true);
             }
-
         } else {
+            Color oldColor = null;
+            if (boundary) {
+                for (LabelWidget labelWidget : labelWidgets) {
+                    oldColor = labelWidget.getForeground();
+                    labelWidget.setForeground(Color.BLACK);
+                }
+            }
             super.paintChildren();
+            if (boundary) {
+                for (LabelWidget labelWidget : labelWidgets) {
+                    labelWidget.setForeground(oldColor);
+                }
+            }
         }
 
         if (boundary) {
             getScene().getGraphics().setComposite(oldComposite);
         }
     }
- 
+
     @Override
     public JPopupMenu getPopupMenu(Widget widget, Point point) {
         JPopupMenu menu = diagramScene.createPopupMenu();
         menu.addSeparator();
-
-        JMenu predecessors = new JMenu("Nodes Above");
-        predecessors.addMenuListener(new NeighborMenuListener(predecessors, getFigure(), false));
-        menu.add(predecessors);
-
-        JMenu successors = new JMenu("Nodes Below");
-        successors.addMenuListener(new NeighborMenuListener(successors, getFigure(), true));
-        menu.add(successors);
+        
+        build(menu, getFigure(), this, false, diagramScene);
+        menu.addSeparator();
+        build(menu, getFigure(), this, true, diagramScene);
 
         if (getFigure().getSubgraphs() != null) {
             menu.addSeparator();
@@ -283,7 +257,7 @@ public class FigureWidget extends Widget implements Properties.Provider, PopupMe
             menu.add(subgraphs);
 
             final GraphViewer viewer = Lookup.getDefault().lookup(GraphViewer.class);
-            for(final InputGraph subgraph : getFigure().getSubgraphs()) {
+            for (final InputGraph subgraph : getFigure().getSubgraphs()) {
                 Action a = new AbstractAction() {
 
                     @Override
@@ -301,10 +275,45 @@ public class FigureWidget extends Widget implements Properties.Provider, PopupMe
         return menu;
     }
 
+    public static void build(JPopupMenu menu, Figure figure, FigureWidget figureWidget, boolean successors, DiagramScene diagramScene) {
+        Set<Figure> set = figure.getPredecessorSet();
+        if (successors) {
+            set = figure.getSuccessorSet();
+        }
+
+        boolean first = true;
+        for (Figure f : set) {
+            if (f == figure) {
+                continue;
+            }
+
+            if (first) {
+                first = false;
+            } else {
+                menu.addSeparator();
+            }
+
+            Action go = diagramScene.createGotoAction(f);
+            menu.add(go);
+
+            JMenu preds = new JMenu("Nodes Above");
+            preds.addMenuListener(figureWidget.new NeighborMenuListener(preds, f, false));
+            menu.add(preds);
+
+            JMenu succs = new JMenu("Nodes Below");
+            succs.addMenuListener(figureWidget.new NeighborMenuListener(succs, f, true));
+            menu.add(succs);
+        }
+
+        if (figure.getPredecessorSet().isEmpty() && figure.getSuccessorSet().isEmpty()) {
+            menu.add("(none)");
+        }
+    }
+
     /**
      * Builds the submenu for a figure's neighbors on demand.
      */
-    private class NeighborMenuListener implements MenuListener {
+    public class NeighborMenuListener implements MenuListener {
 
         private final JMenu menu;
         private final Figure figure;
@@ -323,38 +332,7 @@ public class FigureWidget extends Widget implements Properties.Provider, PopupMe
                 return;
             }
 
-            Set<Figure> set = figure.getPredecessorSet();
-            if (successors) {
-                set = figure.getSuccessorSet();
-            }
-
-            boolean first = true;
-            for (Figure f : set) {
-                if (f == figure) {
-                    continue;
-                }
-
-                if (first) {
-                    first = false;
-                } else {
-                    menu.addSeparator();
-                }
-
-                Action go = diagramScene.createGotoAction(f);
-                menu.add(go);
-
-                JMenu preds = new JMenu("Nodes Above");
-                preds.addMenuListener(new NeighborMenuListener(preds, f, false));
-                menu.add(preds);
-
-                JMenu succs = new JMenu("Nodes Below");
-                succs.addMenuListener(new NeighborMenuListener(succs, f, true));
-                menu.add(succs);
-            }
-
-            if (menu.getItemCount() == 0) {
-                menu.add("(none)");
-            }
+            build(menu.getPopupMenu(), figure, FigureWidget.this, successors, diagramScene);
         }
 
         @Override

@@ -82,7 +82,18 @@ public class NumUtil {
         return (short) x == x;
     }
 
+    /**
+     * Determines if a given {@code long} value is the range of signed short values.
+     */
+    public static boolean isShort(long x) {
+        return (short) x == x;
+    }
+
     public static boolean isUShort(int s) {
+        return s == (s & 0xFFFF);
+    }
+
+    public static boolean isUShort(long s) {
         return s == (s & 0xFFFF);
     }
 

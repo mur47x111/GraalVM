@@ -24,7 +24,8 @@ package com.oracle.graal.lir;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.asm.*;
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.lir.asm.*;

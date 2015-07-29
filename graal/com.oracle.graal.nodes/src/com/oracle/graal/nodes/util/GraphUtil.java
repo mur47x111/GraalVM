@@ -24,8 +24,9 @@ package com.oracle.graal.nodes.util;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.iterators.*;
 import com.oracle.graal.graph.spi.*;
@@ -150,11 +151,21 @@ public class GraphUtil {
 
     public static void killWithUnusedFloatingInputs(Node node) {
         node.safeDelete();
-        for (Node in : node.inputs()) {
-            if (in.isAlive() && in.hasNoUsages() && !(in instanceof FixedNode)) {
-                killWithUnusedFloatingInputs(in);
+        node.acceptInputs((n, in) -> {
+            if (in.isAlive() && !(in instanceof FixedNode)) {
+                if (in.hasNoUsages()) {
+                    killWithUnusedFloatingInputs(in);
+                } else if (in instanceof PhiNode) {
+                    for (Node use : in.usages()) {
+                        if (use != in) {
+                            return;
+                        }
+                    }
+                    in.replaceAtUsages(null);
+                    killWithUnusedFloatingInputs(in);
+                }
             }
-        }
+        });
     }
 
     public static void removeFixedWithUnusedInputs(FixedWithNextNode fixed) {
@@ -225,7 +236,44 @@ public class GraphUtil {
         }
     }
 
-    public static void normalizeLoopBegin(LoopBeginNode begin) {
+    /**
+     * Remove loop header without loop ends. This can happen with degenerated loops like this one:
+     *
+     * <pre>
+     * for (;;) {
+     *     try {
+     *         break;
+     *     } catch (UnresolvedException iioe) {
+     *     }
+     * }
+     * </pre>
+     */
+    public static void normalizeLoops(StructuredGraph graph) {
+        boolean loopRemoved = false;
+        for (LoopBeginNode begin : graph.getNodes(LoopBeginNode.TYPE)) {
+            if (begin.loopEnds().isEmpty()) {
+                assert begin.forwardEndCount() == 1;
+                graph.reduceDegenerateLoopBegin(begin);
+                loopRemoved = true;
+            } else {
+                normalizeLoopBegin(begin);
+            }
+        }
+
+        if (loopRemoved) {
+            /*
+             * Removing a degenerated loop can make non-loop phi functions unnecessary. Therefore,
+             * we re-check all phi functions and remove redundant ones.
+             */
+            for (Node node : graph.getNodes()) {
+                if (node instanceof PhiNode) {
+                    checkRedundantPhi((PhiNode) node);
+                }
+            }
+        }
+    }
+
+    private static void normalizeLoopBegin(LoopBeginNode begin) {
         // Delete unnecessary loop phi functions, i.e., phi functions where all inputs are either
         // the same or the phi itself.
         for (PhiNode phi : begin.phis().snapshot()) {
@@ -298,36 +346,7 @@ public class GraphUtil {
      * @return the exception
      */
     public static BailoutException createBailoutException(String message, Throwable cause, StackTraceElement[] elements) {
-        @SuppressWarnings("serial")
-        BailoutException exception = new BailoutException(cause, message) {
-
-            @Override
-            public final synchronized Throwable fillInStackTrace() {
-                setStackTrace(elements);
-                return this;
-            }
-        };
-        return exception;
-    }
-
-    /**
-     * Creates a runtime exception with the given stack trace elements and message.
-     *
-     * @param message the message of the exception
-     * @param elements the stack trace elements
-     * @return the exception
-     */
-    public static RuntimeException createRuntimeException(String message, Throwable cause, StackTraceElement[] elements) {
-        @SuppressWarnings("serial")
-        RuntimeException exception = new RuntimeException(message, cause) {
-
-            @Override
-            public final synchronized Throwable fillInStackTrace() {
-                setStackTrace(elements);
-                return this;
-            }
-        };
-        return exception;
+        return SourceStackTrace.create(cause, message, elements);
     }
 
     /**
@@ -548,6 +567,11 @@ public class GraphUtil {
 
         public boolean canonicalizeReads() {
             return canonicalizeReads;
+        }
+
+        @Override
+        public boolean allUsagesAvailable() {
+            return true;
         }
 
         public void deleteBranch(Node branch) {

@@ -24,18 +24,17 @@ package com.oracle.graal.compiler.test.ea;
 
 import java.util.*;
 
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.test.*;
-import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
-import com.oracle.graal.java.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.virtual.*;
-import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.inlining.*;
 import com.oracle.graal.phases.tiers.*;
@@ -53,6 +52,7 @@ public class EATestBase extends GraalCompilerTest {
     public static class TestClassInt {
         public int x;
         public int y;
+        public int z;
 
         public TestClassInt() {
             this(0, 0);
@@ -70,7 +70,7 @@ public class EATestBase extends GraalCompilerTest {
         @Override
         public boolean equals(Object obj) {
             TestClassInt other = (TestClassInt) obj;
-            return x == other.x && y == other.y;
+            return x == other.x && y == other.y && z == other.z;
         }
 
         @Override
@@ -134,7 +134,7 @@ public class EATestBase extends GraalCompilerTest {
      * @param iterativeEscapeAnalysis true if escape analysis should be run for more than one
      *            iteration
      */
-    protected void testEscapeAnalysis(String snippet, final JavaConstant expectedConstantResult, final boolean iterativeEscapeAnalysis) {
+    protected void testEscapeAnalysis(String snippet, JavaConstant expectedConstantResult, boolean iterativeEscapeAnalysis) {
         prepareGraph(snippet, iterativeEscapeAnalysis);
         if (expectedConstantResult != null) {
             for (ReturnNode returnNode : returnNodes) {
@@ -147,17 +147,15 @@ public class EATestBase extends GraalCompilerTest {
         Assert.assertEquals(0, newInstanceCount);
     }
 
-    protected void prepareGraph(String snippet, final boolean iterativeEscapeAnalysis) {
+    protected void prepareGraph(String snippet, boolean iterativeEscapeAnalysis) {
         ResolvedJavaMethod method = getResolvedJavaMethod(snippet);
-        graph = new StructuredGraph(method, AllowAssumptions.NO);
-        try (Scope s = Debug.scope(getClass(), graph, method, getCodeCache())) {
-            new GraphBuilderPhase.Instance(getMetaAccess(), getProviders().getStampProvider(), getProviders().getConstantReflection(), GraphBuilderConfiguration.getEagerDefault(),
-                            OptimisticOptimizations.ALL).apply(graph);
-            context = new HighTierContext(getProviders(), null, getDefaultGraphBuilderSuite(), OptimisticOptimizations.ALL);
-            new InliningPhase(new CanonicalizerPhase(true)).apply(graph, context);
+        try (Scope s = Debug.scope(getClass(), method, getCodeCache())) {
+            graph = parseEager(method, AllowAssumptions.YES);
+            context = getDefaultHighTierContext();
+            new InliningPhase(new CanonicalizerPhase()).apply(graph, context);
             new DeadCodeEliminationPhase().apply(graph);
-            new CanonicalizerPhase(true).apply(graph, context);
-            new PartialEscapePhase(iterativeEscapeAnalysis, false, new CanonicalizerPhase(true), null).apply(graph, context);
+            new CanonicalizerPhase().apply(graph, context);
+            new PartialEscapePhase(iterativeEscapeAnalysis, false, new CanonicalizerPhase(), null).apply(graph, context);
             returnNodes = graph.getNodes(ReturnNode.TYPE).snapshot();
         } catch (Throwable e) {
             throw Debug.handle(e);

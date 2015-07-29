@@ -22,19 +22,16 @@
  */
 package com.oracle.graal.truffle;
 
-import java.util.concurrent.atomic.*;
-
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.truffle.api.*;
 
 /**
  * Enables a Truffle compilable to masquerade as a {@link JavaMethod} for use as a context value in
  * {@linkplain Debug#scope(Object) debug scopes}.
  */
-public class TruffleDebugJavaMethod implements JavaMethod {
-    private static final AtomicInteger nextId = new AtomicInteger();
-    private final int id;
+public class TruffleDebugJavaMethod implements JavaMethod, JavaMethodContex {
     private final RootCallTarget compilable;
 
     private static final JavaType declaringClass = new JavaType() {
@@ -90,7 +87,6 @@ public class TruffleDebugJavaMethod implements JavaMethod {
 
     public TruffleDebugJavaMethod(RootCallTarget compilable) {
         this.compilable = compilable;
-        this.id = nextId.incrementAndGet();
     }
 
     @Override
@@ -112,7 +108,7 @@ public class TruffleDebugJavaMethod implements JavaMethod {
     }
 
     public String getName() {
-        return compilable.toString().replace('.', '_').replace(' ', '_') + "_" + id;
+        return compilable.toString().replace('.', '_').replace(' ', '_');
     }
 
     public JavaType getDeclaringClass() {
@@ -122,5 +118,9 @@ public class TruffleDebugJavaMethod implements JavaMethod {
     @Override
     public String toString() {
         return format("Truffle<%n(%p)>");
+    }
+
+    public JavaMethod asJavaMethod() {
+        return this;
     }
 }

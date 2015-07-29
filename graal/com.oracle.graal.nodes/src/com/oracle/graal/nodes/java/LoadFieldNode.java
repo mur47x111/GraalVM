@@ -23,8 +23,8 @@
 package com.oracle.graal.nodes.java;
 
 import static com.oracle.graal.graph.iterators.NodePredicates.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -38,7 +38,7 @@ import com.oracle.graal.nodes.virtual.*;
  * The {@code LoadFieldNode} represents a read of a static or instance field.
  */
 @NodeInfo(nameTemplate = "LoadField#{p#field/s}")
-public final class LoadFieldNode extends AccessFieldNode implements Canonicalizable.Unary<ValueNode>, VirtualizableRoot, UncheckedInterfaceProvider {
+public final class LoadFieldNode extends AccessFieldNode implements Canonicalizable.Unary<ValueNode>, Virtualizable, UncheckedInterfaceProvider {
 
     public static final NodeClass<LoadFieldNode> TYPE = NodeClass.create(LoadFieldNode.class);
 
@@ -60,7 +60,7 @@ public final class LoadFieldNode extends AccessFieldNode implements Canonicaliza
     }
 
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forObject) {
-        if (hasNoUsages() && !isVolatile() && (isStatic() || StampTool.isPointerNonNull(forObject.stamp()))) {
+        if (tool.allUsagesAvailable() && hasNoUsages() && !isVolatile() && (isStatic() || StampTool.isPointerNonNull(forObject.stamp()))) {
             return null;
         }
         MetaAccessProvider metaAccess = tool.getMetaAccess();
@@ -70,13 +70,15 @@ public final class LoadFieldNode extends AccessFieldNode implements Canonicaliza
             if (constant != null) {
                 return constant;
             }
-            PhiNode phi = asPhi(metaAccess, constantReflection, forObject);
-            if (phi != null) {
-                return phi;
+            if (tool.allUsagesAvailable()) {
+                PhiNode phi = asPhi(metaAccess, constantReflection, forObject);
+                if (phi != null) {
+                    return phi;
+                }
             }
         }
         if (!isStatic() && forObject.isNullConstant()) {
-            return new DeoptimizeNode(DeoptimizationAction.None, DeoptimizationReason.NullCheckException);
+            return new DeoptimizeNode(DeoptimizationAction.InvalidateReprofile, DeoptimizationReason.NullCheckException);
         }
         return this;
     }

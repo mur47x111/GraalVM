@@ -27,12 +27,18 @@ import static com.oracle.graal.truffle.TruffleCompilerOptions.*;
 import java.util.*;
 import java.util.concurrent.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.code.stack.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.code.stack.*;
+import jdk.internal.jvmci.debug.*;
+
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.Scope;
+
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.service.*;
+
 import com.oracle.graal.api.runtime.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.truffle.debug.*;
 import com.oracle.graal.truffle.unsafe.*;
 import com.oracle.truffle.api.*;
@@ -56,8 +62,33 @@ public abstract class GraalTruffleRuntime implements TruffleRuntime {
     private final List<GraalTruffleCompilationListener> compilationListeners = new ArrayList<>();
     private final GraalTruffleCompilationListener compilationNotify = new DispatchTruffleCompilationListener();
 
+    protected TruffleCompiler truffleCompiler;
+    protected LoopNodeFactory loopNodeFactory;
+
     public GraalTruffleRuntime() {
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown));
+    }
+
+    public abstract TruffleCompiler getTruffleCompiler();
+
+    private static <T extends PrioritizedServiceProvider> T loadPrioritizedServiceProvider(Class<T> clazz) {
+        Iterable<T> providers = Services.load(clazz);
+        T bestFactory = null;
+        for (T factory : providers) {
+            if (bestFactory == null) {
+                bestFactory = factory;
+            } else if (factory.getPriority() > bestFactory.getPriority()) {
+                bestFactory = factory;
+            }
+        }
+        if (bestFactory == null) {
+            throw new IllegalStateException("Unable to load a factory for " + clazz.getName());
+        }
+        return bestFactory;
+    }
+
+    public void log(String message) {
+        TTY.out().println(message);
     }
 
     protected void installDefaultListeners() {
@@ -80,11 +111,18 @@ public abstract class GraalTruffleRuntime implements TruffleRuntime {
     }
 
     @Override
-    public LoopNode createLoopNode(RepeatingNode repeating) {
-        if (!(repeating instanceof Node)) {
+    public LoopNode createLoopNode(RepeatingNode repeatingNode) {
+        if (!(repeatingNode instanceof Node)) {
             throw new IllegalArgumentException("Repeating node must be of type Node.");
         }
-        return new OptimizedLoopNode(repeating);
+        return getLoopNodeFactory().create(repeatingNode);
+    }
+
+    protected LoopNodeFactory getLoopNodeFactory() {
+        if (loopNodeFactory == null) {
+            loopNodeFactory = loadPrioritizedServiceProvider(LoopNodeFactory.class);
+        }
+        return loopNodeFactory;
     }
 
     @Override
@@ -248,9 +286,19 @@ public abstract class GraalTruffleRuntime implements TruffleRuntime {
 
     public abstract Collection<OptimizedCallTarget> getQueuedCallTargets();
 
-    public abstract Replacements getReplacements();
-
     public abstract void compile(OptimizedCallTarget optimizedCallTarget, boolean mayBeAsynchronous);
+
+    protected void doCompile(OptimizedCallTarget optimizedCallTarget) {
+        boolean success = true;
+        try (Scope s = Debug.scope("Truffle", new TruffleDebugJavaMethod(optimizedCallTarget))) {
+            truffleCompiler.compileMethod(optimizedCallTarget);
+        } catch (Throwable e) {
+            optimizedCallTarget.notifyCompilationFailed(e);
+            success = false;
+        } finally {
+            optimizedCallTarget.notifyCompilationFinished(success);
+        }
+    }
 
     public abstract boolean cancelInstalledTask(OptimizedCallTarget optimizedCallTarget, Object source, CharSequence reason);
 
@@ -261,6 +309,13 @@ public abstract class GraalTruffleRuntime implements TruffleRuntime {
     public abstract void invalidateInstalledCode(OptimizedCallTarget optimizedCallTarget, Object source, CharSequence reason);
 
     public abstract void reinstallStubs();
+
+    public final boolean enableInfopoints() {
+        /* Currently infopoints can change code generation so don't enable them automatically */
+        return platformEnableInfopoints() && TruffleEnableInfopoints.getValue();
+    }
+
+    protected abstract boolean platformEnableInfopoints();
 
     private final class DispatchTruffleCompilationListener implements GraalTruffleCompilationListener {
 

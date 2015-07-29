@@ -27,6 +27,7 @@ import static com.oracle.graal.graph.iterators.NodePredicates.*;
 import java.util.*;
 
 import com.oracle.graal.debug.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.iterators.*;
 import com.oracle.graal.graph.spi.*;
@@ -133,6 +134,10 @@ public abstract class AbstractMergeNode extends BeginStateSplitNode implements I
         return this.usages().filter(PhiNode.class).filter(this::isPhiAtMerge);
     }
 
+    public NodeIterable<ValuePhiNode> valuePhis() {
+        return this.usages().filter(ValuePhiNode.class).filter(this::isPhiAtMerge);
+    }
+
     @Override
     public NodeIterable<Node> anchored() {
         return super.anchored().filter(n -> !isPhiAtMerge(n));
@@ -227,7 +232,7 @@ public abstract class AbstractMergeNode extends BeginStateSplitNode implements I
                 end.safeDelete();
             }
             for (PhiNode phi : phis) {
-                if (phi.isAlive() && phi.hasNoUsages()) {
+                if (tool.allUsagesAvailable() && phi.isAlive() && phi.hasNoUsages()) {
                     GraphUtil.killWithUnusedFloatingInputs(phi);
                 }
             }

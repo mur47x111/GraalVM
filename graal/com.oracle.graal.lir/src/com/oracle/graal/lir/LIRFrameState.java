@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,14 +22,16 @@
  */
 package com.oracle.graal.lir;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.lir.LIRInstruction.OperandFlag;
 import com.oracle.graal.lir.LIRInstruction.OperandMode;
+import com.oracle.graal.lir.dfa.*;
 import com.oracle.graal.lir.framemap.*;
 
 /**
@@ -42,6 +44,8 @@ public class LIRFrameState {
     private final VirtualObject[] virtualObjects;
     public final LabelRef exceptionEdge;
     protected DebugInfo debugInfo;
+
+    private ValueSet liveBasePointers;
 
     public LIRFrameState(BytecodeFrame topFrame, VirtualObject[] virtualObjects, LabelRef exceptionEdge) {
         this.topFrame = topFrame;
@@ -72,6 +76,28 @@ public class LIRFrameState {
                 processValues(inst, obj.getValues(), proc);
             }
         }
+        if (liveBasePointers != null) {
+            liveBasePointers.forEach(inst, OperandMode.ALIVE, STATE_FLAGS, proc);
+        }
+    }
+
+    /**
+     * Iterates the frame state and calls the {@link InstructionValueProcedure} for every variable.
+     *
+     * @param proc The procedure called for variables.
+     */
+    public void forEachState(LIRInstruction inst, InstructionValueConsumer proc) {
+        for (BytecodeFrame cur = topFrame; cur != null; cur = cur.caller()) {
+            processValues(inst, cur.values, proc);
+        }
+        if (virtualObjects != null) {
+            for (VirtualObject obj : virtualObjects) {
+                processValues(inst, obj.getValues(), proc);
+            }
+        }
+        if (liveBasePointers != null) {
+            liveBasePointers.forEach(inst, OperandMode.ALIVE, STATE_FLAGS, proc);
+        }
     }
 
     /**
@@ -80,73 +106,87 @@ public class LIRFrameState {
      */
     protected static final EnumSet<OperandFlag> STATE_FLAGS = EnumSet.of(OperandFlag.REG, OperandFlag.STACK);
 
-    protected void processValues(LIRInstruction inst, JavaValue[] values, InstructionValueProcedure proc) {
+    protected void processValues(LIRInstruction inst, Value[] values, InstructionValueProcedure proc) {
         for (int i = 0; i < values.length; i++) {
-            if (values[i] instanceof Value) {
-                Value value = (Value) values[i];
-                values[i] = (JavaValue) processValue(inst, proc, value);
+            Value value = values[i];
+            if (isIllegal(value)) {
+                continue;
+            }
+            if (value instanceof AllocatableValue) {
+                Value result = proc.doValue(inst, value, OperandMode.ALIVE, STATE_FLAGS);
+                if (!value.identityEquals(result)) {
+                    values[i] = result;
+                }
+            } else if (value instanceof StackLockValue) {
+                StackLockValue monitor = (StackLockValue) value;
+                Value owner = monitor.getOwner();
+                if (owner instanceof AllocatableValue) {
+                    monitor.setOwner(proc.doValue(inst, owner, OperandMode.ALIVE, STATE_FLAGS));
+                }
+                Value slot = monitor.getSlot();
+                if (isVirtualStackSlot(slot)) {
+                    monitor.setSlot(asStackSlotValue(proc.doValue(inst, slot, OperandMode.ALIVE, STATE_FLAGS)));
+                }
+            } else {
+                assert unprocessed(value);
             }
         }
     }
 
-    protected Value processValue(LIRInstruction inst, InstructionValueProcedure proc, Value value) {
-        if (processed(value)) {
-            return proc.doValue(inst, value, OperandMode.ALIVE, STATE_FLAGS);
+    protected void processValues(LIRInstruction inst, Value[] values, InstructionValueConsumer proc) {
+        for (int i = 0; i < values.length; i++) {
+            Value value = values[i];
+            if (isIllegal(value)) {
+                continue;
+            } else if (value instanceof AllocatableValue) {
+                proc.visitValue(inst, value, OperandMode.ALIVE, STATE_FLAGS);
+            } else if (value instanceof StackLockValue) {
+                StackLockValue monitor = (StackLockValue) value;
+                Value owner = monitor.getOwner();
+                if (owner instanceof AllocatableValue) {
+                    proc.visitValue(inst, owner, OperandMode.ALIVE, STATE_FLAGS);
+                }
+                Value slot = monitor.getSlot();
+                if (isVirtualStackSlot(slot)) {
+                    proc.visitValue(inst, slot, OperandMode.ALIVE, STATE_FLAGS);
+                }
+            } else {
+                assert unprocessed(value);
+            }
         }
-        return value;
     }
 
-    protected boolean processed(Value value) {
+    private boolean unprocessed(Value value) {
         if (isIllegal(value)) {
             // Ignore dead local variables.
-            return false;
+            return true;
         } else if (isConstant(value)) {
             // Ignore constants, the register allocator does not need to see them.
-            return false;
+            return true;
         } else if (isVirtualObject(value)) {
             assert Arrays.asList(virtualObjects).contains(value);
-            return false;
-        } else {
             return true;
+        } else {
+            return false;
         }
     }
 
     /**
-     * Called by the register allocator before {@link #markLocation} to initialize the frame state.
+     * Called by the register allocator to initialize the frame state.
      *
      * @param frameMap The frame map.
      * @param canHaveRegisters True if there can be any register map entries.
      */
     public void initDebugInfo(FrameMap frameMap, boolean canHaveRegisters) {
-        debugInfo = new DebugInfo(topFrame, frameMap.initReferenceMap(canHaveRegisters));
+        debugInfo = new DebugInfo(topFrame, virtualObjects);
     }
 
-    /**
-     * Called by the register allocator to mark the specified location as a reference in the
-     * reference map of the debug information. The tracked location can be a {@link RegisterValue}
-     * or a {@link StackSlot}. Note that a {@link JavaConstant} is automatically tracked.
-     *
-     * @param location The location to be added to the reference map.
-     * @param frameMap The frame map.
-     */
-    public void markLocation(Value location, FrameMap frameMap) {
-        frameMap.setReference(location, debugInfo.getReferenceMap());
+    public ValueSet getLiveBasePointers() {
+        return liveBasePointers;
     }
 
-    /**
-     * Updates this reference map with all references that are marked in {@code refMap}.
-     */
-    public void updateUnion(ReferenceMap refMap) {
-        debugInfo.getReferenceMap().updateUnion(refMap);
-    }
-
-    /**
-     * Called by the register allocator after all locations are marked.
-     *
-     * @param op The instruction to which this frame state belongs.
-     * @param frameMap The frame map.
-     */
-    public void finish(LIRInstruction op, FrameMap frameMap) {
+    public void setLiveBasePointers(ValueSet liveBasePointers) {
+        this.liveBasePointers = liveBasePointers;
     }
 
     @Override

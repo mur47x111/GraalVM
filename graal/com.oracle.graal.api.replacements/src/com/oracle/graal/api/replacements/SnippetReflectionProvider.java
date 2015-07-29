@@ -25,7 +25,7 @@ package com.oracle.graal.api.replacements;
 import java.lang.reflect.*;
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
 
 /**
  * Reflection operations on values represented as {@linkplain JavaConstant constants} for the
@@ -88,7 +88,7 @@ public interface SnippetReflectionProvider {
         try {
             return Class.forName(type.toClassName());
         } catch (ClassNotFoundException e) {
-            // Support for -XX:-UseGraalClassLoader
+            // Support for -XX:-UseJVMCIClassLoader
             return Class.forName(type.toClassName(), false, ClassLoader.getSystemClassLoader());
         }
     }

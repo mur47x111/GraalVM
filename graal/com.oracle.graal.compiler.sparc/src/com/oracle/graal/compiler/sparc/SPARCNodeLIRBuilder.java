@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,18 +23,19 @@
 
 package com.oracle.graal.compiler.sparc;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.gen.*;
 import com.oracle.graal.compiler.match.*;
 import com.oracle.graal.lir.*;
-import com.oracle.graal.lir.StandardOp.*;
+import com.oracle.graal.lir.StandardOp.JumpOp;
 import com.oracle.graal.lir.gen.*;
 import com.oracle.graal.lir.sparc.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
-import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
 
 /**
  * This class implements the SPARC specific portion of the LIR generator.
@@ -99,14 +100,49 @@ public abstract class SPARCNodeLIRBuilder extends NodeLIRBuilder {
                 fromKind = Kind.Int;
                 break;
             default:
-                throw GraalInternalError.unimplemented("unsupported sign extension (" + fromBits + " bit -> " + toBits + " bit)");
+                throw JVMCIError.unimplemented("unsupported sign extension (" + fromBits + " bit -> " + toBits + " bit)");
         }
 
         Kind localFromKind = fromKind;
         Kind localToKind = toKind;
         return builder -> {
-            Value address = access.accessLocation().generateAddress(builder, gen, operand(access.object()));
-            Value v = getLIRGeneratorTool().emitLoad(LIRKind.value(localFromKind), address, getState(access));
+            Value v = getLIRGeneratorTool().emitSignExtendLoad(LIRKind.value(localFromKind), operand(access.getAddress()), getState(access));
+            return getLIRGeneratorTool().emitReinterpret(LIRKind.value(localToKind), v);
+        };
+    }
+
+    private ComplexMatchResult emitZeroExtendMemory(Access access, int fromBits, int toBits) {
+        assert fromBits <= toBits && toBits <= 64;
+        Kind toKind = null;
+        Kind fromKind = null;
+        if (fromBits == toBits) {
+            return null;
+        } else if (toBits > 32) {
+            toKind = Kind.Long;
+        } else if (toBits > 16) {
+            toKind = Kind.Int;
+        } else {
+            toKind = Kind.Short;
+        }
+        switch (fromBits) {
+            case 8:
+                fromKind = Kind.Byte;
+                break;
+            case 16:
+                fromKind = Kind.Short;
+                break;
+            case 32:
+                fromKind = Kind.Int;
+                break;
+            default:
+                throw JVMCIError.unimplemented("unsupported sign extension (" + fromBits + " bit -> " + toBits + " bit)");
+        }
+
+        Kind localFromKind = fromKind;
+        Kind localToKind = toKind;
+        return builder -> {
+            // Loads are always zero extending load
+            Value v = getLIRGeneratorTool().emitLoad(LIRKind.value(localFromKind), operand(access.getAddress()), getState(access));
             return getLIRGeneratorTool().emitReinterpret(LIRKind.value(localToKind), v);
         };
     }
@@ -115,5 +151,22 @@ public abstract class SPARCNodeLIRBuilder extends NodeLIRBuilder {
     @MatchRule("(SignExtend FloatingRead=access)")
     public ComplexMatchResult signExtend(SignExtendNode root, Access access) {
         return emitSignExtendMemory(access, root.getInputBits(), root.getResultBits());
+    }
+
+    @MatchRule("(ZeroExtend Read=access)")
+    @MatchRule("(ZeroExtend FloatingRead=access)")
+    public ComplexMatchResult zeroExtend(ZeroExtendNode root, Access access) {
+        return emitZeroExtendMemory(access, root.getInputBits(), root.getResultBits());
+    }
+
+    @Override
+    public SPARCLIRGenerator getLIRGeneratorTool() {
+        return (SPARCLIRGenerator) super.getLIRGeneratorTool();
+    }
+
+    @Override
+    protected void emitPrologue(StructuredGraph graph) {
+        getLIRGeneratorTool().emitLoadConstantTableBase();
+        super.emitPrologue(graph);
     }
 }

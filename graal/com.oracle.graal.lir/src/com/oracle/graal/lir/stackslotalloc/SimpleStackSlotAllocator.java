@@ -22,15 +22,17 @@
  */
 package com.oracle.graal.lir.stackslotalloc;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.compiler.common.cfg.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
 import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
+import com.oracle.graal.debug.Debug.*;
+
+import com.oracle.graal.compiler.common.alloc.*;
+import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.framemap.*;
 import com.oracle.graal.lir.gen.*;
@@ -40,13 +42,14 @@ import com.oracle.graal.lir.phases.*;
 public class SimpleStackSlotAllocator extends AllocationPhase implements StackSlotAllocator {
 
     @Override
-    protected <B extends AbstractBlockBase<B>> void run(TargetDescription target, LIRGenerationResult lirGenRes, List<B> codeEmittingOrder, List<B> linearScanOrder, SpillMoveFactory spillMoveFactory) {
+    protected <B extends AbstractBlockBase<B>> void run(TargetDescription target, LIRGenerationResult lirGenRes, List<B> codeEmittingOrder, List<B> linearScanOrder, SpillMoveFactory spillMoveFactory,
+                    RegisterAllocationConfig registerAllocationConfig) {
         lirGenRes.buildFrameMap(this);
     }
 
     public void allocateStackSlots(FrameMapBuilderTool builder, LIRGenerationResult res) {
         StackSlot[] mapping = new StackSlot[builder.getNumberOfStackSlots()];
-        long currentFrameSize = Debug.isMeterEnabled() ? builder.getFrameMap().currentFrameSize() : 0;
+        long currentFrameSize = allocatedFramesize.isEnabled() ? builder.getFrameMap().currentFrameSize() : 0;
         for (VirtualStackSlot virtualSlot : builder.getStackSlots()) {
             final StackSlot slot;
             if (virtualSlot instanceof SimpleVirtualStackSlot) {
@@ -57,13 +60,15 @@ public class SimpleStackSlotAllocator extends AllocationPhase implements StackSl
                 slot = mapVirtualStackSlotRange(builder, slotRange);
                 virtualFramesize.add(builder.getFrameMap().spillSlotRangeSize(slotRange.getSlots()));
             } else {
-                throw GraalInternalError.shouldNotReachHere("Unknown VirtualStackSlot: " + virtualSlot);
+                throw JVMCIError.shouldNotReachHere("Unknown VirtualStackSlot: " + virtualSlot);
             }
             allocatedSlots.increment();
             mapping[virtualSlot.getId()] = slot;
         }
         updateLIR(res, mapping);
-        allocatedFramesize.add(builder.getFrameMap().currentFrameSize() - currentFrameSize);
+        if (allocatedFramesize.isEnabled()) {
+            allocatedFramesize.add(builder.getFrameMap().currentFrameSize() - currentFrameSize);
+        }
     }
 
     protected void updateLIR(LIRGenerationResult res, StackSlot[] mapping) {

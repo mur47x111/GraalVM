@@ -47,7 +47,7 @@ define_pd_global(bool, UncommonNullCast,         true);  // Uncommon-trap NULLs 
 // the the vep is aligned at CodeEntryAlignment whereas c2 only aligns
 // the uep and the vep doesn't get real alignment but just slops on by
 // only assured that the entry instruction meets the 5 byte size requirement.
-#if defined(COMPILER2) || defined(GRAAL)
+#if defined(COMPILER2) || INCLUDE_JVMCI
 define_pd_global(intx, CodeEntryAlignment,       32);
 #else
 define_pd_global(intx, CodeEntryAlignment,       16);
@@ -80,8 +80,8 @@ define_pd_global(bool, UseMembar,            false);
 // GC Ergo Flags
 define_pd_global(uintx, CMSYoungGenPerWorker, 64*M);  // default max size of CMS young gen, per GC worker thread
 
-// Disabled in GRAAL until HotSpotMethodData is updated to be aware of the new profiling tags
-define_pd_global(uintx, TypeProfileLevel, GRAAL_ONLY(0) NOT_GRAAL(111));
+// Disabled in JVMCI until HotSpotMethodData is updated to be aware of the new profiling tags
+define_pd_global(uintx, TypeProfileLevel, JVMCI_ONLY(0) NOT_JVMCI(111));
 
 #define ARCH_FLAGS(develop, product, diagnostic, experimental, notproduct) \
                                                                             \
@@ -131,16 +131,16 @@ define_pd_global(uintx, TypeProfileLevel, GRAAL_ONLY(0) NOT_GRAAL(111));
           "Use fast-string operation for zeroing: rep stosb")               \
                                                                             \
   /* Use Restricted Transactional Memory for lock eliding */                \
-  experimental(bool, UseRTMLocking, false,                                  \
+  product(bool, UseRTMLocking, false,                                       \
           "Enable RTM lock eliding for inflated locks in compiled code")    \
                                                                             \
   experimental(bool, UseRTMForStackLocks, false,                            \
           "Enable RTM lock eliding for stack locks in compiled code")       \
                                                                             \
-  experimental(bool, UseRTMDeopt, false,                                    \
+  product(bool, UseRTMDeopt, false,                                         \
           "Perform deopt and recompilation based on RTM abort ratio")       \
                                                                             \
-  experimental(uintx, RTMRetryCount, 5,                                     \
+  product(uintx, RTMRetryCount, 5,                                          \
           "Number of RTM retries on lock abort or busy")                    \
                                                                             \
   experimental(intx, RTMSpinLoopCount, 100,                                 \
@@ -177,6 +177,8 @@ define_pd_global(uintx, TypeProfileLevel, GRAAL_ONLY(0) NOT_GRAAL(111));
           "Use count trailing zeros instruction")                           \
                                                                             \
   product(bool, UseBMI1Instructions, false,                                 \
-          "Use BMI instructions")
-
+          "Use BMI1 instructions")                                          \
+                                                                            \
+  product(bool, UseBMI2Instructions, false,                                 \
+          "Use BMI2 instructions")
 #endif // CPU_X86_VM_GLOBALS_X86_HPP

@@ -29,20 +29,9 @@
 #error "This file should only be included from thread.inline.hpp"
 #endif
 
-#include "runtime/atomic.hpp"
-#include "runtime/prefetch.hpp"
+#include "runtime/atomic.inline.hpp"
 #include "runtime/thread.hpp"
 #include "runtime/threadLocalStorage.hpp"
-#ifdef TARGET_OS_ARCH_solaris_x86
-# include "atomic_solaris_x86.inline.hpp"
-# include "orderAccess_solaris_x86.inline.hpp"
-# include "prefetch_solaris_x86.inline.hpp"
-#endif
-#ifdef TARGET_OS_ARCH_solaris_sparc
-# include "atomic_solaris_sparc.inline.hpp"
-# include "orderAccess_solaris_sparc.inline.hpp"
-# include "prefetch_solaris_sparc.inline.hpp"
-#endif
 
 // Thread::current is "hot" it's called > 128K times in the 1st 500 msecs of
 // startup.
@@ -58,7 +47,7 @@ inline Thread* ThreadLocalStorage::thread()  {
   uintptr_t raw = pd_raw_thread_id();
   int ix = pd_cache_index(raw);
   Thread* candidate = ThreadLocalStorage::_get_thread_cache[ix];
-  if (candidate->self_raw_id() == raw) {
+  if (candidate != NULL && candidate->self_raw_id() == raw) {
     // hit
     return candidate;
   } else {

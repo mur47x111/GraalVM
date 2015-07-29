@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,11 +22,13 @@
  */
 package com.oracle.graal.compiler.target;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.code.stack.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.code.stack.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.asm.*;
-import com.oracle.graal.compiler.common.*;
+import com.oracle.graal.compiler.common.alloc.*;
 import com.oracle.graal.compiler.gen.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.asm.*;
@@ -44,6 +46,14 @@ public abstract class Backend {
 
     private final Providers providers;
 
+    public static final ForeignCallDescriptor ARITHMETIC_SIN = new ForeignCallDescriptor("arithmeticSin", double.class, double.class);
+    public static final ForeignCallDescriptor ARITHMETIC_COS = new ForeignCallDescriptor("arithmeticCos", double.class, double.class);
+    public static final ForeignCallDescriptor ARITHMETIC_TAN = new ForeignCallDescriptor("arithmeticTan", double.class, double.class);
+    public static final ForeignCallDescriptor ARITHMETIC_EXP = new ForeignCallDescriptor("arithmeticExp", double.class, double.class);
+    public static final ForeignCallDescriptor ARITHMETIC_LOG = new ForeignCallDescriptor("arithmeticLog", double.class, double.class);
+    public static final ForeignCallDescriptor ARITHMETIC_LOG10 = new ForeignCallDescriptor("arithmeticLog10", double.class, double.class);
+    public static final ForeignCallDescriptor ARITHMETIC_POW = new ForeignCallDescriptor("arithmeticPow", double.class, double.class, double.class);
+
     protected Backend(Providers providers) {
         this.providers = providers;
     }
@@ -56,13 +66,19 @@ public abstract class Backend {
         return providers.getCodeCache();
     }
 
+    public MetaAccessProvider getMetaAccess() {
+        return providers.getMetaAccess();
+    }
+
+    public ConstantReflectionProvider getConstantReflection() {
+        return providers.getConstantReflection();
+    }
+
     public ForeignCallsProvider getForeignCalls() {
         return providers.getForeignCalls();
     }
 
     public abstract SuitesProvider getSuites();
-
-    public abstract DisassemblerProvider getDisassembler();
 
     public TargetDescription getTarget() {
         return providers.getCodeCache().getTarget();
@@ -74,11 +90,13 @@ public abstract class Backend {
      */
     public abstract FrameMapBuilder newFrameMapBuilder(RegisterConfig registerConfig);
 
+    public abstract RegisterAllocationConfig newRegisterAllocationConfig(RegisterConfig registerConfig);
+
     public abstract FrameMap newFrameMap(RegisterConfig registerConfig);
 
     public abstract LIRGeneratorTool newLIRGenerator(CallingConvention cc, LIRGenerationResult lirGenRes);
 
-    public abstract LIRGenerationResult newLIRGenerationResult(LIR lir, FrameMapBuilder frameMapBuilder, ResolvedJavaMethod method, Object stub);
+    public abstract LIRGenerationResult newLIRGenerationResult(String compilationUnitName, LIR lir, FrameMapBuilder frameMapBuilder, ResolvedJavaMethod method, Object stub);
 
     public abstract NodeLIRBuilderTool newNodeLIRBuilder(StructuredGraph graph, LIRGeneratorTool lirGen);
 
@@ -87,7 +105,7 @@ public abstract class Backend {
      * @param parser the bytecode parser the BytecodeLIRBuilder should use
      */
     public BytecodeLIRBuilder newBytecodeLIRBuilder(LIRGeneratorTool gen, BytecodeParserTool parser) {
-        throw GraalInternalError.unimplemented("Baseline compilation is not available for this Backend!");
+        throw JVMCIError.unimplemented("Baseline compilation is not available for this Backend!");
     }
 
     /**

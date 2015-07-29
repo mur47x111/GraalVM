@@ -25,10 +25,11 @@ package com.oracle.graal.printer;
 import java.io.*;
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.code.CodeUtil.RefMapFormatter;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.debug.*;
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.lir.dfa.*;
 
 /**
  * Utility for printing compilation related data structures at various compilation phases. The
@@ -113,19 +114,16 @@ public class CompilationPrinter implements Closeable {
     /**
      * Formats given debug info as a multi line string.
      */
-    protected String debugInfoToString(BytecodePosition codePos, ReferenceMap refMap, RegisterSaveLayout calleeSaveInfo, Architecture arch) {
+    protected String debugInfoToString(BytecodePosition codePos, ReferenceMap refMap, ValueSet liveBasePointers, RegisterSaveLayout calleeSaveInfo) {
         StringBuilder sb = new StringBuilder();
-        RefMapFormatter formatter = new CodeUtil.NumberedRefMapFormatter();
-
-        if (refMap != null && refMap.hasRegisterRefMap()) {
-            sb.append("reg-ref-map:");
-            refMap.appendRegisterMap(sb, arch != null ? new CodeUtil.DefaultRegFormatter(arch) : formatter);
+        if (refMap != null) {
+            sb.append("reference-map: ");
+            sb.append(refMap.toString());
             sb.append("\n");
         }
-
-        if (refMap != null && refMap.hasFrameRefMap()) {
-            sb.append("frame-ref-map:");
-            refMap.appendFrameMap(sb, formatter);
+        if (liveBasePointers != null) {
+            sb.append("live-base-pointers: ");
+            sb.append(liveBasePointers);
             sb.append("\n");
         }
 
@@ -182,7 +180,7 @@ public class CompilationPrinter implements Closeable {
         return sb.toString();
     }
 
-    protected String valueToString(JavaValue value, List<VirtualObject> virtualObjects) {
+    protected String valueToString(Value value, List<VirtualObject> virtualObjects) {
         if (value == null) {
             return "-";
         }
@@ -193,7 +191,7 @@ public class CompilationPrinter implements Closeable {
     }
 
     public void printMachineCode(String code, String label) {
-        if (code.length() == 0) {
+        if (code == null || code.length() == 0) {
             return;
         }
         if (label != null) {

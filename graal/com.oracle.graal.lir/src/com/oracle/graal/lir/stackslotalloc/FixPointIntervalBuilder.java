@@ -22,14 +22,15 @@
  */
 package com.oracle.graal.lir.stackslotalloc;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.cfg.*;
+import jdk.internal.jvmci.code.*;
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.LIRInstruction.OperandFlag;
 import com.oracle.graal.lir.LIRInstruction.OperandMode;
@@ -172,55 +173,44 @@ final class FixPointIntervalBuilder {
         private void processInstructionBottomUp(LIRInstruction op) {
             try (Indent indent = Debug.logAndIndent("handle op %d, %s", op.id(), op)) {
                 // kills
-                op.visitEachTemp(this::defConsumer);
-                op.visitEachOutput(this::defConsumer);
+                op.visitEachTemp(defConsumer);
+                op.visitEachOutput(defConsumer);
 
                 // gen - values that are considered alive for this state
-                op.visitEachAlive(this::useConsumer);
-                op.visitEachState(this::useConsumer);
+                op.visitEachAlive(useConsumer);
+                op.visitEachState(useConsumer);
                 // mark locations
                 // gen
-                op.visitEachInput(this::useConsumer);
+                op.visitEachInput(useConsumer);
             }
         }
 
-        /**
-         * @see InstructionValueConsumer
-         *
-         * @param inst
-         * @param operand
-         * @param mode
-         * @param flags
-         */
-        private void useConsumer(LIRInstruction inst, Value operand, OperandMode mode, EnumSet<OperandFlag> flags) {
-            if (isVirtualStackSlot(operand)) {
-                VirtualStackSlot vslot = asVirtualStackSlot(operand);
-                addUse(vslot, inst, flags);
-                usePos.add(inst);
-                Debug.log("set operand: %s", operand);
-                currentSet.set(vslot.getId());
+        InstructionValueConsumer useConsumer = new InstructionValueConsumer() {
+            public void visitValue(LIRInstruction inst, Value operand, OperandMode mode, EnumSet<OperandFlag> flags) {
+                if (isVirtualStackSlot(operand)) {
+                    VirtualStackSlot vslot = asVirtualStackSlot(operand);
+                    addUse(vslot, inst, flags);
+                    addRegisterHint(inst, vslot, mode, flags, false);
+                    usePos.add(inst);
+                    Debug.log("set operand: %s", operand);
+                    currentSet.set(vslot.getId());
+                }
             }
-        }
+        };
 
-        /**
-         *
-         * @see InstructionValueConsumer
-         *
-         * @param inst
-         * @param operand
-         * @param mode
-         * @param flags
-         */
-        private void defConsumer(LIRInstruction inst, Value operand, OperandMode mode, EnumSet<OperandFlag> flags) {
-            if (isVirtualStackSlot(operand)) {
-                VirtualStackSlot vslot = asVirtualStackSlot(operand);
-                addDef(vslot, inst);
-                usePos.add(inst);
-                Debug.log("clear operand: %s", operand);
-                currentSet.clear(vslot.getId());
+        InstructionValueConsumer defConsumer = new InstructionValueConsumer() {
+            public void visitValue(LIRInstruction inst, Value operand, OperandMode mode, EnumSet<OperandFlag> flags) {
+                if (isVirtualStackSlot(operand)) {
+                    VirtualStackSlot vslot = asVirtualStackSlot(operand);
+                    addDef(vslot, inst);
+                    addRegisterHint(inst, vslot, mode, flags, true);
+                    usePos.add(inst);
+                    Debug.log("clear operand: %s", operand);
+                    currentSet.clear(vslot.getId());
+                }
+
             }
-
-        }
+        };
 
         private void addUse(VirtualStackSlot stackSlot, LIRInstruction inst, EnumSet<OperandFlag> flags) {
             StackInterval interval = getOrCreateInterval(stackSlot);
@@ -240,6 +230,31 @@ final class FixPointIntervalBuilder {
         private void addDef(VirtualStackSlot stackSlot, LIRInstruction inst) {
             StackInterval interval = getOrCreateInterval(stackSlot);
             interval.addFrom(inst.id());
+        }
+
+        void addRegisterHint(final LIRInstruction op, VirtualStackSlot targetValue, OperandMode mode, EnumSet<OperandFlag> flags, final boolean hintAtDef) {
+            if (flags.contains(OperandFlag.HINT)) {
+
+                op.forEachRegisterHint(targetValue, mode, (registerHint, valueMode, valueFlags) -> {
+                    if (isVirtualStackSlot(registerHint)) {
+                        StackInterval from = getOrCreateInterval((VirtualStackSlot) registerHint);
+                        StackInterval to = getOrCreateInterval(targetValue);
+
+                        /* hints always point from def to use */
+                        if (hintAtDef) {
+                            to.setLocationHint(from);
+                        } else {
+                            from.setLocationHint(to);
+                        }
+                        if (Debug.isLogEnabled()) {
+                            Debug.log("operation %s at opId %d: added hint from interval %d to %d", op, op.id(), from, to);
+                        }
+
+                        return registerHint;
+                    }
+                    return null;
+                });
+            }
         }
 
     }

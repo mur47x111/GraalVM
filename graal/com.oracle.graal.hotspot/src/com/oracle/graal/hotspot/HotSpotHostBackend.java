@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,18 +22,17 @@
  */
 package com.oracle.graal.hotspot;
 
-import static com.oracle.graal.compiler.common.GraalOptions.*;
-import static com.oracle.graal.hotspot.InitTimer.*;
-
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.api.runtime.*;
 import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.service.*;
+import static com.oracle.graal.compiler.common.GraalOptions.*;
+import static jdk.internal.jvmci.hotspot.InitTimer.*;
+
 import com.oracle.graal.hotspot.meta.*;
 import com.oracle.graal.hotspot.stubs.*;
-import com.oracle.graal.java.*;
 import com.oracle.graal.nodes.spi.*;
-import com.oracle.graal.replacements.*;
 
 /**
  * Common functionality of HotSpot host backends.
@@ -70,12 +69,7 @@ public abstract class HotSpotHostBackend extends HotSpotBackend {
         HotSpotVMConfig config = getRuntime().getConfig();
         HotSpotHostForeignCallsProvider foreignCalls = (HotSpotHostForeignCallsProvider) providers.getForeignCalls();
         final HotSpotLoweringProvider lowerer = (HotSpotLoweringProvider) providers.getLowerer();
-
-        try (InitTimer st = timer("graphBuilderPlugins.initialize")) {
-            GraphBuilderPhase phase = (GraphBuilderPhase) providers.getSuites().getDefaultGraphBuilderSuite().findPhase(GraphBuilderPhase.class).previous();
-            InvocationPlugins plugins = phase.getGraphBuilderConfig().getInvocationPlugins();
-            registerInvocationPlugins(providers, plugins);
-        }
+        HotSpotReplacementsImpl replacements = (HotSpotReplacementsImpl) providers.getReplacements();
 
         try (InitTimer st = timer("foreignCalls.initialize")) {
             foreignCalls.initialize(providers, config);
@@ -83,7 +77,6 @@ public abstract class HotSpotHostBackend extends HotSpotBackend {
         try (InitTimer st = timer("lowerer.initialize")) {
             lowerer.initialize(providers, config);
         }
-        HotSpotReplacementsImpl replacements = (HotSpotReplacementsImpl) providers.getReplacements();
 
         // Install intrinsics.
         if (Intrinsify.getValue()) {
@@ -96,18 +89,12 @@ public abstract class HotSpotHostBackend extends HotSpotBackend {
                 }
                 if (BootstrapReplacements.getValue()) {
                     for (ResolvedJavaMethod method : replacements.getAllReplacements()) {
-                        replacements.getMacroSubstitution(method);
-                        replacements.getMethodSubstitution(method);
+                        replacements.getSubstitution(method, -1);
                     }
                 }
             } catch (Throwable e) {
                 throw Debug.handle(e);
             }
         }
-    }
-
-    protected void registerInvocationPlugins(HotSpotProviders providers, InvocationPlugins plugins) {
-        StandardGraphBuilderPlugins.registerInvocationPlugins(providers.getMetaAccess(), plugins);
-        HotSpotGraphBuilderPlugins.registerInvocationPlugins(providers, plugins);
     }
 }

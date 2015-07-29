@@ -25,7 +25,6 @@ package com.oracle.graal.hotspot.sparc;
 
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
 
-import com.oracle.graal.asm.sparc.SPARCAssembler.Prefetch;
 import com.oracle.graal.asm.sparc.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.asm.*;
@@ -33,19 +32,20 @@ import com.oracle.graal.lir.sparc.*;
 
 public final class SPARCPrefetchOp extends SPARCLIRInstruction {
     public static final LIRInstructionClass<SPARCPrefetchOp> TYPE = LIRInstructionClass.create(SPARCPrefetchOp.class);
+    public static final SizeEstimate SIZE = SizeEstimate.create(1);
 
     private final int instr;  // AllocatePrefetchInstr
     @Alive({COMPOSITE}) protected SPARCAddressValue address;
 
     public SPARCPrefetchOp(SPARCAddressValue address, int instr) {
-        super(TYPE);
+        super(TYPE, SIZE);
         this.address = address;
         this.instr = instr;
     }
 
     @Override
     public void emitCode(CompilationResultBuilder crb, SPARCMacroAssembler masm) {
-        assert instr >= 0 && instr < Prefetch.Fcn.values().length : instr;
-        new Prefetch(address.toAddress(), Prefetch.Fcn.values()[instr]).emit(masm);
+        assert instr >= 0 && instr < SPARCAssembler.Fcn.values().length : instr;
+        masm.prefetch(address.toAddress(), SPARCAssembler.Fcn.values()[instr]);
     }
 }

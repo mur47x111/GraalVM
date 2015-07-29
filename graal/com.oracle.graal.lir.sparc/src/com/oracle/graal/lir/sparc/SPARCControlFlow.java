@@ -22,33 +22,50 @@
  */
 package com.oracle.graal.lir.sparc;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
-import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
-import static com.oracle.graal.sparc.SPARC.*;
 import static com.oracle.graal.asm.sparc.SPARCAssembler.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.Annul.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.BranchPredict.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.CC.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.ConditionFlag.*;
+import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
+import static com.oracle.graal.lir.sparc.SPARCMove.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import static jdk.internal.jvmci.sparc.SPARC.*;
+import static jdk.internal.jvmci.sparc.SPARC.CPUFeature.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import java.util.*;
+
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.sparc.SPARC.CPUFeature;
+
 import com.oracle.graal.asm.*;
+import com.oracle.graal.asm.Assembler.LabelHint;
 import com.oracle.graal.asm.sparc.*;
-import com.oracle.graal.asm.sparc.SPARCMacroAssembler.*;
-import com.oracle.graal.compiler.common.*;
+import com.oracle.graal.asm.sparc.SPARCAssembler.BranchPredict;
+import com.oracle.graal.asm.sparc.SPARCAssembler.CC;
+import com.oracle.graal.asm.sparc.SPARCAssembler.ConditionFlag;
+import com.oracle.graal.asm.sparc.SPARCMacroAssembler.ScratchRegister;
+import com.oracle.graal.asm.sparc.SPARCMacroAssembler.Setx;
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.lir.*;
-import com.oracle.graal.lir.StandardOp.*;
 import com.oracle.graal.lir.SwitchStrategy.BaseSwitchClosure;
 import com.oracle.graal.lir.asm.*;
-import com.oracle.graal.sparc.*;
 
 public class SPARCControlFlow {
+    // This describes the maximum offset between the first emitted (load constant in to scratch,
+    // if does not fit into simm5 of cbcond) instruction and the final branch instruction
+    private static final int maximumSelfOffsetInstructions = 2;
 
-    public static final class ReturnOp extends SPARCLIRInstruction implements BlockEndOp {
+    public static final class ReturnOp extends SPARCBlockEndOp {
         public static final LIRInstructionClass<ReturnOp> TYPE = LIRInstructionClass.create(ReturnOp.class);
+        public static final SizeEstimate SIZE = SizeEstimate.create(2);
 
         @Use({REG, ILLEGAL}) protected Value x;
 
         public ReturnOp(Value x) {
-            super(TYPE);
+            super(TYPE, SIZE);
             this.x = x;
         }
 
@@ -58,19 +75,21 @@ public class SPARCControlFlow {
         }
 
         public static void emitCodeHelper(CompilationResultBuilder crb, SPARCMacroAssembler masm) {
-            new Ret().emit(masm);
+            masm.ret();
             // On SPARC we always leave the frame (in the delay slot).
             crb.frameContext.leave(crb);
         }
     }
 
-    public static final class CompareBranchOp extends SPARCLIRInstruction implements BlockEndOp, SPARCDelayedControlTransfer {
+    public static final class CompareBranchOp extends SPARCBlockEndOp implements SPARCDelayedControlTransfer {
         public static final LIRInstructionClass<CompareBranchOp> TYPE = LIRInstructionClass.create(CompareBranchOp.class);
+        public static final SizeEstimate SIZE = SizeEstimate.create(3);
+        static final EnumSet<Kind> SUPPORTED_KINDS = EnumSet.of(Kind.Long, Kind.Int, Kind.Object, Kind.Float, Kind.Double);
 
         private final SPARCCompare opcode;
         @Use({REG}) protected Value x;
         @Use({REG, CONST}) protected Value y;
-        protected final Condition condition;
+        private ConditionFlag conditionFlag;
         protected final LabelRef trueDestination;
         protected LabelHint trueDestinationHint;
         protected final LabelRef falseDestination;
@@ -80,22 +99,20 @@ public class SPARCControlFlow {
         private boolean emitted = false;
         private int delaySlotPosition = -1;
         private double trueDestinationProbability;
-        // This describes the maximum offset between the first emitted (load constant in to scratch,
-        // if does not fit into simm5 of cbcond) instruction and the final branch instruction
-        private static int maximumSelfOffsetInstructions = 4;
 
         public CompareBranchOp(SPARCCompare opcode, Value x, Value y, Condition condition, LabelRef trueDestination, LabelRef falseDestination, Kind kind, boolean unorderedIsTrue,
                         double trueDestinationProbability) {
-            super(TYPE);
+            super(TYPE, SIZE);
             this.opcode = opcode;
             this.x = x;
             this.y = y;
-            this.condition = condition;
             this.trueDestination = trueDestination;
             this.falseDestination = falseDestination;
             this.kind = kind;
             this.unorderedIsTrue = unorderedIsTrue;
             this.trueDestinationProbability = trueDestinationProbability;
+            CC conditionCodeReg = CC.forKind(kind);
+            conditionFlag = fromCondition(conditionCodeReg, condition, unorderedIsTrue);
         }
 
         @Override
@@ -105,24 +122,32 @@ public class SPARCControlFlow {
             }
             if (!emitted) {
                 requestHints(masm);
-                if (canUseShortBranch(crb, masm, masm.position() + maximumSelfOffsetInstructions * masm.target.wordSize)) {
+                int targetPosition = getTargetPosition(masm);
+                if (canUseShortBranch(crb, masm, targetPosition)) {
                     emitted = emitShortCompareBranch(crb, masm);
                 }
-                if (!emitted) {
+                if (!emitted) { // No short compare/branch was used, so we go into fallback
                     SPARCCompare.emit(crb, masm, opcode, x, y);
-                    emitted = emitBranch(crb, masm, true);
+                    emitted = emitBranch(crb, masm, kind, conditionFlag, trueDestination, falseDestination, true, trueDestinationProbability);
                 }
             }
-
             assert emitted;
+        }
+
+        private static int getTargetPosition(Assembler asm) {
+            return asm.position() + maximumSelfOffsetInstructions * asm.target.wordSize;
         }
 
         public void emitControlTransfer(CompilationResultBuilder crb, SPARCMacroAssembler masm) {
             requestHints(masm);
             // When we use short branches, no delay slot is available
-            if (!canUseShortBranch(crb, masm, masm.position() + maximumSelfOffsetInstructions * masm.target.wordSize)) {
+            int targetPosition = getTargetPosition(masm);
+            if (!canUseShortBranch(crb, masm, targetPosition)) {
                 SPARCCompare.emit(crb, masm, opcode, x, y);
-                emitted = emitBranch(crb, masm, false);
+                emitted = emitBranch(crb, masm, kind, conditionFlag, trueDestination, falseDestination, false, trueDestinationProbability);
+                if (emitted) {
+                    delaySlotPosition = masm.position();
+                }
             }
         }
 
@@ -133,7 +158,6 @@ public class SPARCControlFlow {
             if (falseDestinationHint == null) {
                 this.falseDestinationHint = masm.requestLabelHint(falseDestination.label());
             }
-
         }
 
         /**
@@ -170,24 +194,25 @@ public class SPARCControlFlow {
             Value tmpValue;
             Value actualX = x;
             Value actualY = y;
-            Condition actualCondition = condition;
+            ConditionFlag actualConditionFlag = conditionFlag;
             Label actualTrueTarget = trueDestination.label();
             Label actualFalseTarget = falseDestination.label();
             Label tmpTarget;
             boolean needJump;
             if (crb.isSuccessorEdge(trueDestination)) {
-                actualCondition = actualCondition.negate();
+                actualConditionFlag = conditionFlag.negate();
                 tmpTarget = actualTrueTarget;
                 actualTrueTarget = actualFalseTarget;
                 actualFalseTarget = tmpTarget;
                 needJump = false;
             } else {
                 needJump = !crb.isSuccessorEdge(falseDestination);
-                if (needJump && !isShortBranch(masm, masm.position() + maximumSelfOffsetInstructions * masm.target.wordSize, trueDestinationHint, actualTrueTarget)) {
+                int targetPosition = getTargetPosition(masm);
+                if (needJump && !isShortBranch(masm, targetPosition, trueDestinationHint, actualTrueTarget)) {
                     // we have to jump in either way, so we must put the shorter
                     // branch into the actualTarget as only one of the two jump targets
                     // is guaranteed to be simm10
-                    actualCondition = actualCondition.negate();
+                    actualConditionFlag = actualConditionFlag.negate();
                     tmpTarget = actualTrueTarget;
                     actualTrueTarget = actualFalseTarget;
                     actualFalseTarget = tmpTarget;
@@ -198,106 +223,48 @@ public class SPARCControlFlow {
                 tmpValue = actualX;
                 actualX = actualY;
                 actualY = tmpValue;
-                actualCondition = actualCondition.mirror();
+                actualConditionFlag = actualConditionFlag.mirror();
             }
-            ConditionFlag conditionFlag = ConditionFlag.fromCondtition(CC.Icc, actualCondition, false);
-            boolean isValidConstant = isConstant(actualY) && isSimm5(asConstant(actualY));
-            SPARCScratchRegister scratch = null;
-            try {
-                if (isConstant(actualY) && !isValidConstant) { // Make sure, the y value is loaded
-                    scratch = SPARCScratchRegister.get();
-                    Value scratchValue = scratch.getRegister().asValue(actualY.getLIRKind());
-                    SPARCMove.move(crb, masm, scratchValue, actualY, SPARCDelayedControlTransfer.DUMMY);
-                    actualY = scratchValue;
-                }
-                emitCBCond(masm, actualX, actualY, actualTrueTarget, conditionFlag);
-                new Nop().emit(masm);
-            } finally {
-                if (scratch != null) {
-                    // release the scratch if used
-                    scratch.close();
-                }
+            try (ScratchRegister scratch = masm.getScratchRegister()) {
+                emitCBCond(masm, actualX, actualY, actualTrueTarget, actualConditionFlag);
             }
             if (needJump) {
                 masm.jmp(actualFalseTarget);
-                new Nop().emit(masm);
+                masm.nop();
             }
             return true;
         }
 
         private static void emitCBCond(SPARCMacroAssembler masm, Value actualX, Value actualY, Label actualTrueTarget, ConditionFlag conditionFlag) {
             switch ((Kind) actualX.getLIRKind().getPlatformKind()) {
-                case Byte:
-                case Char:
-                case Short:
                 case Int:
                     if (isConstant(actualY)) {
                         int constantY = asConstant(actualY).asInt();
-                        new CBcondw(conditionFlag, asIntReg(actualX), constantY, actualTrueTarget).emit(masm);
+                        masm.cbcondw(conditionFlag, asIntReg(actualX), constantY, actualTrueTarget);
                     } else {
-                        new CBcondw(conditionFlag, asIntReg(actualX), asIntReg(actualY), actualTrueTarget).emit(masm);
+                        masm.cbcondw(conditionFlag, asIntReg(actualX), asIntReg(actualY), actualTrueTarget);
                     }
                     break;
                 case Long:
                     if (isConstant(actualY)) {
                         int constantY = (int) asConstant(actualY).asLong();
-                        new CBcondx(conditionFlag, asLongReg(actualX), constantY, actualTrueTarget).emit(masm);
+                        masm.cbcondx(conditionFlag, asLongReg(actualX), constantY, actualTrueTarget);
                     } else {
-                        new CBcondx(conditionFlag, asLongReg(actualX), asLongReg(actualY), actualTrueTarget).emit(masm);
+                        masm.cbcondx(conditionFlag, asLongReg(actualX), asLongReg(actualY), actualTrueTarget);
                     }
                     break;
                 case Object:
                     if (isConstant(actualY)) {
                         // Object constant valid can only be null
                         assert asConstant(actualY).isNull();
-                        new CBcondx(conditionFlag, asObjectReg(actualX), 0, actualTrueTarget).emit(masm);
+                        masm.cbcondx(conditionFlag, asObjectReg(actualX), 0, actualTrueTarget);
                     } else { // this is already loaded
-                        new CBcondx(conditionFlag, asObjectReg(actualX), asObjectReg(actualY), actualTrueTarget).emit(masm);
+                        masm.cbcondx(conditionFlag, asObjectReg(actualX), asObjectReg(actualY), actualTrueTarget);
                     }
                     break;
                 default:
-                    GraalInternalError.shouldNotReachHere();
+                    JVMCIError.shouldNotReachHere();
             }
-        }
-
-        public boolean emitBranch(CompilationResultBuilder crb, SPARCMacroAssembler masm, boolean withDelayedNop) {
-            Label actualTarget;
-            Condition actualCondition;
-            boolean branchOnUnordered;
-            boolean needJump;
-            boolean predictBranchTaken;
-            if (crb.isSuccessorEdge(trueDestination)) {
-                actualCondition = condition != null ? condition.negate() : null;
-                actualTarget = falseDestination.label();
-                predictBranchTaken = trueDestinationProbability < .5; // false branch needs jump
-                needJump = false;
-                branchOnUnordered = !unorderedIsTrue;
-            } else {
-                actualCondition = condition;
-                actualTarget = trueDestination.label();
-                needJump = !crb.isSuccessorEdge(falseDestination);
-                predictBranchTaken = trueDestinationProbability >= .5;
-                branchOnUnordered = unorderedIsTrue;
-            }
-            if (!withDelayedNop && needJump) {
-                // We cannot make use of the delay slot when we jump in true-case and false-case
-                return false;
-            }
-            if (kind == Kind.Double || kind == Kind.Float) {
-                emitFloatBranch(masm, actualTarget, actualCondition, branchOnUnordered);
-            } else {
-                CC cc = kind == Kind.Int ? CC.Icc : CC.Xcc;
-                assert actualCondition != null;
-                SPARCControlFlow.emitBranch(masm, actualTarget, actualCondition, cc, predictBranchTaken);
-            }
-            delaySlotPosition = masm.position();
-            if (withDelayedNop) {
-                new Nop().emit(masm);  // delay slot
-            }
-            if (needJump) {
-                masm.jmp(falseDestination.label());
-            }
-            return true; // emitted
         }
 
         private boolean canUseShortBranch(CompilationResultBuilder crb, SPARCAssembler asm, int position) {
@@ -305,15 +272,18 @@ public class SPARCControlFlow {
                 return false;
             }
             switch ((Kind) x.getPlatformKind()) {
-                case Byte:
-                case Char:
-                case Short:
                 case Int:
                 case Long:
                 case Object:
                     break;
                 default:
                     return false;
+            }
+            // Do not use short branch, if the y value is a constant and does not fit into simm5 but
+            // fits into simm13; this means the code with CBcond would be longer as the code without
+            // CBcond.
+            if (isConstant(y) && !isSimm5(asConstant(y)) && isSimm13(asConstant(y))) {
+                return false;
             }
             boolean hasShortJumpTarget = false;
             if (!crb.isSuccessorEdge(trueDestination)) {
@@ -325,223 +295,125 @@ public class SPARCControlFlow {
             return hasShortJumpTarget;
         }
 
-        private static boolean isShortBranch(SPARCAssembler asm, int position, LabelHint hint, Label label) {
-            int disp = 0;
-            if (label.isBound()) {
-                disp = label.position() - position;
-
-            } else if (hint != null && hint.isValid()) {
-                disp = hint.getTarget() - hint.getPosition();
-            }
-            if (disp != 0) {
-                if (disp < 0) {
-                    disp -= maximumSelfOffsetInstructions * asm.target.wordSize;
-                } else {
-                    disp += maximumSelfOffsetInstructions * asm.target.wordSize;
-                }
-                return isSimm10(disp >> 2);
-            } else if (hint == null) {
-                asm.requestLabelHint(label);
-            }
-            return false;
-        }
-
         public void resetState() {
             emitted = false;
             delaySlotPosition = -1;
         }
+
+        @Override
+        public void verify() {
+            super.verify();
+            assert SUPPORTED_KINDS.contains(kind) : kind;
+            assert x.getKind().equals(kind) && y.getKind().equals(kind) : x + " " + y;
+        }
     }
 
-    public static final class BranchOp extends SPARCLIRInstruction implements StandardOp.BranchOp {
+    private static boolean isShortBranch(SPARCAssembler asm, int position, LabelHint hint, Label label) {
+        int disp = 0;
+        if (label.isBound()) {
+            disp = label.position() - position;
+        } else if (hint != null && hint.isValid()) {
+            disp = hint.getTarget() - hint.getPosition();
+        }
+        if (disp != 0) {
+            if (disp < 0) {
+                disp -= maximumSelfOffsetInstructions * asm.target.wordSize;
+            } else {
+                disp += maximumSelfOffsetInstructions * asm.target.wordSize;
+            }
+            return isSimm10(disp >> 2);
+        } else if (hint == null) {
+            asm.requestLabelHint(label);
+        }
+        return false;
+    }
+
+    public static final class BranchOp extends SPARCBlockEndOp implements StandardOp.BranchOp {
         public static final LIRInstructionClass<BranchOp> TYPE = LIRInstructionClass.create(BranchOp.class);
-        // TODO: Condition code/flag handling needs to be improved;
-        protected final Condition condition;
+        public static final SizeEstimate SIZE = SizeEstimate.create(2);
         protected final ConditionFlag conditionFlag;
         protected final LabelRef trueDestination;
         protected final LabelRef falseDestination;
         protected final Kind kind;
-        protected final boolean unorderedIsTrue;
+        protected final double trueDestinationProbability;
 
-        public BranchOp(ConditionFlag condition, LabelRef trueDestination, LabelRef falseDestination, Kind kind) {
-            super(TYPE);
-            this.conditionFlag = condition;
+        public BranchOp(ConditionFlag conditionFlag, LabelRef trueDestination, LabelRef falseDestination, Kind kind, double trueDestinationProbability) {
+            super(TYPE, SIZE);
             this.trueDestination = trueDestination;
             this.falseDestination = falseDestination;
             this.kind = kind;
-            this.condition = null;
-            this.unorderedIsTrue = true;
-        }
-
-        public BranchOp(Condition condition, LabelRef trueDestination, LabelRef falseDestination, Kind kind) {
-            super(TYPE);
-            this.condition = condition;
-            this.trueDestination = trueDestination;
-            this.falseDestination = falseDestination;
-            this.kind = kind;
-            this.conditionFlag = null;
-            this.unorderedIsTrue = true;
-        }
-
-        public BranchOp(Condition finalCondition, LabelRef trueDestination, LabelRef falseDestination, Kind kind, boolean unorderedIsTrue) {
-            super(TYPE);
-            this.trueDestination = trueDestination;
-            this.falseDestination = falseDestination;
-            this.kind = kind;
-            this.conditionFlag = null;
-            this.unorderedIsTrue = unorderedIsTrue;
-            this.condition = finalCondition;
+            this.conditionFlag = conditionFlag;
+            this.trueDestinationProbability = trueDestinationProbability;
         }
 
         @Override
         public void emitCode(CompilationResultBuilder crb, SPARCMacroAssembler masm) {
-            assert condition == null && conditionFlag != null || condition != null && conditionFlag == null;
-            Label actualTarget;
-            Condition actualCondition;
-            ConditionFlag actualConditionFlag;
-            boolean branchOnUnordered;
-            boolean needJump;
-            if (crb.isSuccessorEdge(trueDestination)) {
-                actualCondition = condition != null ? condition.negate() : null;
-                actualConditionFlag = conditionFlag != null ? conditionFlag.negate() : null;
-                actualTarget = falseDestination.label();
-                needJump = false;
-                branchOnUnordered = !unorderedIsTrue;
-            } else {
-                actualCondition = condition;
-                actualConditionFlag = conditionFlag;
-                actualTarget = trueDestination.label();
-                needJump = !crb.isSuccessorEdge(falseDestination);
-                branchOnUnordered = unorderedIsTrue;
-            }
-            assert kind == Kind.Int || kind == Kind.Long || kind == Kind.Object || kind == Kind.Double || kind == Kind.Float : kind;
-            if (kind == Kind.Double || kind == Kind.Float) {
-                emitFloatBranch(masm, actualTarget, actualCondition, branchOnUnordered);
-            } else {
-                CC cc = kind == Kind.Int ? CC.Icc : CC.Xcc;
-                if (actualCondition != null) {
-                    emitBranch(masm, actualTarget, actualCondition, cc, false);
-                } else if (actualConditionFlag != null) {
-                    emitBranch(masm, actualTarget, actualConditionFlag, cc);
-                } else {
-                    GraalInternalError.shouldNotReachHere();
-                }
-            }
-            new Nop().emit(masm);  // delay slot
-            if (needJump) {
-                masm.jmp(falseDestination.label());
-            }
+            emitBranch(crb, masm, kind, conditionFlag, trueDestination, falseDestination, true, trueDestinationProbability);
+        }
+
+        @Override
+        public void verify() {
+            assert CompareBranchOp.SUPPORTED_KINDS.contains(kind);
         }
     }
 
-    private static void emitFloatBranch(SPARCMacroAssembler masm, Label target, Condition actualCondition, boolean branchOnUnordered) {
-        switch (actualCondition) {
-            case EQ:
-                if (branchOnUnordered) {
-                    new Fbue(false, target).emit(masm);
-                } else {
-                    new Fbe(false, target).emit(masm);
-                }
-                break;
-            case NE:
-                new Fbne(false, target).emit(masm); // Is also unordered
-                break;
-            case LT:
-                if (branchOnUnordered) {
-                    new Fbul(false, target).emit(masm);
-                } else {
-                    new Fbl(false, target).emit(masm);
-                }
-                break;
-            case LE:
-                if (branchOnUnordered) {
-                    new Fbule(false, target).emit(masm);
-                } else {
-                    new Fble(false, target).emit(masm);
-                }
-                break;
-            case GT:
-                if (branchOnUnordered) {
-                    new Fbug(false, target).emit(masm);
-                } else {
-                    new Fbg(false, target).emit(masm);
-                }
-                break;
-            case GE:
-                if (branchOnUnordered) {
-                    new Fbuge(false, target).emit(masm);
-                } else {
-                    new Fbge(false, target).emit(masm);
-                }
-                break;
-            case AE:
-            case AT:
-            case BT:
-            case BE:
-                throw GraalInternalError.unimplemented("Should not be required for float/dobule");
-            default:
-                throw GraalInternalError.shouldNotReachHere();
+    private static boolean emitBranch(CompilationResultBuilder crb, SPARCMacroAssembler masm, Kind kind, ConditionFlag conditionFlag, LabelRef trueDestination, LabelRef falseDestination,
+                    boolean withDelayedNop, double trueDestinationProbability) {
+        Label actualTarget;
+        ConditionFlag actualConditionFlag;
+        boolean needJump;
+        BranchPredict predictTaken;
+        if (falseDestination != null && crb.isSuccessorEdge(trueDestination)) {
+            actualConditionFlag = conditionFlag != null ? conditionFlag.negate() : null;
+            actualTarget = falseDestination.label();
+            needJump = false;
+            predictTaken = trueDestinationProbability < .5d ? PREDICT_TAKEN : PREDICT_NOT_TAKEN;
+        } else {
+            actualConditionFlag = conditionFlag;
+            actualTarget = trueDestination.label();
+            needJump = falseDestination != null && !crb.isSuccessorEdge(falseDestination);
+            predictTaken = trueDestinationProbability > .5d ? PREDICT_TAKEN : PREDICT_NOT_TAKEN;
         }
-    }
-
-    private static void emitBranch(SPARCMacroAssembler masm, Label target, ConditionFlag actualCondition, CC cc) {
-        new Fmt00c(0, actualCondition, Op2s.Bp, cc, 0, target).emit(masm);
-    }
-
-    private static void emitBranch(SPARCMacroAssembler masm, Label target, Condition actualCondition, CC cc, boolean predictTaken) {
-
-        switch (actualCondition) {
-            case EQ:
-                new Bpe(cc, false, predictTaken, target).emit(masm);
-                break;
-            case NE:
-                new Bpne(cc, false, predictTaken, target).emit(masm);
-                break;
-            case BT:
-                new Bplu(cc, false, predictTaken, target).emit(masm);
-                break;
-            case LT:
-                new Bpl(cc, false, predictTaken, target).emit(masm);
-                break;
-            case BE:
-                new Bpleu(cc, false, predictTaken, target).emit(masm);
-                break;
-            case LE:
-                new Bple(cc, false, predictTaken, target).emit(masm);
-                break;
-            case GE:
-                new Bpge(cc, false, predictTaken, target).emit(masm);
-                break;
-            case AE:
-                new Bpgeu(cc, false, predictTaken, target).emit(masm);
-                break;
-            case GT:
-                new Bpg(cc, false, predictTaken, target).emit(masm);
-                break;
-            case AT:
-                new Bpgu(cc, false, predictTaken, target).emit(masm);
-                break;
-            default:
-                throw GraalInternalError.shouldNotReachHere();
+        if (!withDelayedNop && needJump) {
+            // We cannot make use of the delay slot when we jump in true-case and false-case
+            return false;
         }
+        if (kind == Kind.Double || kind == Kind.Float) {
+            masm.fbpcc(actualConditionFlag, NOT_ANNUL, actualTarget, CC.Fcc0, predictTaken);
+        } else {
+            CC cc = kind == Kind.Int ? CC.Icc : CC.Xcc;
+            masm.bpcc(actualConditionFlag, NOT_ANNUL, actualTarget, cc, predictTaken);
+        }
+        if (withDelayedNop) {
+            masm.nop();  // delay slot
+        }
+        if (needJump) {
+            masm.jmp(falseDestination.label());
+        }
+        return true;
     }
 
-    public static final class StrategySwitchOp extends SPARCLIRInstruction implements BlockEndOp {
+    public static final class StrategySwitchOp extends SPARCBlockEndOp {
         public static final LIRInstructionClass<StrategySwitchOp> TYPE = LIRInstructionClass.create(StrategySwitchOp.class);
         @Use({CONST}) protected JavaConstant[] keyConstants;
         private final LabelRef[] keyTargets;
         private LabelRef defaultTarget;
         @Alive({REG}) protected Value key;
+        @Alive({REG, ILLEGAL}) protected Value constantTableBase;
         @Temp({REG}) protected Value scratch;
         private final SwitchStrategy strategy;
+        private final LabelHint[] labelHints;
 
-        public StrategySwitchOp(SwitchStrategy strategy, LabelRef[] keyTargets, LabelRef defaultTarget, Value key, Value scratch) {
+        public StrategySwitchOp(Value constantTableBase, SwitchStrategy strategy, LabelRef[] keyTargets, LabelRef defaultTarget, Value key, Value scratch) {
             super(TYPE);
             this.strategy = strategy;
             this.keyConstants = strategy.keyConstants;
             this.keyTargets = keyTargets;
             this.defaultTarget = defaultTarget;
+            this.constantTableBase = constantTableBase;
             this.key = key;
             this.scratch = scratch;
+            this.labelHints = new LabelHint[keyTargets.length];
             assert keyConstants.length == keyTargets.length;
             assert keyConstants.length == strategy.keyProbabilities.length;
         }
@@ -549,51 +421,87 @@ public class SPARCControlFlow {
         @Override
         public void emitCode(final CompilationResultBuilder crb, final SPARCMacroAssembler masm) {
             final Register keyRegister = asRegister(key);
-
+            final Register constantBaseRegister = AllocatableValue.ILLEGAL.equals(constantTableBase) ? g0 : asRegister(constantTableBase);
             BaseSwitchClosure closure = new BaseSwitchClosure(crb, masm, keyTargets, defaultTarget) {
                 @Override
                 protected void conditionalJump(int index, Condition condition, Label target) {
+                    requestHint(masm, index);
+                    JavaConstant constant = keyConstants[index];
+                    CC conditionCode;
+                    Long bits;
                     switch (key.getKind()) {
                         case Char:
                         case Byte:
                         case Short:
                         case Int:
-                            if (crb.codeCache.needsDataPatch(keyConstants[index])) {
-                                crb.recordInlineDataInCode(keyConstants[index]);
-                            }
-                            long lc = keyConstants[index].asLong();
-                            if (SPARCAssembler.isSimm13(lc)) {
-                                assert NumUtil.isInt(lc);
-                                new Cmp(keyRegister, (int) lc).emit(masm);
-                            } else {
-                                new Setx(lc, asIntReg(scratch)).emit(masm);
-                                new Cmp(keyRegister, asIntReg(scratch)).emit(masm);
-                            }
-                            emitBranch(masm, target, condition, CC.Icc, false);
+                            conditionCode = CC.Icc;
+                            bits = constant.asLong();
                             break;
                         case Long: {
-                            SPARCMove.move(crb, masm, scratch, keyConstants[index], SPARCDelayedControlTransfer.DUMMY);
-                            new Cmp(keyRegister, asLongReg(scratch)).emit(masm);
-                            emitBranch(masm, target, condition, CC.Xcc, false);
+                            conditionCode = CC.Xcc;
+                            bits = constant.asLong();
                             break;
                         }
                         case Object: {
-                            SPARCMove.move(crb, masm, scratch, keyConstants[index], SPARCDelayedControlTransfer.DUMMY);
-                            new Cmp(keyRegister, asObjectReg(scratch)).emit(masm);
-                            emitBranch(masm, target, condition, CC.Ptrcc, false);
+                            conditionCode = crb.codeCache.getTarget().wordKind == Kind.Long ? CC.Xcc : CC.Icc;
+                            bits = constant.isDefaultForKind() ? 0L : null;
                             break;
                         }
                         default:
-                            throw new GraalInternalError("switch only supported for int, long and object");
+                            throw new JVMCIError("switch only supported for int, long and object");
                     }
-                    new Nop().emit(masm);  // delay slot
+                    ConditionFlag conditionFlag = fromCondition(conditionCode, condition, false);
+                    LabelHint hint = labelHints[index];
+                    boolean canUseShortBranch = masm.hasFeature(CBCOND) && hint.isValid() && isShortBranch(masm, masm.position(), hint, target);
+                    if (bits != null && canUseShortBranch) {
+                        if (isSimm5(constant)) {
+                            if (conditionCode == Icc) {
+                                masm.cbcondw(conditionFlag, keyRegister, (int) (long) bits, target);
+                            } else {
+                                masm.cbcondx(conditionFlag, keyRegister, (int) (long) bits, target);
+                            }
+                        } else {
+                            Register scratchRegister = asRegister(scratch);
+                            const2reg(crb, masm, scratch, constantBaseRegister, keyConstants[index], SPARCDelayedControlTransfer.DUMMY);
+                            if (conditionCode == Icc) {
+                                masm.cbcondw(conditionFlag, keyRegister, scratchRegister, target);
+                            } else {
+                                masm.cbcondx(conditionFlag, keyRegister, scratchRegister, target);
+                            }
+                        }
+                    } else {
+                        if (bits != null && isSimm13(constant)) {
+                            masm.cmp(keyRegister, (int) (long) bits); // Cast is safe
+                        } else {
+                            Register scratchRegister = asRegister(scratch);
+                            const2reg(crb, masm, scratch, constantBaseRegister, keyConstants[index], SPARCDelayedControlTransfer.DUMMY);
+                            masm.cmp(keyRegister, scratchRegister);
+                        }
+                        masm.bpcc(conditionFlag, ANNUL, target, conditionCode, PREDICT_TAKEN);
+                        masm.nop();  // delay slot
+                    }
                 }
             };
             strategy.run(closure);
         }
+
+        private void requestHint(SPARCMacroAssembler masm, int index) {
+            labelHints[index] = masm.requestLabelHint(keyTargets[index].label());
+        }
+
+        @Override
+        public SizeEstimate estimateSize() {
+            int constantBytes = 0;
+            for (JavaConstant v : keyConstants) {
+                if (!SPARCAssembler.isSimm13(v)) {
+                    constantBytes += v.getKind().getByteCount();
+                }
+            }
+            return new SizeEstimate(4 * keyTargets.length, constantBytes);
+        }
     }
 
-    public static final class TableSwitchOp extends SPARCLIRInstruction implements BlockEndOp {
+    public static final class TableSwitchOp extends SPARCBlockEndOp {
         public static final LIRInstructionClass<TableSwitchOp> TYPE = LIRInstructionClass.create(TableSwitchOp.class);
 
         private final int lowKey;
@@ -621,56 +529,58 @@ public class SPARCControlFlow {
 
             // subtract the low value from the switch value
             if (isSimm13(lowKey)) {
-                new Sub(value, lowKey, scratchReg).emit(masm);
+                masm.sub(value, lowKey, scratchReg);
             } else {
-                try (SPARCScratchRegister sc = SPARCScratchRegister.get()) {
+                try (ScratchRegister sc = masm.getScratchRegister()) {
                     Register scratch2 = sc.getRegister();
                     new Setx(lowKey, scratch2).emit(masm);
-                    new Sub(value, scratch2, scratchReg).emit(masm);
+                    masm.sub(value, scratch2, scratchReg);
                 }
             }
             int upperLimit = highKey - lowKey;
-            try (SPARCScratchRegister sc = SPARCScratchRegister.get()) {
+            try (ScratchRegister sc = masm.getScratchRegister()) {
                 Register scratch2 = sc.getRegister();
                 if (isSimm13(upperLimit)) {
-                    new Cmp(scratchReg, upperLimit).emit(masm);
+                    masm.cmp(scratchReg, upperLimit);
                 } else {
                     new Setx(upperLimit, scratch2).emit(masm);
-                    new Cmp(scratchReg, upperLimit).emit(masm);
+                    masm.cmp(scratchReg, upperLimit);
                 }
 
                 // Jump to default target if index is not within the jump table
                 if (defaultTarget != null) {
-                    new Bpgu(CC.Icc, defaultTarget.label()).emit(masm);
-                    new Nop().emit(masm);  // delay slot
+                    masm.bpcc(GreaterUnsigned, NOT_ANNUL, defaultTarget.label(), Icc, PREDICT_TAKEN);
+                    masm.nop();  // delay slot
                 }
 
                 // Load jump table entry into scratch and jump to it
-                new Sll(scratchReg, 3, scratchReg).emit(masm); // Multiply by 8
+                masm.sll(scratchReg, 3, scratchReg); // Multiply by 8
                 // Zero the left bits sll with shcnt>0 does not mask upper 32 bits
-                new Srl(scratchReg, 0, scratchReg).emit(masm);
-                new Rdpc(scratch2).emit(masm);
+                masm.srl(scratchReg, 0, scratchReg);
+                masm.rdpc(scratch2);
 
                 // The jump table follows four instructions after rdpc
-                new Add(scratchReg, 4 * 4, scratchReg).emit(masm);
-                new Jmpl(scratch2, scratchReg, g0).emit(masm);
+                masm.add(scratchReg, 4 * 4, scratchReg);
+                masm.jmpl(scratch2, scratchReg, g0);
             }
-            new Nop().emit(masm);
-            // new Sra(value, 3, value).emit(masm); // delay slot, correct the value (division by 8)
+            masm.nop();
 
             // Emit jump table entries
             for (LabelRef target : targets) {
-                new Bpa(target.label()).emit(masm);
-                new Nop().emit(masm); // delay slot
+                masm.bpcc(Always, NOT_ANNUL, target.label(), Xcc, PREDICT_TAKEN);
+                masm.nop(); // delay slot
             }
+        }
+
+        @Override
+        public SizeEstimate estimateSize() {
+            return SizeEstimate.create(17 + targets.length * 2);
         }
     }
 
     @Opcode("CMOVE")
     public static final class CondMoveOp extends SPARCLIRInstruction {
         public static final LIRInstructionClass<CondMoveOp> TYPE = LIRInstructionClass.create(CondMoveOp.class);
-
-        private final Kind kind;
 
         @Def({REG, HINT}) protected Value result;
         @Use({REG, CONST}) protected Value trueValue;
@@ -679,9 +589,8 @@ public class SPARCControlFlow {
         private final ConditionFlag condition;
         private final CC cc;
 
-        public CondMoveOp(Kind kind, Variable result, CC cc, ConditionFlag condition, Value trueValue, Value falseValue) {
+        public CondMoveOp(Variable result, CC cc, ConditionFlag condition, Value trueValue, Value falseValue) {
             super(TYPE);
-            this.kind = kind;
             this.result = result;
             this.condition = condition;
             this.trueValue = trueValue;
@@ -691,12 +600,10 @@ public class SPARCControlFlow {
 
         @Override
         public void emitCode(CompilationResultBuilder crb, SPARCMacroAssembler masm) {
-            // check that we don't overwrite an input operand before it is used.
-            // assert !result.equals(trueValue);
             if (result.equals(trueValue)) { // We have the true value in place, do he opposite
-                cmove(masm, cc, kind, result, condition.negate(), falseValue);
+                cmove(masm, cc, result, condition.negate(), falseValue);
             } else if (result.equals(falseValue)) {
-                cmove(masm, cc, kind, result, condition, trueValue);
+                cmove(masm, cc, result, condition, trueValue);
             } else { // We have to move one of the input values to the result
                 ConditionFlag actualCondition = condition;
                 Value actualTrueValue = trueValue;
@@ -707,13 +614,29 @@ public class SPARCControlFlow {
                     actualFalseValue = trueValue;
                 }
                 SPARCMove.move(crb, masm, result, actualFalseValue, SPARCDelayedControlTransfer.DUMMY);
-                cmove(masm, cc, kind, result, actualCondition, actualTrueValue);
+                cmove(masm, cc, result, actualCondition, actualTrueValue);
             }
+        }
+
+        @Override
+        public SizeEstimate estimateSize() {
+            int constantSize = 0;
+            if (isConstant(trueValue) && !SPARCAssembler.isSimm13(asConstant(trueValue))) {
+                constantSize += trueValue.getKind().getByteCount();
+            }
+            if (isConstant(falseValue) && !SPARCAssembler.isSimm13(asConstant(falseValue))) {
+                constantSize += trueValue.getKind().getByteCount();
+            }
+            return SizeEstimate.create(3, constantSize);
         }
     }
 
-    private static void cmove(SPARCMacroAssembler masm, CC cc, Kind kind, Value result, ConditionFlag cond, Value other) {
-        switch (kind) {
+    private static void cmove(SPARCMacroAssembler masm, CC cc, Value result, ConditionFlag cond, Value other) {
+        switch (other.getKind()) {
+            case Boolean:
+            case Byte:
+            case Short:
+            case Char:
             case Int:
                 if (isConstant(other)) {
                     int constant;
@@ -722,9 +645,9 @@ public class SPARCControlFlow {
                     } else {
                         constant = asConstant(other).asInt();
                     }
-                    new Movcc(cond, cc, constant, asRegister(result)).emit(masm);
+                    masm.movcc(cond, cc, constant, asRegister(result));
                 } else {
-                    new Movcc(cond, cc, asRegister(other), asRegister(result)).emit(masm);
+                    masm.movcc(cond, cc, asRegister(other), asRegister(result));
                 }
                 break;
             case Long:
@@ -736,20 +659,69 @@ public class SPARCControlFlow {
                     } else {
                         constant = asConstant(other).asLong();
                     }
-                    assert isSimm11(constant);
-                    new Movcc(cond, cc, (int) constant, asRegister(result)).emit(masm);
+                    masm.movcc(cond, cc, (int) constant, asRegister(result));
                 } else {
-                    new Movcc(cond, cc, asRegister(other), asRegister(result)).emit(masm);
+                    masm.movcc(cond, cc, asRegister(other), asRegister(result));
                 }
                 break;
             case Float:
-                new Fmovscc(cond, cc, asFloatReg(other), asFloatReg(result)).emit(masm);
+                masm.fmovscc(cond, cc, asFloatReg(other), asFloatReg(result));
                 break;
             case Double:
-                new Fmovdcc(cond, cc, asDoubleReg(other), asDoubleReg(result)).emit(masm);
+                masm.fmovdcc(cond, cc, asDoubleReg(other), asDoubleReg(result));
                 break;
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
+    }
+
+    public static ConditionFlag fromCondition(CC conditionFlagsRegister, Condition cond, boolean unorderedIsTrue) {
+        switch (conditionFlagsRegister) {
+            case Xcc:
+            case Icc:
+                switch (cond) {
+                    case EQ:
+                        return Equal;
+                    case NE:
+                        return NotEqual;
+                    case BT:
+                        return LessUnsigned;
+                    case LT:
+                        return Less;
+                    case BE:
+                        return LessEqualUnsigned;
+                    case LE:
+                        return LessEqual;
+                    case AE:
+                        return GreaterEqualUnsigned;
+                    case GE:
+                        return GreaterEqual;
+                    case AT:
+                        return GreaterUnsigned;
+                    case GT:
+                        return Greater;
+                }
+                throw JVMCIError.shouldNotReachHere("Unimplemented for: " + cond);
+            case Fcc0:
+            case Fcc1:
+            case Fcc2:
+            case Fcc3:
+                switch (cond) {
+                    case EQ:
+                        return unorderedIsTrue ? F_UnorderedOrEqual : F_Equal;
+                    case NE:
+                        return ConditionFlag.F_NotEqual;
+                    case LT:
+                        return unorderedIsTrue ? F_UnorderedOrLess : F_Less;
+                    case LE:
+                        return unorderedIsTrue ? F_UnorderedOrLessOrEqual : F_LessOrEqual;
+                    case GE:
+                        return unorderedIsTrue ? F_UnorderedGreaterOrEqual : F_GreaterOrEqual;
+                    case GT:
+                        return unorderedIsTrue ? F_UnorderedOrGreater : F_Greater;
+                }
+                throw JVMCIError.shouldNotReachHere("Unkown condition: " + cond);
+        }
+        throw JVMCIError.shouldNotReachHere("Unknown condition flag register " + conditionFlagsRegister);
     }
 }

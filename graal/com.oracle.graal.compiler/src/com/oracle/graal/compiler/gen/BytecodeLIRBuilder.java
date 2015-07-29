@@ -22,8 +22,9 @@
  */
 package com.oracle.graal.compiler.gen;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.lir.gen.*;
 
 public abstract class BytecodeLIRBuilder {

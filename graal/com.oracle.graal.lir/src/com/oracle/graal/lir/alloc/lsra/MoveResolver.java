@@ -22,45 +22,63 @@
  */
 package com.oracle.graal.lir.alloc.lsra;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import static java.lang.String.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.lir.*;
 
 /**
  */
-final class MoveResolver {
+class MoveResolver {
 
     private final LinearScan allocator;
 
     private int insertIdx;
     private LIRInsertionBuffer insertionBuffer; // buffer where moves are inserted
 
-    private final List<Interval> mappingFrom;
+    protected final List<Interval> mappingFrom;
     private final List<Value> mappingFromOpr;
     private final List<Interval> mappingTo;
     private boolean multipleReadsAllowed;
     private final int[] registerBlocked;
 
-    private int registerBlocked(int reg) {
-        return registerBlocked[reg];
+    protected void setValueBlocked(Value location, int direction) {
+        assert direction == 1 || direction == -1 : "out of bounds";
+        if (isRegister(location)) {
+            registerBlocked[asRegister(location).number] += direction;
+        } else {
+            throw JVMCIError.shouldNotReachHere("unhandled value " + location);
+        }
     }
 
-    private void setRegisterBlocked(int reg, int direction) {
-        assert direction == 1 || direction == -1 : "out of bounds";
-        registerBlocked[reg] += direction;
+    protected int valueBlocked(Value location) {
+        if (isRegister(location)) {
+            return registerBlocked[asRegister(location).number];
+        }
+        throw JVMCIError.shouldNotReachHere("unhandled value " + location);
     }
 
     void setMultipleReadsAllowed() {
         multipleReadsAllowed = true;
     }
 
+    protected boolean areMultipleReadsAllowed() {
+        return multipleReadsAllowed;
+    }
+
     boolean hasMappings() {
         return mappingFrom.size() > 0;
+    }
+
+    protected LinearScan getAllocator() {
+        return allocator;
     }
 
     MoveResolver(LinearScan allocator) {
@@ -73,16 +91,19 @@ final class MoveResolver {
         this.insertIdx = -1;
         this.insertionBuffer = new LIRInsertionBuffer();
         this.registerBlocked = new int[allocator.registers.length];
-        assert checkEmpty();
     }
 
     boolean checkEmpty() {
         assert mappingFrom.size() == 0 && mappingFromOpr.size() == 0 && mappingTo.size() == 0 : "list must be empty before and after processing";
-        for (int i = 0; i < allocator.registers.length; i++) {
-            assert registerBlocked(i) == 0 : "register map must be empty before and after processing";
+        for (int i = 0; i < getAllocator().registers.length; i++) {
+            assert registerBlocked[i] == 0 : "register map must be empty before and after processing";
         }
-        assert !multipleReadsAllowed : "must have default value";
+        checkMultipleReads();
         return true;
+    }
+
+    protected void checkMultipleReads() {
+        assert !areMultipleReadsAllowed() : "must have default value";
     }
 
     private boolean verifyBeforeResolve() {
@@ -92,7 +113,7 @@ final class MoveResolver {
 
         int i;
         int j;
-        if (!multipleReadsAllowed) {
+        if (!areMultipleReadsAllowed()) {
             for (i = 0; i < mappingFrom.size(); i++) {
                 for (j = i + 1; j < mappingFrom.size(); j++) {
                     assert mappingFrom.get(i) == null || mappingFrom.get(i) != mappingFrom.get(j) : "cannot read from same interval twice";
@@ -107,7 +128,7 @@ final class MoveResolver {
         }
 
         HashSet<Value> usedRegs = new HashSet<>();
-        if (!multipleReadsAllowed) {
+        if (!areMultipleReadsAllowed()) {
             for (i = 0; i < mappingFrom.size(); i++) {
                 Interval interval = mappingFrom.get(i);
                 if (interval != null && !isIllegal(interval.location())) {
@@ -129,38 +150,51 @@ final class MoveResolver {
             assert unique : "cannot write to same register twice";
         }
 
-        usedRegs.clear();
-        for (i = 0; i < mappingFrom.size(); i++) {
+        verifyStackSlotMapping();
+
+        return true;
+    }
+
+    protected void verifyStackSlotMapping() {
+        HashSet<Value> usedRegs = new HashSet<>();
+        for (int i = 0; i < mappingFrom.size(); i++) {
             Interval interval = mappingFrom.get(i);
             if (interval != null && !isRegister(interval.location())) {
                 usedRegs.add(interval.location());
             }
         }
-        for (i = 0; i < mappingTo.size(); i++) {
+        for (int i = 0; i < mappingTo.size(); i++) {
             Interval interval = mappingTo.get(i);
-            assert !usedRegs.contains(interval.location()) || interval.location().equals(mappingFrom.get(i).location()) : "stack slots used in mappingFrom must be disjoint to mappingTo";
+            assert !usedRegs.contains(interval.location()) || checkIntervalLocation(mappingFrom.get(i), interval, mappingFromOpr.get(i)) : "stack slots used in mappingFrom must be disjoint to mappingTo";
         }
+    }
 
-        return true;
+    private static boolean checkIntervalLocation(Interval from, Interval to, Value fromOpr) {
+        if (from == null) {
+            return fromOpr != null;
+        } else {
+            return to.location().equals(from.location());
+        }
     }
 
     // mark assignedReg and assignedRegHi of the interval as blocked
     private void blockRegisters(Interval interval) {
         Value location = interval.location();
-        if (isRegister(location)) {
-            int reg = asRegister(location).number;
-            assert multipleReadsAllowed || registerBlocked(reg) == 0 : "register already marked as used";
-            setRegisterBlocked(reg, 1);
+        if (mightBeBlocked(location)) {
+            assert areMultipleReadsAllowed() || valueBlocked(location) == 0 : "location already marked as used: " + location;
+            int direction = 1;
+            setValueBlocked(location, direction);
+            Debug.log("block %s", location);
         }
     }
 
     // mark assignedReg and assignedRegHi of the interval as unblocked
     private void unblockRegisters(Interval interval) {
         Value location = interval.location();
-        if (isRegister(location)) {
-            int reg = asRegister(location).number;
-            assert registerBlocked(reg) > 0 : "register already marked as unused";
-            setRegisterBlocked(reg, -1);
+        if (mightBeBlocked(location)) {
+            assert valueBlocked(location) > 0 : "location already marked as unused: " + location;
+            setValueBlocked(location, -1);
+            Debug.log("unblock %s", location);
         }
     }
 
@@ -171,14 +205,30 @@ final class MoveResolver {
     private boolean safeToProcessMove(Interval from, Interval to) {
         Value fromReg = from != null ? from.location() : null;
 
-        Value reg = to.location();
-        if (isRegister(reg)) {
-            if (registerBlocked(asRegister(reg).number) > 1 || (registerBlocked(asRegister(reg).number) == 1 && !reg.equals(fromReg))) {
+        Value location = to.location();
+        if (mightBeBlocked(location)) {
+            if ((valueBlocked(location) > 1 || (valueBlocked(location) == 1 && !isMoveToSelf(fromReg, location)))) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    protected boolean isMoveToSelf(Value from, Value to) {
+        assert to != null;
+        if (to.equals(from)) {
+            return true;
+        }
+        if (from != null && isRegister(from) && isRegister(to) && asRegister(from).equals(asRegister(to))) {
+            assert LIRKind.verifyMoveKinds(to.getLIRKind(), from.getLIRKind()) : String.format("Same register but Kind mismatch %s <- %s", to, from);
+            return true;
+        }
+        return false;
+    }
+
+    protected boolean mightBeBlocked(Value location) {
+        return isRegister(location);
     }
 
     private void createInsertionBuffer(List<LIRInstruction> list) {
@@ -197,100 +247,88 @@ final class MoveResolver {
 
     private void insertMove(Interval fromInterval, Interval toInterval) {
         assert !fromInterval.operand.equals(toInterval.operand) : "from and to interval equal: " + fromInterval;
-        assert fromInterval.kind().equals(toInterval.kind()) : "move between different types";
+        assert LIRKind.verifyMoveKinds(toInterval.kind(), fromInterval.kind()) : "move between different types";
         assert insertIdx != -1 : "must setup insert position first";
 
-        AllocatableValue fromOpr = fromInterval.operand;
-        AllocatableValue toOpr = toInterval.operand;
+        insertionBuffer.append(insertIdx, createMove(fromInterval.operand, toInterval.operand, fromInterval.location(), toInterval.location()));
 
-        insertionBuffer.append(insertIdx, allocator.getSpillMoveFactory().createMove(toOpr, fromOpr));
+        if (Debug.isLogEnabled()) {
+            Debug.log("insert move from %s to %s at %d", fromInterval, toInterval, insertIdx);
+        }
+    }
 
-        Debug.log("insert move from %s to %s at %d", fromInterval, toInterval, insertIdx);
+    /**
+     * @param fromOpr {@link Interval#operand operand} of the {@code from} interval
+     * @param toOpr {@link Interval#operand operand} of the {@code to} interval
+     * @param fromLocation {@link Interval#location() location} of the {@code to} interval
+     * @param toLocation {@link Interval#location() location} of the {@code to} interval
+     */
+    protected LIRInstruction createMove(AllocatableValue fromOpr, AllocatableValue toOpr, AllocatableValue fromLocation, AllocatableValue toLocation) {
+        return getAllocator().getSpillMoveFactory().createMove(toOpr, fromOpr);
     }
 
     private void insertMove(Value fromOpr, Interval toInterval) {
-        assert fromOpr.getLIRKind().equals(toInterval.kind()) : "move between different types";
+        assert LIRKind.verifyMoveKinds(toInterval.kind(), fromOpr.getLIRKind()) : format("move between different types %s %s", fromOpr.getLIRKind(), toInterval.kind());
         assert insertIdx != -1 : "must setup insert position first";
 
         AllocatableValue toOpr = toInterval.operand;
-        insertionBuffer.append(insertIdx, allocator.getSpillMoveFactory().createMove(toOpr, fromOpr));
+        LIRInstruction move = getAllocator().getSpillMoveFactory().createMove(toOpr, fromOpr);
+        insertionBuffer.append(insertIdx, move);
 
-        Debug.log("insert move from value %s to %s at %d", fromOpr, toInterval, insertIdx);
+        if (Debug.isLogEnabled()) {
+            Debug.log("insert move from value %s to %s at %d", fromOpr, toInterval, insertIdx);
+        }
     }
 
     private void resolveMappings() {
-        assert verifyBeforeResolve();
-
-        // Block all registers that are used as input operands of a move.
-        // When a register is blocked, no move to this register is emitted.
-        // This is necessary for detecting cycles in moves.
-        int i;
-        for (i = mappingFrom.size() - 1; i >= 0; i--) {
-            Interval fromInterval = mappingFrom.get(i);
-            if (fromInterval != null) {
-                blockRegisters(fromInterval);
+        try (Indent indent = Debug.logAndIndent("resolveMapping")) {
+            assert verifyBeforeResolve();
+            if (Debug.isLogEnabled()) {
+                printMapping();
             }
-        }
 
-        int spillCandidate = -1;
-        while (mappingFrom.size() > 0) {
-            boolean processedInterval = false;
-
+            // Block all registers that are used as input operands of a move.
+            // When a register is blocked, no move to this register is emitted.
+            // This is necessary for detecting cycles in moves.
+            int i;
             for (i = mappingFrom.size() - 1; i >= 0; i--) {
                 Interval fromInterval = mappingFrom.get(i);
-                Interval toInterval = mappingTo.get(i);
-
-                if (safeToProcessMove(fromInterval, toInterval)) {
-                    // this interval can be processed because target is free
-                    if (fromInterval != null) {
-                        insertMove(fromInterval, toInterval);
-                        unblockRegisters(fromInterval);
-                    } else {
-                        insertMove(mappingFromOpr.get(i), toInterval);
-                    }
-                    mappingFrom.remove(i);
-                    mappingFromOpr.remove(i);
-                    mappingTo.remove(i);
-
-                    processedInterval = true;
-                } else if (fromInterval != null && isRegister(fromInterval.location())) {
-                    // this interval cannot be processed now because target is not free
-                    // it starts in a register, so it is a possible candidate for spilling
-                    spillCandidate = i;
+                if (fromInterval != null) {
+                    blockRegisters(fromInterval);
                 }
             }
 
-            if (!processedInterval) {
-                // no move could be processed because there is a cycle in the move list
-                // (e.g. r1 . r2, r2 . r1), so one interval must be spilled to memory
-                assert spillCandidate != -1 : "no interval in register for spilling found";
+            int spillCandidate = -1;
+            while (mappingFrom.size() > 0) {
+                boolean processedInterval = false;
 
-                // create a new spill interval and assign a stack slot to it
-                Interval fromInterval = mappingFrom.get(spillCandidate);
-                Interval spillInterval = allocator.createDerivedInterval(fromInterval);
-                spillInterval.setKind(fromInterval.kind());
+                for (i = mappingFrom.size() - 1; i >= 0; i--) {
+                    Interval fromInterval = mappingFrom.get(i);
+                    Interval toInterval = mappingTo.get(i);
 
-                // add a dummy range because real position is difficult to calculate
-                // Note: this range is a special case when the integrity of the allocation is
-                // checked
-                spillInterval.addRange(1, 2);
+                    if (safeToProcessMove(fromInterval, toInterval)) {
+                        // this interval can be processed because target is free
+                        if (fromInterval != null) {
+                            insertMove(fromInterval, toInterval);
+                            unblockRegisters(fromInterval);
+                        } else {
+                            insertMove(mappingFromOpr.get(i), toInterval);
+                        }
+                        mappingFrom.remove(i);
+                        mappingFromOpr.remove(i);
+                        mappingTo.remove(i);
 
-                // do not allocate a new spill slot for temporary interval, but
-                // use spill slot assigned to fromInterval. Otherwise moves from
-                // one stack slot to another can happen (not allowed by LIRAssembler
-                StackSlotValue spillSlot = fromInterval.spillSlot();
-                if (spillSlot == null) {
-                    spillSlot = allocator.frameMapBuilder.allocateSpillSlot(spillInterval.kind());
-                    fromInterval.setSpillSlot(spillSlot);
+                        processedInterval = true;
+                    } else if (fromInterval != null && isRegister(fromInterval.location())) {
+                        // this interval cannot be processed now because target is not free
+                        // it starts in a register, so it is a possible candidate for spilling
+                        spillCandidate = i;
+                    }
                 }
-                spillInterval.assignLocation(spillSlot);
 
-                Debug.log("created new Interval for spilling: %s", spillInterval);
-
-                // insert a move from register to stack and update the mapping
-                insertMove(fromInterval, spillInterval);
-                mappingFrom.set(spillCandidate, spillInterval);
-                unblockRegisters(fromInterval);
+                if (!processedInterval) {
+                    breakCycle(spillCandidate);
+                }
             }
         }
 
@@ -299,6 +337,64 @@ final class MoveResolver {
 
         // check that all intervals have been processed
         assert checkEmpty();
+    }
+
+    protected void breakCycle(int spillCandidate) {
+        // no move could be processed because there is a cycle in the move list
+        // (e.g. r1 . r2, r2 . r1), so one interval must be spilled to memory
+        assert spillCandidate != -1 : "no interval in register for spilling found";
+
+        // create a new spill interval and assign a stack slot to it
+        Interval fromInterval = mappingFrom.get(spillCandidate);
+        // do not allocate a new spill slot for temporary interval, but
+        // use spill slot assigned to fromInterval. Otherwise moves from
+        // one stack slot to another can happen (not allowed by LIRAssembler
+        StackSlotValue spillSlot = fromInterval.spillSlot();
+        if (spillSlot == null) {
+            spillSlot = getAllocator().frameMapBuilder.allocateSpillSlot(fromInterval.kind());
+            fromInterval.setSpillSlot(spillSlot);
+        }
+        spillInterval(spillCandidate, fromInterval, spillSlot);
+    }
+
+    protected void spillInterval(int spillCandidate, Interval fromInterval, StackSlotValue spillSlot) {
+        assert mappingFrom.get(spillCandidate).equals(fromInterval);
+        Interval spillInterval = getAllocator().createDerivedInterval(fromInterval);
+        spillInterval.setKind(fromInterval.kind());
+
+        // add a dummy range because real position is difficult to calculate
+        // Note: this range is a special case when the integrity of the allocation is
+        // checked
+        spillInterval.addRange(1, 2);
+
+        spillInterval.assignLocation(spillSlot);
+
+        if (Debug.isLogEnabled()) {
+            Debug.log("created new Interval for spilling: %s", spillInterval);
+        }
+        blockRegisters(spillInterval);
+
+        // insert a move from register to stack and update the mapping
+        insertMove(fromInterval, spillInterval);
+        mappingFrom.set(spillCandidate, spillInterval);
+        unblockRegisters(fromInterval);
+    }
+
+    private void printMapping() {
+        try (Indent indent = Debug.logAndIndent("Mapping")) {
+            for (int i = mappingFrom.size() - 1; i >= 0; i--) {
+                Interval fromInterval = mappingFrom.get(i);
+                Interval toInterval = mappingTo.get(i);
+                Value from;
+                Value to = toInterval.location();
+                if (fromInterval == null) {
+                    from = mappingFromOpr.get(i);
+                } else {
+                    from = fromInterval.location();
+                }
+                Debug.log("move %s <- %s", from, to);
+            }
+        }
     }
 
     void setInsertPosition(List<LIRInstruction> insertList, int insertIdx) {
@@ -327,7 +423,9 @@ final class MoveResolver {
     void addMapping(Interval fromInterval, Interval toInterval) {
 
         if (isIllegal(toInterval.location()) && toInterval.canMaterialize()) {
-            Debug.log("no store to rematerializable interval %s needed", toInterval);
+            if (Debug.isLogEnabled()) {
+                Debug.log("no store to rematerializable interval %s needed", toInterval);
+            }
             return;
         }
         if (isIllegal(fromInterval.location()) && fromInterval.canMaterialize()) {
@@ -336,17 +434,22 @@ final class MoveResolver {
             addMapping(rematValue, toInterval);
             return;
         }
-        Debug.log("add move mapping from %s to %s", fromInterval, toInterval);
+        if (Debug.isLogEnabled()) {
+            Debug.log("add move mapping from %s to %s", fromInterval, toInterval);
+        }
 
         assert !fromInterval.operand.equals(toInterval.operand) : "from and to interval equal: " + fromInterval;
-        assert fromInterval.kind().equals(toInterval.kind());
+        assert LIRKind.verifyMoveKinds(toInterval.kind(), fromInterval.kind()) : String.format("Kind mismatch: %s vs. %s, from=%s, to=%s", fromInterval.kind(), toInterval.kind(), fromInterval,
+                        toInterval);
         mappingFrom.add(fromInterval);
         mappingFromOpr.add(Value.ILLEGAL);
         mappingTo.add(toInterval);
     }
 
     void addMapping(Value fromOpr, Interval toInterval) {
-        Debug.log("add move mapping from %s to %s", fromOpr, toInterval);
+        if (Debug.isLogEnabled()) {
+            Debug.log("add move mapping from %s to %s", fromOpr, toInterval);
+        }
 
         assert isConstant(fromOpr) : "only for constants";
 

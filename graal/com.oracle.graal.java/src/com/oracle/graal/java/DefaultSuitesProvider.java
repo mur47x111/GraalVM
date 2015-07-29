@@ -22,9 +22,12 @@
  */
 package com.oracle.graal.java;
 
+import jdk.internal.jvmci.options.*;
+import jdk.internal.jvmci.options.DerivedOptionValue.*;
+
+import com.oracle.graal.graphbuilderconf.*;
+import com.oracle.graal.graphbuilderconf.GraphBuilderConfiguration.Plugins;
 import com.oracle.graal.lir.phases.*;
-import com.oracle.graal.options.*;
-import com.oracle.graal.options.DerivedOptionValue.OptionSupplier;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.tiers.*;
 
@@ -54,8 +57,8 @@ public class DefaultSuitesProvider implements SuitesProvider {
 
     }
 
-    public DefaultSuitesProvider() {
-        this.defaultGraphBuilderSuite = createGraphBuilderSuite();
+    public DefaultSuitesProvider(Plugins plugins) {
+        this.defaultGraphBuilderSuite = createGraphBuilderSuite(plugins);
         this.defaultSuites = new DerivedOptionValue<>(new SuitesSupplier());
         this.defaultLIRSuites = new DerivedOptionValue<>(new LIRSuitesSupplier());
     }
@@ -72,9 +75,9 @@ public class DefaultSuitesProvider implements SuitesProvider {
         return defaultGraphBuilderSuite;
     }
 
-    protected PhaseSuite<HighTierContext> createGraphBuilderSuite() {
+    protected PhaseSuite<HighTierContext> createGraphBuilderSuite(Plugins plugins) {
         PhaseSuite<HighTierContext> suite = new PhaseSuite<>();
-        suite.appendPhase(new GraphBuilderPhase(GraphBuilderConfiguration.getDefault()));
+        suite.appendPhase(new GraphBuilderPhase(GraphBuilderConfiguration.getDefault(plugins)));
         return suite;
     }
 

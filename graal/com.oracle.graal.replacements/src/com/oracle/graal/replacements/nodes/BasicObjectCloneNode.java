@@ -24,11 +24,13 @@ package com.oracle.graal.replacements.nodes;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.meta.Assumptions.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
+import com.oracle.graal.nodes.CallTargetNode.InvokeKind;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
@@ -40,8 +42,8 @@ public abstract class BasicObjectCloneNode extends MacroStateSplitNode implement
 
     public static final NodeClass<BasicObjectCloneNode> TYPE = NodeClass.create(BasicObjectCloneNode.class);
 
-    protected BasicObjectCloneNode(NodeClass<? extends BasicObjectCloneNode> c, Invoke invoke) {
-        super(c, invoke);
+    public BasicObjectCloneNode(NodeClass<? extends MacroNode> c, InvokeKind invokeKind, ResolvedJavaMethod targetMethod, int bci, JavaType returnType, ValueNode... arguments) {
+        super(c, invokeKind, targetMethod, bci, returnType, arguments);
     }
 
     @Override
@@ -64,7 +66,7 @@ public abstract class BasicObjectCloneNode extends MacroStateSplitNode implement
     /*
      * Looks at the given stamp and determines if it is an exact type (or can be assumed to be an
      * exact type) and if it is a cloneable type.
-     *
+     * 
      * If yes, then the exact type is returned, otherwise it returns null.
      */
     protected static ResolvedJavaType getConcreteType(Stamp stamp, Assumptions assumptions, MetaAccessProvider metaAccess) {
@@ -76,15 +78,14 @@ public abstract class BasicObjectCloneNode extends MacroStateSplitNode implement
             return null;
         } else if (objectStamp.isExactType()) {
             return isCloneableType(objectStamp.type(), metaAccess) ? objectStamp.type() : null;
-        } else {
-            ResolvedJavaType type = objectStamp.type().findUniqueConcreteSubtype();
-            if (type != null && isCloneableType(type, metaAccess)) {
-                assumptions.recordConcreteSubtype(objectStamp.type(), type);
-                return type;
-            } else {
-                return null;
+        } else if (assumptions != null) {
+            AssumptionResult<ResolvedJavaType> leafConcreteSubtype = objectStamp.type().findLeafConcreteSubtype();
+            if (leafConcreteSubtype != null && isCloneableType(leafConcreteSubtype.getResult(), metaAccess)) {
+                assumptions.record(leafConcreteSubtype);
+                return leafConcreteSubtype.getResult();
             }
         }
+        return null;
     }
 
     @Override
@@ -98,7 +99,7 @@ public abstract class BasicObjectCloneNode extends MacroStateSplitNode implement
                     newEntryState[i] = originalState.getEntry(i);
                 }
                 VirtualObjectNode newVirtual = originalVirtual.duplicate();
-                tool.createVirtualObject(newVirtual, newEntryState, Collections.<MonitorIdNode> emptyList());
+                tool.createVirtualObject(newVirtual, newEntryState, Collections.<MonitorIdNode> emptyList(), false);
                 tool.replaceWithVirtual(newVirtual);
             }
         } else {
@@ -119,7 +120,7 @@ public abstract class BasicObjectCloneNode extends MacroStateSplitNode implement
                     state[i] = loads[i] = new LoadFieldNode(obj, fields[i]);
                     tool.addNode(loads[i]);
                 }
-                tool.createVirtualObject(newVirtual, state, Collections.<MonitorIdNode> emptyList());
+                tool.createVirtualObject(newVirtual, state, Collections.<MonitorIdNode> emptyList(), false);
                 tool.replaceWithVirtual(newVirtual);
             }
         }

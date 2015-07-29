@@ -24,9 +24,10 @@ package com.oracle.graal.replacements.test;
 
 import java.lang.reflect.*;
 
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.test.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
@@ -34,7 +35,6 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.java.*;
-import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.inlining.*;
 import com.oracle.graal.phases.common.inlining.policy.*;
@@ -115,9 +115,9 @@ public class EdgesTest extends GraalCompilerTest {
 
         ResolvedJavaMethod javaMethod = getMetaAccess().lookupJavaMethod(method);
         StructuredGraph g = parseProfiled(javaMethod, AllowAssumptions.NO);
-        HighTierContext context = new HighTierContext(getProviders(), null, getDefaultGraphBuilderSuite(), OptimisticOptimizations.ALL);
-        new InliningPhase(new InlineMethodSubstitutionsPolicy(), new CanonicalizerPhase(true)).apply(g, context);
-        new CanonicalizerPhase(false).apply(g, context);
+        HighTierContext context = getDefaultHighTierContext();
+        new InliningPhase(new InlineMethodSubstitutionsPolicy(), new CanonicalizerPhase()).apply(g, context);
+        new CanonicalizerPhase().apply(g, context);
         Assert.assertTrue(g.getNodes().filter(CheckCastNode.class).isEmpty());
     }
 

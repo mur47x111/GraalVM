@@ -22,19 +22,19 @@
  */
 package com.oracle.graal.lir.amd64;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import jdk.internal.jvmci.amd64.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
 import static java.lang.Double.*;
 import static java.lang.Float.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
-import com.oracle.graal.amd64.*;
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.asm.*;
 import com.oracle.graal.asm.amd64.*;
-import com.oracle.graal.compiler.common.*;
+import com.oracle.graal.asm.amd64.AMD64Assembler.*;
 import com.oracle.graal.lir.*;
-import com.oracle.graal.lir.StandardOp.ImplicitNullCheck;
 import com.oracle.graal.lir.StandardOp.MoveOp;
 import com.oracle.graal.lir.StandardOp.NullCheck;
 import com.oracle.graal.lir.asm.*;
@@ -110,207 +110,119 @@ public class AMD64Move {
         }
     }
 
-    public abstract static class MemOp extends AMD64LIRInstruction implements ImplicitNullCheck {
-        public static final LIRInstructionClass<MemOp> TYPE = LIRInstructionClass.create(MemOp.class);
+    @Opcode("STACKMOVE")
+    public static final class AMD64StackMove extends AMD64LIRInstruction implements MoveOp {
+        public static final LIRInstructionClass<AMD64StackMove> TYPE = LIRInstructionClass.create(AMD64StackMove.class);
 
-        protected final Kind kind;
-        @Use({COMPOSITE}) protected AMD64AddressValue address;
-        @State protected LIRFrameState state;
+        @Def({STACK}) protected AllocatableValue result;
+        @Use({STACK, HINT}) protected Value input;
+        @Alive({OperandFlag.STACK, OperandFlag.UNINITIALIZED}) private StackSlotValue backupSlot;
 
-        public MemOp(LIRInstructionClass<? extends MemOp> c, Kind kind, AMD64AddressValue address, LIRFrameState state) {
-            super(c);
-            this.kind = kind;
-            this.address = address;
-            this.state = state;
+        private Register scratch;
+
+        public AMD64StackMove(AllocatableValue result, Value input, Register scratch, StackSlotValue backupSlot) {
+            super(TYPE);
+            this.result = result;
+            this.input = input;
+            this.backupSlot = backupSlot;
+            this.scratch = scratch;
         }
 
-        protected abstract void emitMemAccess(CompilationResultBuilder crb, AMD64MacroAssembler masm);
+        @Override
+        public Value getInput() {
+            return input;
+        }
+
+        @Override
+        public AllocatableValue getResult() {
+            return result;
+        }
+
+        public Register getScratchRegister() {
+            return scratch;
+        }
+
+        public StackSlotValue getBackupSlot() {
+            return backupSlot;
+        }
 
         @Override
         public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
-            if (state != null) {
-                crb.recordImplicitException(masm.position(), state);
-            }
-            emitMemAccess(crb, masm);
-        }
+            // backup scratch register
+            move(backupSlot.getKind(), crb, masm, backupSlot, scratch.asValue(backupSlot.getLIRKind()));
+            // move stack slot
+            move(getInput().getKind(), crb, masm, scratch.asValue(getInput().getLIRKind()), getInput());
+            move(getResult().getKind(), crb, masm, getResult(), scratch.asValue(getResult().getLIRKind()));
+            // restore scratch register
+            move(backupSlot.getKind(), crb, masm, scratch.asValue(backupSlot.getLIRKind()), backupSlot);
 
-        public boolean makeNullCheckFor(Value value, LIRFrameState nullCheckState, int implicitNullCheckLimit) {
-            if (state == null && value.equals(address.base) && address.index.equals(Value.ILLEGAL) && address.displacement >= 0 && address.displacement < implicitNullCheckLimit) {
-                state = nullCheckState;
-                return true;
-            }
-            return false;
         }
     }
 
-    public static final class LoadOp extends MemOp {
-        public static final LIRInstructionClass<LoadOp> TYPE = LIRInstructionClass.create(LoadOp.class);
+    @Opcode("MULTISTACKMOVE")
+    public static final class AMD64MultiStackMove extends AMD64LIRInstruction {
+        public static final LIRInstructionClass<AMD64MultiStackMove> TYPE = LIRInstructionClass.create(AMD64MultiStackMove.class);
 
-        @Def({REG}) protected AllocatableValue result;
+        @Def({STACK}) protected AllocatableValue[] results;
+        @Use({STACK}) protected Value[] inputs;
+        @Alive({OperandFlag.STACK, OperandFlag.UNINITIALIZED}) private StackSlotValue backupSlot;
 
-        public LoadOp(Kind kind, AllocatableValue result, AMD64AddressValue address, LIRFrameState state) {
-            super(TYPE, kind, address, state);
+        private Register scratch;
+
+        public AMD64MultiStackMove(AllocatableValue[] results, Value[] inputs, Register scratch, StackSlotValue backupSlot) {
+            super(TYPE);
+            this.results = results;
+            this.inputs = inputs;
+            this.backupSlot = backupSlot;
+            this.scratch = scratch;
+        }
+
+        @Override
+        public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
+            // backup scratch register
+            move(backupSlot.getKind(), crb, masm, backupSlot, scratch.asValue(backupSlot.getLIRKind()));
+            for (int i = 0; i < results.length; i++) {
+                Value input = inputs[i];
+                AllocatableValue result = results[i];
+                // move stack slot
+                move(input.getKind(), crb, masm, scratch.asValue(input.getLIRKind()), input);
+                move(result.getKind(), crb, masm, result, scratch.asValue(result.getLIRKind()));
+            }
+            // restore scratch register
+            move(backupSlot.getKind(), crb, masm, scratch.asValue(backupSlot.getLIRKind()), backupSlot);
+
+        }
+    }
+
+    @Opcode("STACKMOVE")
+    public static final class AMD64PushPopStackMove extends AMD64LIRInstruction implements MoveOp {
+        public static final LIRInstructionClass<AMD64PushPopStackMove> TYPE = LIRInstructionClass.create(AMD64PushPopStackMove.class);
+
+        @Def({STACK}) protected AllocatableValue result;
+        @Use({STACK, HINT}) protected Value input;
+        private final OperandSize size;
+
+        public AMD64PushPopStackMove(OperandSize size, AllocatableValue result, Value input) {
+            super(TYPE);
             this.result = result;
-        }
-
-        @Override
-        public void emitMemAccess(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
-            switch (kind) {
-                case Boolean:
-                    masm.movzbl(asRegister(result), address.toAddress());
-                    break;
-                case Byte:
-                    masm.movsbl(asRegister(result), address.toAddress());
-                    break;
-                case Char:
-                    masm.movzwl(asRegister(result), address.toAddress());
-                    break;
-                case Short:
-                    masm.movswl(asRegister(result), address.toAddress());
-                    break;
-                case Int:
-                    masm.movl(asRegister(result), address.toAddress());
-                    break;
-                case Long:
-                    masm.movq(asRegister(result), address.toAddress());
-                    break;
-                case Float:
-                    masm.movflt(asFloatReg(result), address.toAddress());
-                    break;
-                case Double:
-                    masm.movdbl(asDoubleReg(result), address.toAddress());
-                    break;
-                case Object:
-                    masm.movq(asRegister(result), address.toAddress());
-                    break;
-                default:
-                    throw GraalInternalError.shouldNotReachHere();
-            }
-        }
-    }
-
-    public static final class ZeroExtendLoadOp extends MemOp {
-        public static final LIRInstructionClass<ZeroExtendLoadOp> TYPE = LIRInstructionClass.create(ZeroExtendLoadOp.class);
-
-        @Def({REG}) protected AllocatableValue result;
-
-        public ZeroExtendLoadOp(Kind kind, AllocatableValue result, AMD64AddressValue address, LIRFrameState state) {
-            super(TYPE, kind, address, state);
-            this.result = result;
-        }
-
-        @Override
-        public void emitMemAccess(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
-            switch (kind) {
-                case Boolean:
-                case Byte:
-                    masm.movzbl(asRegister(result), address.toAddress());
-                    break;
-                case Char:
-                case Short:
-                    masm.movzwl(asRegister(result), address.toAddress());
-                    break;
-                case Int:
-                    masm.movl(asRegister(result), address.toAddress());
-                    break;
-                case Long:
-                    masm.movq(asRegister(result), address.toAddress());
-                    break;
-                default:
-                    throw GraalInternalError.shouldNotReachHere();
-            }
-        }
-    }
-
-    public static final class StoreOp extends MemOp {
-        public static final LIRInstructionClass<StoreOp> TYPE = LIRInstructionClass.create(StoreOp.class);
-
-        @Use({REG}) protected AllocatableValue input;
-
-        public StoreOp(Kind kind, AMD64AddressValue address, AllocatableValue input, LIRFrameState state) {
-            super(TYPE, kind, address, state);
             this.input = input;
+            this.size = size;
         }
 
         @Override
-        public void emitMemAccess(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
-            assert isRegister(input);
-            switch (kind) {
-                case Boolean:
-                case Byte:
-                    masm.movb(address.toAddress(), asRegister(input));
-                    break;
-                case Char:
-                case Short:
-                    masm.movw(address.toAddress(), asRegister(input));
-                    break;
-                case Int:
-                    masm.movl(address.toAddress(), asRegister(input));
-                    break;
-                case Long:
-                    masm.movq(address.toAddress(), asRegister(input));
-                    break;
-                case Float:
-                    masm.movflt(address.toAddress(), asFloatReg(input));
-                    break;
-                case Double:
-                    masm.movsd(address.toAddress(), asDoubleReg(input));
-                    break;
-                case Object:
-                    masm.movq(address.toAddress(), asRegister(input));
-                    break;
-                default:
-                    throw GraalInternalError.shouldNotReachHere();
-            }
-        }
-    }
-
-    public abstract static class StoreConstantOp extends MemOp {
-        public static final LIRInstructionClass<StoreConstantOp> TYPE = LIRInstructionClass.create(StoreConstantOp.class);
-
-        protected final JavaConstant input;
-
-        protected StoreConstantOp(LIRInstructionClass<? extends StoreConstantOp> c, Kind kind, AMD64AddressValue address, JavaConstant input, LIRFrameState state) {
-            super(c, kind, address, state);
-            this.input = input;
+        public Value getInput() {
+            return input;
         }
 
         @Override
-        public void emitMemAccess(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
-            switch (kind) {
-                case Boolean:
-                case Byte:
-                    masm.movb(address.toAddress(), input.asInt() & 0xFF);
-                    break;
-                case Char:
-                case Short:
-                    masm.movw(address.toAddress(), input.asInt() & 0xFFFF);
-                    break;
-                case Int:
-                    masm.movl(address.toAddress(), input.asInt());
-                    break;
-                case Long:
-                    if (NumUtil.isInt(input.asLong())) {
-                        masm.movslq(address.toAddress(), (int) input.asLong());
-                    } else {
-                        throw GraalInternalError.shouldNotReachHere("Cannot store 64-bit constants to memory");
-                    }
-                    break;
-                case Float:
-                    masm.movl(address.toAddress(), floatToRawIntBits(input.asFloat()));
-                    break;
-                case Double:
-                    throw GraalInternalError.shouldNotReachHere("Cannot store 64-bit constants to memory");
-                case Object:
-                    if (input.isNull()) {
-                        masm.movptr(address.toAddress(), 0);
-                    } else {
-                        throw GraalInternalError.shouldNotReachHere("Cannot store 64-bit constants to memory");
-                    }
-                    break;
-                default:
-                    throw GraalInternalError.shouldNotReachHere();
-            }
+        public AllocatableValue getResult() {
+            return result;
+        }
+
+        @Override
+        public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
+            AMD64MOp.PUSH.emit(masm, size, (AMD64Address) crb.asAddress(input));
+            AMD64MOp.POP.emit(masm, size, (AMD64Address) crb.asAddress(result));
         }
     }
 
@@ -388,23 +300,23 @@ public class AMD64Move {
     public static final class NullCheckOp extends AMD64LIRInstruction implements NullCheck {
         public static final LIRInstructionClass<NullCheckOp> TYPE = LIRInstructionClass.create(NullCheckOp.class);
 
-        @Use({REG}) protected AllocatableValue input;
+        @Use({COMPOSITE}) protected AMD64AddressValue address;
         @State protected LIRFrameState state;
 
-        public NullCheckOp(Variable input, LIRFrameState state) {
+        public NullCheckOp(AMD64AddressValue address, LIRFrameState state) {
             super(TYPE);
-            this.input = input;
+            this.address = address;
             this.state = state;
         }
 
         @Override
         public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
             crb.recordImplicitException(masm.position(), state);
-            masm.nullCheck(asRegister(input));
+            masm.nullCheck(address.toAddress());
         }
 
         public Value getCheckedValue() {
-            return input;
+            return address.base;
         }
 
         public LIRFrameState getState() {
@@ -448,7 +360,7 @@ public class AMD64Move {
                     masm.cmpxchgq(asRegister(newValue), address.toAddress());
                     break;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     }
@@ -485,7 +397,7 @@ public class AMD64Move {
                     masm.xaddq(address.toAddress(), asRegister(result));
                     break;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     }
@@ -520,7 +432,7 @@ public class AMD64Move {
                     masm.xchgq(asRegister(result), address.toAddress());
                     break;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     }
@@ -536,13 +448,13 @@ public class AMD64Move {
             } else if (isStackSlot(result)) {
                 reg2stack(moveKind, crb, masm, result, input);
             } else {
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
             }
         } else if (isStackSlot(input)) {
             if (isRegister(result)) {
                 stack2reg(moveKind, crb, masm, result, input);
             } else {
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
             }
         } else if (isConstant(input)) {
             if (isRegister(result)) {
@@ -550,10 +462,10 @@ public class AMD64Move {
             } else if (isStackSlot(result)) {
                 const2stack(crb, masm, result, (JavaConstant) input);
             } else {
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
             }
         } else {
-            throw GraalInternalError.shouldNotReachHere();
+            throw JVMCIError.shouldNotReachHere();
         }
     }
 
@@ -578,7 +490,7 @@ public class AMD64Move {
                 masm.movq(asRegister(result), asRegister(input));
                 break;
             default:
-                throw GraalInternalError.shouldNotReachHere("kind=" + result.getKind());
+                throw JVMCIError.shouldNotReachHere("kind=" + result.getKind());
         }
     }
 
@@ -609,7 +521,7 @@ public class AMD64Move {
                 masm.movq(dest, asRegister(input));
                 break;
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 
@@ -644,7 +556,7 @@ public class AMD64Move {
                 masm.movq(asRegister(result), src);
                 break;
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 
@@ -721,35 +633,62 @@ public class AMD64Move {
                 }
                 break;
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 
     private static void const2stack(CompilationResultBuilder crb, AMD64MacroAssembler masm, Value result, JavaConstant input) {
         assert !crb.codeCache.needsDataPatch(input);
         AMD64Address dest = (AMD64Address) crb.asAddress(result);
+        final long imm;
         switch (input.getKind().getStackKind()) {
             case Int:
-                masm.movl(dest, input.asInt());
+                imm = input.asInt();
                 break;
             case Long:
-                masm.movlong(dest, input.asLong());
+                imm = input.asLong();
                 break;
             case Float:
-                masm.movl(dest, floatToRawIntBits(input.asFloat()));
+                imm = floatToRawIntBits(input.asFloat());
                 break;
             case Double:
-                masm.movlong(dest, doubleToRawLongBits(input.asDouble()));
+                imm = doubleToRawLongBits(input.asDouble());
                 break;
             case Object:
                 if (input.isNull()) {
-                    masm.movlong(dest, 0L);
+                    imm = 0;
                 } else {
-                    throw GraalInternalError.shouldNotReachHere("Non-null object constants must be in register");
+                    throw JVMCIError.shouldNotReachHere("Non-null object constants must be in register");
                 }
                 break;
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
+        }
+        switch (result.getKind()) {
+            case Byte:
+                assert NumUtil.isByte(imm) : "Is not in byte range: " + imm;
+                AMD64MIOp.MOVB.emit(masm, OperandSize.BYTE, dest, (int) imm);
+                break;
+            case Short:
+                assert NumUtil.isShort(imm) : "Is not in short range: " + imm;
+                AMD64MIOp.MOV.emit(masm, OperandSize.WORD, dest, (int) imm);
+                break;
+            case Char:
+                assert NumUtil.isUShort(imm) : "Is not in char range: " + imm;
+                AMD64MIOp.MOV.emit(masm, OperandSize.WORD, dest, (int) imm);
+                break;
+            case Int:
+            case Float:
+                assert NumUtil.isInt(imm) : "Is not in int range: " + imm;
+                masm.movl(dest, (int) imm);
+                break;
+            case Long:
+            case Double:
+            case Object:
+                masm.movlong(dest, imm);
+                break;
+            default:
+                throw JVMCIError.shouldNotReachHere("Unknown result Kind: " + result.getKind());
         }
     }
 }

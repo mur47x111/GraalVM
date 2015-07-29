@@ -24,10 +24,12 @@ package com.oracle.graal.nodes.extended;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
+import com.oracle.graal.graph.spi.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 
@@ -155,8 +157,33 @@ public abstract class SwitchNode extends ControlSplitNode {
      */
     public AbstractBeginNode defaultSuccessor() {
         if (defaultSuccessorIndex() == -1) {
-            throw new GraalInternalError("unexpected");
+            throw new JVMCIError("unexpected");
         }
         return successors.get(defaultSuccessorIndex());
+    }
+
+    @Override
+    public AbstractBeginNode getPrimarySuccessor() {
+        return this.defaultSuccessor();
+    }
+
+    /**
+     * Delete all other successors except for the one reached by {@code survivingEdge}.
+     *
+     * @param tool
+     * @param survivingEdge index of the edge in the {@link SwitchNode#successors} list
+     */
+    protected void killOtherSuccessors(SimplifierTool tool, int survivingEdge) {
+        for (Node successor : successors()) {
+            /*
+             * Deleting a branch change change the successors so reload the surviving successor each
+             * time.
+             */
+            if (successor != blockSuccessor(survivingEdge)) {
+                tool.deleteBranch(successor);
+            }
+        }
+        tool.addToWorkList(blockSuccessor(survivingEdge));
+        graph().removeSplit(this, blockSuccessor(survivingEdge));
     }
 }

@@ -24,13 +24,14 @@ package com.oracle.graal.nodes;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.api.meta.JavaTypeProfile.ProfiledType;
-import com.oracle.graal.api.meta.ProfilingInfo.TriState;
+import jdk.internal.jvmci.common.*;
+import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.meta.JavaTypeProfile.*;
+
 import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.type.*;
-import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.iterators.*;
 import com.oracle.graal.graph.spi.*;
@@ -141,6 +142,15 @@ public final class IfNode extends ControlSplitNode implements Simplifiable, LIRL
         return super.verify();
     }
 
+    public void eliminateNegation() {
+        AbstractBeginNode oldTrueSuccessor = trueSuccessor;
+        AbstractBeginNode oldFalseSuccessor = falseSuccessor;
+        trueSuccessor = oldFalseSuccessor;
+        falseSuccessor = oldTrueSuccessor;
+        trueSuccessorProbability = 1 - trueSuccessorProbability;
+        setCondition(((LogicNegationNode) condition).getValue());
+    }
+
     @Override
     public void simplify(SimplifierTool tool) {
         if (trueSuccessor().next() instanceof DeoptimizeNode) {
@@ -156,15 +166,7 @@ public final class IfNode extends ControlSplitNode implements Simplifiable, LIRL
         }
 
         if (condition() instanceof LogicNegationNode) {
-            AbstractBeginNode trueSucc = trueSuccessor();
-            AbstractBeginNode falseSucc = falseSuccessor();
-            setTrueSuccessor(null);
-            setFalseSuccessor(null);
-            LogicNegationNode negation = (LogicNegationNode) condition();
-            IfNode newIfNode = graph().add(new IfNode(negation.getValue(), falseSucc, trueSucc, 1 - trueSuccessorProbability));
-            predecessor().replaceFirstSuccessor(this, newIfNode);
-            GraphUtil.killWithUnusedFloatingInputs(this);
-            return;
+            eliminateNegation();
         }
         if (condition() instanceof LogicConstantNode) {
             LogicConstantNode c = (LogicConstantNode) condition();
@@ -179,7 +181,7 @@ public final class IfNode extends ControlSplitNode implements Simplifiable, LIRL
             }
             return;
         }
-        if (trueSuccessor().hasNoUsages() && falseSuccessor().hasNoUsages()) {
+        if (tool.allUsagesAvailable() && trueSuccessor().hasNoUsages() && falseSuccessor().hasNoUsages()) {
 
             pushNodesThroughIf(tool);
 
@@ -305,7 +307,7 @@ public final class IfNode extends ControlSplitNode implements Simplifiable, LIRL
                          */
                         JavaConstant positive = lessThan2.getX().asJavaConstant();
                         if (positive != null && positive.asLong() > 0 && positive.asLong() < positive.getKind().getMaxValue()) {
-                            ConstantNode newLimit = ConstantNode.forIntegerKind(positive.getKind(), positive.asLong() + 1, graph());
+                            ConstantNode newLimit = ConstantNode.forIntegerStamp(lessThan2.getX().stamp(), positive.asLong() + 1, graph());
                             below = graph().unique(new IntegerBelowNode(lessThan.getX(), newLimit));
                         }
                     }
@@ -340,7 +342,12 @@ public final class IfNode extends ControlSplitNode implements Simplifiable, LIRL
             EndNode end1 = (EndNode) next1;
             EndNode end2 = (EndNode) next2;
             if (end1.merge() == end2.merge()) {
-                // They go to the same MergeNode
+                for (PhiNode phi : end1.merge().phis()) {
+                    if (phi.valueAt(end1) != phi.valueAt(end2)) {
+                        return false;
+                    }
+                }
+                // They go to the same MergeNode and merge the same values
                 return true;
             }
         } else if (next1 instanceof DeoptimizeNode && next2 instanceof DeoptimizeNode) {
@@ -782,12 +789,22 @@ public final class IfNode extends ControlSplitNode implements Simplifiable, LIRL
                 }
             }
         }
+        transferProxies(trueSuccessor(), trueMerge);
+        transferProxies(falseSuccessor(), falseMerge);
 
         cleanupMerge(tool, merge);
         cleanupMerge(tool, trueMerge);
         cleanupMerge(tool, falseMerge);
 
         return true;
+    }
+
+    private static void transferProxies(AbstractBeginNode successor, MergeNode falseMerge) {
+        if (falseMerge != null) {
+            for (ProxyNode proxy : successor.proxies().snapshot()) {
+                proxy.replaceFirstInput(successor, falseMerge);
+            }
+        }
     }
 
     private void cleanupMerge(SimplifierTool tool, MergeNode merge) {
@@ -1005,7 +1022,7 @@ public final class IfNode extends ControlSplitNode implements Simplifiable, LIRL
                         return;
                     }
                 } else {
-                    throw new GraalInternalError("Illegal state");
+                    throw new JVMCIError("Illegal state");
                 }
             } else if (node instanceof AbstractMergeNode && !(node instanceof LoopBeginNode)) {
                 for (AbstractEndNode endNode : ((AbstractMergeNode) node).cfgPredecessors()) {
@@ -1127,5 +1144,14 @@ public final class IfNode extends ControlSplitNode implements Simplifiable, LIRL
         }
 
         return null;
+    }
+
+    @Override
+    public AbstractBeginNode getPrimarySuccessor() {
+        return this.trueSuccessor();
+    }
+
+    public AbstractBeginNode getSuccessor(boolean result) {
+        return result ? this.trueSuccessor() : this.falseSuccessor();
     }
 }

@@ -22,6 +22,8 @@
  */
 package com.oracle.graal.api.directives;
 
+// JaCoCo Exclude
+
 /**
  * Directives that influence the compilation of methods by Graal. They don't influence the semantics
  * of the code, but they are useful for unit testing and benchmarking.
@@ -273,5 +275,25 @@ public final class GraalDirectives {
      */
     public static <T> T opaque(T value) {
         return value;
+    }
+
+    public static <T> T guardingNonNull(T value) {
+        if (value == null) {
+            deoptimize();
+        }
+        return value;
+    }
+
+    /**
+     * Ensures that the given object will be virtual (escape analyzed) at all points that are
+     * dominated by the current position.
+     */
+    public static void ensureVirtualized(@SuppressWarnings("unused") Object object) {
+    }
+
+    /**
+     * Ensures that the given object will be virtual at the current position.
+     */
+    public static void ensureVirtualizedHere(@SuppressWarnings("unused") Object object) {
     }
 }

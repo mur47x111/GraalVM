@@ -24,11 +24,11 @@ package com.oracle.graal.nodes;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
-import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.iterators.*;
 import com.oracle.graal.nodeinfo.*;
@@ -38,11 +38,10 @@ import com.oracle.graal.nodes.spi.*;
 /**
  * The {@code ConstantNode} represents a {@link Constant constant}.
  */
-@NodeInfo(shortName = "Const", nameTemplate = "Const({p#rawvalue})")
+@NodeInfo(nameTemplate = "C({p#rawvalue})")
 public final class ConstantNode extends FloatingNode implements LIRLowerable {
 
     public static final NodeClass<ConstantNode> TYPE = NodeClass.create(ConstantNode.class);
-    private static final DebugMetric ConstantNodes = Debug.metric("ConstantNodes");
 
     protected final Constant value;
 
@@ -60,7 +59,6 @@ public final class ConstantNode extends FloatingNode implements LIRLowerable {
         super(TYPE, stamp);
         assert stamp != null && isCompatible(value, stamp);
         this.value = value;
-        ConstantNodes.increment();
     }
 
     private static boolean isCompatible(Constant value, Stamp stamp) {
@@ -394,7 +392,7 @@ public final class ConstantNode extends FloatingNode implements LIRLowerable {
             case Long:
                 return ConstantNode.forLong(value, graph);
             default:
-                throw GraalInternalError.shouldNotReachHere("unknown kind " + kind);
+                throw JVMCIError.shouldNotReachHere("unknown kind " + kind);
         }
     }
 
@@ -407,7 +405,7 @@ public final class ConstantNode extends FloatingNode implements LIRLowerable {
             case Long:
                 return createPrimitive(JavaConstant.forLong(value));
             default:
-                throw GraalInternalError.shouldNotReachHere("unknown kind " + kind);
+                throw JVMCIError.shouldNotReachHere("unknown kind " + kind);
         }
     }
 
@@ -418,7 +416,7 @@ public final class ConstantNode extends FloatingNode implements LIRLowerable {
             case Double:
                 return ConstantNode.forDouble(value, graph);
             default:
-                throw GraalInternalError.shouldNotReachHere("unknown kind " + kind);
+                throw JVMCIError.shouldNotReachHere("unknown kind " + kind);
         }
     }
 
@@ -429,7 +427,7 @@ public final class ConstantNode extends FloatingNode implements LIRLowerable {
             case Double:
                 return ConstantNode.forDouble(value);
             default:
-                throw GraalInternalError.shouldNotReachHere("unknown kind " + kind);
+                throw JVMCIError.shouldNotReachHere("unknown kind " + kind);
         }
     }
 

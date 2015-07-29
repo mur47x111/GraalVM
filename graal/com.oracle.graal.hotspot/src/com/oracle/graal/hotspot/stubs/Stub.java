@@ -27,19 +27,22 @@ import static com.oracle.graal.hotspot.HotSpotGraalRuntime.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.compiler.target.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
 import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
+import com.oracle.graal.debug.Debug.*;
 import com.oracle.graal.debug.internal.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.compiler.target.*;
 import com.oracle.graal.hotspot.*;
-import com.oracle.graal.hotspot.bridge.CompilerToVM.CodeInstallResult;
 import com.oracle.graal.hotspot.meta.*;
 import com.oracle.graal.hotspot.nodes.*;
 import com.oracle.graal.lir.asm.*;
 import com.oracle.graal.lir.phases.*;
+import com.oracle.graal.lir.phases.PostAllocationOptimizationPhase.PostAllocationOptimizationContext;
+import com.oracle.graal.lir.profiling.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.schedule.*;
@@ -178,9 +181,8 @@ public abstract class Stub {
                 try (Scope s0 = Debug.scope("StubCompilation", graph, providers.getCodeCache())) {
                     Suites defaultSuites = providers.getSuites().getDefaultSuites();
                     Suites suites = new Suites(new PhaseSuite<>(), defaultSuites.getMidTier(), defaultSuites.getLowTier());
-                    SchedulePhase schedule = emitFrontEnd(providers, target, graph, null, providers.getSuites().getDefaultGraphBuilderSuite(), OptimisticOptimizations.ALL, getProfilingInfo(graph),
-                                    null, suites);
-                    LIRSuites lirSuites = providers.getSuites().getDefaultLIRSuites();
+                    SchedulePhase schedule = emitFrontEnd(providers, target, graph, providers.getSuites().getDefaultGraphBuilderSuite(), OptimisticOptimizations.ALL, getProfilingInfo(graph), suites);
+                    LIRSuites lirSuites = createLIRSuites();
                     emitBackEnd(graph, Stub.this, incomingCc, getInstalledCodeOwner(), backend, target, compResult, CompilationResultBuilderFactory.Default, schedule, getRegisterConfig(), lirSuites);
                 } catch (Throwable e) {
                     throw Debug.handle(e);
@@ -190,11 +192,13 @@ public abstract class Stub {
                 try (Scope s = Debug.scope("CodeInstall")) {
                     Stub stub = Stub.this;
                     HotSpotRuntimeStub installedCode = new HotSpotRuntimeStub(stub);
-                    HotSpotCompiledCode hsCompResult = new HotSpotCompiledRuntimeStub(stub, compResult);
+                    HotSpotCompiledCode hsCompResult = new HotSpotCompiledRuntimeStub(compResult);
 
-                    CodeInstallResult result = runtime().getCompilerToVM().installCode(hsCompResult, installedCode, null);
-                    if (result != CodeInstallResult.OK) {
-                        throw new GraalInternalError("Error installing stub %s: %s", Stub.this, result);
+                    HotSpotGraalRuntime runtime = runtime();
+                    int result = runtime.getCompilerToVM().installCode(hsCompResult, installedCode, null);
+                    HotSpotVMConfig config = runtime.getConfig();
+                    if (result != config.codeInstallResultOk) {
+                        throw new JVMCIError("Error installing stub %s: %s", Stub.this, config.getCodeInstallResultDescription(result));
                     }
                     ((HotSpotCodeCacheProvider) codeCache).logOrDump(installedCode, compResult);
                     code = installedCode;
@@ -208,6 +212,15 @@ public abstract class Stub {
         }
 
         return code;
+    }
+
+    private LIRSuites createLIRSuites() {
+        LIRSuites lirSuites = new LIRSuites(providers.getSuites().getDefaultLIRSuites());
+        ListIterator<LIRPhase<PostAllocationOptimizationContext>> moveProfiling = lirSuites.getPostAllocationOptimizationStage().findPhase(MoveProfiling.class);
+        if (moveProfiling != null) {
+            moveProfiling.remove();
+        }
+        return lirSuites;
     }
 
     /**

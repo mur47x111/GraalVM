@@ -22,8 +22,10 @@
  */
 package com.oracle.graal.nodes.extended;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.meta.Assumptions.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -54,7 +56,9 @@ public final class LoadMethodNode extends FixedWithNextNode implements Lowerable
         this.method = method;
         assert method.isConcrete() : "Cannot load abstract method from a hub";
         assert method.hasReceiver() : "Cannot load a static method from a hub";
-        assert method.isInVirtualMethodTable(receiverType);
+        if (!method.isInVirtualMethodTable(receiverType)) {
+            throw new JVMCIError("%s does not have a vtable entry in type %s", method, receiverType);
+        }
     }
 
     @Override
@@ -72,10 +76,10 @@ public final class LoadMethodNode extends FixedWithNextNode implements Lowerable
             }
             Assumptions assumptions = graph().getAssumptions();
             if (type != null && assumptions != null) {
-                ResolvedJavaMethod resolvedMethod = type.findUniqueConcreteMethod(method);
+                AssumptionResult<ResolvedJavaMethod> resolvedMethod = type.findUniqueConcreteMethod(method);
                 if (resolvedMethod != null && !type.isInterface() && method.getDeclaringClass().isAssignableFrom(type)) {
-                    assumptions.recordConcreteMethod(method, type, resolvedMethod);
-                    return ConstantNode.forConstant(stamp(), resolvedMethod.getEncoding(), tool.getMetaAccess());
+                    assumptions.record(resolvedMethod);
+                    return ConstantNode.forConstant(stamp(), resolvedMethod.getResult().getEncoding(), tool.getMetaAccess());
                 }
             }
         }
@@ -101,7 +105,7 @@ public final class LoadMethodNode extends FixedWithNextNode implements Lowerable
              * This really represent a misuse of LoadMethod since we're loading from a class which
              * isn't known to implement the original method but for now at least fold it away.
              */
-            return ConstantNode.forConstant(JavaConstant.NULL_POINTER, null);
+            return ConstantNode.forConstant(stamp(), JavaConstant.NULL_POINTER, null);
         } else {
             return ConstantNode.forConstant(stamp(), newMethod.getEncoding(), tool.getMetaAccess());
         }

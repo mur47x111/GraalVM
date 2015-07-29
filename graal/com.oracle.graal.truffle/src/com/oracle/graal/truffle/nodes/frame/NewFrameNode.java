@@ -24,10 +24,11 @@ package com.oracle.graal.truffle.nodes.frame;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.api.runtime.*;
-import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -134,7 +135,7 @@ public final class NewFrameNode extends FixedWithNextNode implements IterableNod
             escapeReason = "Must not let virtual frame object escape at node " + fixed + ".";
         }
 
-        Throwable exception = new GraalInternalError(escapeReason +
+        Throwable exception = new JVMCIError(escapeReason +
                         " Insert a call to VirtualFrame.materialize() to convert the instance to a materialized frame object (source position of following stack trace is approximate)");
         throw GraphUtil.approxSourceException(fixed, exception);
     }
@@ -181,12 +182,12 @@ public final class NewFrameNode extends FixedWithNextNode implements IterableNod
             graph().getAssumptions().record(new AssumptionValidAssumption((OptimizedAssumption) frameDescriptor.getVersion()));
         }
 
-        tool.createVirtualObject(virtualFrameObjectArray, objectArrayEntryState, Collections.<MonitorIdNode> emptyList());
+        tool.createVirtualObject(virtualFrameObjectArray, objectArrayEntryState, Collections.<MonitorIdNode> emptyList(), false);
         if (virtualFramePrimitiveArray != null) {
-            tool.createVirtualObject(virtualFramePrimitiveArray, primitiveArrayEntryState, Collections.<MonitorIdNode> emptyList());
+            tool.createVirtualObject(virtualFramePrimitiveArray, primitiveArrayEntryState, Collections.<MonitorIdNode> emptyList(), false);
         }
         if (virtualFrameTagArray != null) {
-            tool.createVirtualObject(virtualFrameTagArray, tagArrayEntryState, Collections.<MonitorIdNode> emptyList());
+            tool.createVirtualObject(virtualFrameTagArray, tagArrayEntryState, Collections.<MonitorIdNode> emptyList(), false);
         }
 
         assert frameFields.length == 5 || frameFields.length == 3;
@@ -201,7 +202,7 @@ public final class NewFrameNode extends FixedWithNextNode implements IterableNod
         if (tagsField != null) {
             frameEntryState[frameFieldList.indexOf(tagsField)] = virtualFrameTagArray;
         }
-        tool.createVirtualObject(virtualFrame, frameEntryState, Collections.<MonitorIdNode> emptyList());
+        tool.createVirtualObject(virtualFrame, frameEntryState, Collections.<MonitorIdNode> emptyList(), false);
         tool.replaceWithVirtual(virtualFrame);
     }
 
@@ -236,7 +237,7 @@ public final class NewFrameNode extends FixedWithNextNode implements IterableNod
 
     @Override
     public Node canonical(CanonicalizerTool tool) {
-        if (hasNoUsages()) {
+        if (tool.allUsagesAvailable() && hasNoUsages()) {
             return null;
         } else {
             return this;

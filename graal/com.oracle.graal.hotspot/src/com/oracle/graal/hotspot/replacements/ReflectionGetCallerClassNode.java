@@ -22,14 +22,14 @@
  */
 package com.oracle.graal.hotspot.replacements;
 
-import static com.oracle.graal.compiler.GraalCompiler.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
-import com.oracle.graal.hotspot.meta.*;
 import com.oracle.graal.nodeinfo.*;
+import com.oracle.graal.nodes.CallTargetNode.InvokeKind;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.replacements.nodes.*;
@@ -39,8 +39,8 @@ public final class ReflectionGetCallerClassNode extends MacroStateSplitNode impl
 
     public static final NodeClass<ReflectionGetCallerClassNode> TYPE = NodeClass.create(ReflectionGetCallerClassNode.class);
 
-    public ReflectionGetCallerClassNode(Invoke invoke) {
-        super(TYPE, invoke);
+    public ReflectionGetCallerClassNode(InvokeKind invokeKind, ResolvedJavaMethod targetMethod, int bci, JavaType returnType, ValueNode... arguments) {
+        super(TYPE, invokeKind, targetMethod, bci, returnType, arguments);
     }
 
     @Override
@@ -73,10 +73,6 @@ public final class ReflectionGetCallerClassNode extends MacroStateSplitNode impl
      * @return ConstantNode of the caller class, or null
      */
     private ConstantNode getCallerClassNode(MetaAccessProvider metaAccess) {
-        if (!shouldIntrinsify(getTargetMethod())) {
-            return null;
-        }
-
         // Walk back up the frame states to find the caller at the required depth.
         FrameState state = stateAfter();
 
@@ -87,7 +83,7 @@ public final class ReflectionGetCallerClassNode extends MacroStateSplitNode impl
             HotSpotResolvedJavaMethod method = (HotSpotResolvedJavaMethod) state.method();
             switch (n) {
                 case 0:
-                    throw GraalInternalError.shouldNotReachHere("current frame state does not include the Reflection.getCallerClass frame");
+                    throw JVMCIError.shouldNotReachHere("current frame state does not include the Reflection.getCallerClass frame");
                 case 1:
                     // Frame 0 and 1 must be caller sensitive (see JVM_GetCallerClass).
                     if (!method.isCallerSensitive()) {

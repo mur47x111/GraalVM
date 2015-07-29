@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,30 +22,32 @@
  */
 package com.oracle.graal.hotspot.sparc;
 
-import static com.oracle.graal.api.code.CallingConvention.Type.*;
-import static com.oracle.graal.api.code.ValueUtil.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.Annul.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.BranchPredict.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.CC.*;
+import static com.oracle.graal.asm.sparc.SPARCAssembler.ConditionFlag.*;
 import static com.oracle.graal.compiler.common.GraalOptions.*;
-import static com.oracle.graal.compiler.common.UnsafeAccess.*;
-import static com.oracle.graal.sparc.SPARC.*;
+import static jdk.internal.jvmci.code.CallingConvention.Type.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import static jdk.internal.jvmci.common.UnsafeAccess.*;
+import static jdk.internal.jvmci.sparc.SPARC.*;
 
 import java.util.*;
+import java.util.concurrent.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.code.DataSection.Data;
+import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.asm.*;
 import com.oracle.graal.asm.sparc.*;
-import com.oracle.graal.asm.sparc.SPARCAssembler.Bpne;
-import com.oracle.graal.asm.sparc.SPARCAssembler.CC;
-import com.oracle.graal.asm.sparc.SPARCAssembler.Ldx;
-import com.oracle.graal.asm.sparc.SPARCAssembler.Save;
-import com.oracle.graal.asm.sparc.SPARCAssembler.Stx;
-import com.oracle.graal.asm.sparc.SPARCMacroAssembler.Cmp;
-import com.oracle.graal.asm.sparc.SPARCMacroAssembler.Nop;
-import com.oracle.graal.asm.sparc.SPARCMacroAssembler.RestoreWindow;
+import com.oracle.graal.asm.sparc.SPARCMacroAssembler.ScratchRegister;
 import com.oracle.graal.asm.sparc.SPARCMacroAssembler.Setx;
+import com.oracle.graal.compiler.common.alloc.*;
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.hotspot.*;
-import com.oracle.graal.hotspot.meta.HotSpotCodeCacheProvider.MarkId;
 import com.oracle.graal.hotspot.meta.*;
 import com.oracle.graal.hotspot.stubs.*;
 import com.oracle.graal.lir.*;
@@ -54,17 +56,36 @@ import com.oracle.graal.lir.asm.*;
 import com.oracle.graal.lir.framemap.*;
 import com.oracle.graal.lir.gen.*;
 import com.oracle.graal.lir.sparc.*;
+import com.oracle.graal.lir.sparc.SPARCLIRInstruction.SizeEstimate;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.spi.*;
-import com.oracle.graal.sparc.*;
 
 /**
  * HotSpot SPARC specific backend.
  */
 public class SPARCHotSpotBackend extends HotSpotHostBackend {
 
+    private static final SizeEstimateStatistics CONSTANT_ESTIMATED_STATS = new SizeEstimateStatistics("ESTIMATE");
+    private static final SizeEstimateStatistics CONSTANT_ACTUAL_STATS = new SizeEstimateStatistics("ACTUAL");
+
     public SPARCHotSpotBackend(HotSpotGraalRuntimeProvider runtime, HotSpotProviders providers) {
         super(runtime, providers);
+    }
+
+    private static class SizeEstimateStatistics {
+        private static final ConcurrentHashMap<String, DebugMetric> metrics = new ConcurrentHashMap<>();
+        private final String suffix;
+
+        public SizeEstimateStatistics(String suffix) {
+            super();
+            this.suffix = suffix;
+        }
+
+        public void add(Class<?> c, int count) {
+            String name = SizeEstimateStatistics.class.getSimpleName() + "_" + c.getSimpleName() + "." + suffix;
+            DebugMetric m = metrics.computeIfAbsent(name, (n) -> Debug.metric(n));
+            m.add(count);
+        }
     }
 
     @Override
@@ -75,7 +96,7 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
 
     @Override
     public FrameMap newFrameMap(RegisterConfig registerConfig) {
-        return new SPARCFrameMap(getCodeCache(), registerConfig);
+        return new SPARCFrameMap(getCodeCache(), registerConfig, this);
     }
 
     @Override
@@ -84,8 +105,8 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
     }
 
     @Override
-    public LIRGenerationResult newLIRGenerationResult(LIR lir, FrameMapBuilder frameMapBuilder, ResolvedJavaMethod method, Object stub) {
-        return new SPARCHotSpotLIRGenerationResult(lir, frameMapBuilder, stub);
+    public LIRGenerationResult newLIRGenerationResult(String compilationUnitName, LIR lir, FrameMapBuilder frameMapBuilder, ResolvedJavaMethod method, Object stub) {
+        return new SPARCHotSpotLIRGenerationResult(compilationUnitName, lir, frameMapBuilder, stub);
     }
 
     @Override
@@ -115,12 +136,13 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
                     // Use SPARCAddress to get the final displacement including the stack bias.
                     SPARCAddress address = new SPARCAddress(sp, -disp);
                     if (SPARCAssembler.isSimm13(address.getDisplacement())) {
-                        new Stx(g0, address).emit(masm);
+                        masm.stx(g0, address);
                     } else {
-                        try (SPARCScratchRegister sc = SPARCScratchRegister.get()) {
+                        try (ScratchRegister sc = masm.getScratchRegister()) {
                             Register scratch = sc.getRegister();
+                            assert afterFrameInit || isGlobalRegister(scratch) : "Only global (g1-g7) registers are allowed if the frame was not initialized here. Got register " + scratch;
                             new Setx(address.getDisplacement(), scratch).emit(masm);
-                            new Stx(g0, new SPARCAddress(sp, scratch)).emit(masm);
+                            masm.stx(g0, new SPARCAddress(sp, scratch));
                         }
                     }
                 }
@@ -150,12 +172,13 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
             }
 
             if (SPARCAssembler.isSimm13(stackpoinerChange)) {
-                new Save(sp, stackpoinerChange, sp).emit(masm);
+                masm.save(sp, stackpoinerChange, sp);
             } else {
-                try (SPARCScratchRegister sc = SPARCScratchRegister.get()) {
+                try (ScratchRegister sc = masm.getScratchRegister()) {
                     Register scratch = sc.getRegister();
+                    assert isGlobalRegister(scratch) : "Only global registers are allowed before save. Got register " + scratch;
                     new Setx(stackpoinerChange, scratch).emit(masm);
-                    new Save(sp, scratch, sp).emit(masm);
+                    masm.save(sp, scratch, sp);
                 }
             }
 
@@ -163,7 +186,7 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
                 final int slotSize = 8;
                 for (int i = 0; i < frameSize / slotSize; ++i) {
                     // 0xC1C1C1C1
-                    new Stx(g0, new SPARCAddress(sp, i * slotSize)).emit(masm);
+                    masm.stx(g0, new SPARCAddress(sp, i * slotSize));
                 }
             }
         }
@@ -171,7 +194,7 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
         @Override
         public void leave(CompilationResultBuilder crb) {
             SPARCMacroAssembler masm = (SPARCMacroAssembler) crb.asm;
-            new RestoreWindow().emit(masm);
+            masm.restoreWindow();
         }
     }
 
@@ -203,19 +226,72 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
             Map<LIRFrameState, SaveRegistersOp> calleeSaveInfo = gen.getCalleeSaveInfo();
             updateStub(stub, definedRegisters, calleeSaveInfo, frameMap);
         }
-
+        assert registerSizePredictionValidator(crb);
         return crb;
+    }
+
+    /**
+     * Registers a verifier which checks if the LIRInstructions estimate of constants size is
+     * greater or equal to the actual one.
+     */
+    private static boolean registerSizePredictionValidator(final CompilationResultBuilder crb) {
+        /**
+         * Used to hold state between beforeOp and afterOp
+         */
+        class ValidationState {
+            LIRInstruction op;
+            int constantSizeBefore;
+
+            public void before(LIRInstruction before) {
+                assert op == null : "LIRInstruction " + op + " no after call received";
+                op = before;
+                constantSizeBefore = calculateDataSectionSize(crb.compilationResult.getDataSection());
+            }
+
+            public void after(LIRInstruction after) {
+                assert after.equals(op) : "Instructions before/after don't match " + op + "/" + after;
+                int constantSizeAfter = calculateDataSectionSize(crb.compilationResult.getDataSection());
+                int actual = constantSizeAfter - constantSizeBefore;
+                if (op instanceof SPARCLIRInstruction) {
+                    SizeEstimate size = ((SPARCLIRInstruction) op).estimateSize();
+                    assert size != null : "No size prediction available for op: " + op;
+                    Class<?> c = op.getClass();
+                    CONSTANT_ESTIMATED_STATS.add(c, size.constantSize);
+                    CONSTANT_ACTUAL_STATS.add(c, actual);
+                    assert size.constantSize >= actual : "Op " + op + " exceeded estimated constant size; predicted: " + size.constantSize + " actual: " + actual;
+                } else {
+                    assert actual == 0 : "Op " + op + " emitted to DataSection without any estimate.";
+                }
+                op = null;
+                constantSizeBefore = 0;
+            }
+        }
+        final ValidationState state = new ValidationState();
+        crb.setOpCallback(op -> state.before(op), op -> state.after(op));
+        return true;
+    }
+
+    private static int calculateDataSectionSize(DataSection ds) {
+        int sum = 0;
+        for (Data d : ds) {
+            sum += d.getSize();
+        }
+        return sum;
     }
 
     @Override
     public void emitCode(CompilationResultBuilder crb, LIR lir, ResolvedJavaMethod installedCodeOwner) {
-        stuffDelayedControlTransfers(lir);
         SPARCMacroAssembler masm = (SPARCMacroAssembler) crb.asm;
+        // TODO: (sa) Fold the two traversals into one
+        stuffDelayedControlTransfers(lir);
+        int constantSize = calculateConstantSize(lir);
+        boolean canUseImmediateConstantLoad = constantSize < (1 << 13);
+        masm.setImmediateConstantLoad(canUseImmediateConstantLoad);
         FrameMap frameMap = crb.frameMap;
         RegisterConfig regConfig = frameMap.getRegisterConfig();
         HotSpotVMConfig config = getRuntime().getConfig();
         Label unverifiedStub = installedCodeOwner == null || installedCodeOwner.isStatic() ? null : new Label();
-
+        boolean hasUnsafeAccess = crb.compilationResult.hasUnsafeAccess();
         int i = 0;
         do {
             if (i > 0) {
@@ -226,38 +302,41 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
 
             // Emit the prefix
             if (unverifiedStub != null) {
-                MarkId.recordMark(crb, MarkId.UNVERIFIED_ENTRY);
+                crb.recordMark(config.MARKID_UNVERIFIED_ENTRY);
                 // We need to use JavaCall here because we haven't entered the frame yet.
                 CallingConvention cc = regConfig.getCallingConvention(JavaCall, null, new JavaType[]{getProviders().getMetaAccess().lookupJavaType(Object.class)}, getTarget(), false);
                 Register inlineCacheKlass = g5; // see MacroAssembler::ic_call
 
-                try (SPARCScratchRegister sc = SPARCScratchRegister.get()) {
+                try (ScratchRegister sc = masm.getScratchRegister()) {
                     Register scratch = sc.getRegister();
                     Register receiver = asRegister(cc.getArgument(0));
                     SPARCAddress src = new SPARCAddress(receiver, config.hubOffset);
 
-                    new Ldx(src, scratch).emit(masm);
-                    new Cmp(scratch, inlineCacheKlass).emit(masm);
+                    masm.ldx(src, scratch);
+                    masm.cmp(scratch, inlineCacheKlass);
                 }
-                new Bpne(CC.Xcc, unverifiedStub).emit(masm);
-                new Nop().emit(masm);  // delay slot
+                masm.bpcc(NotEqual, NOT_ANNUL, unverifiedStub, Xcc, PREDICT_NOT_TAKEN);
+                masm.nop();  // delay slot
             }
 
             masm.align(config.codeEntryAlignment);
-            MarkId.recordMark(crb, MarkId.OSR_ENTRY);
-            MarkId.recordMark(crb, MarkId.VERIFIED_ENTRY);
+            crb.recordMark(config.MARKID_OSR_ENTRY);
+            crb.recordMark(config.MARKID_VERIFIED_ENTRY);
 
             // Emit code for the LIR
             crb.emit(lir);
         } while (i++ < 1);
+        // Restore the unsafeAccess flag
+        crb.compilationResult.setHasUnsafeAccess(hasUnsafeAccess);
+        profileInstructions(lir, crb);
 
         HotSpotFrameContext frameContext = (HotSpotFrameContext) crb.frameContext;
         HotSpotForeignCallsProvider foreignCalls = getProviders().getForeignCalls();
         if (!frameContext.isStub) {
-            MarkId.recordMark(crb, MarkId.EXCEPTION_HANDLER_ENTRY);
-            SPARCCall.directCall(crb, masm, foreignCalls.lookupForeignCall(EXCEPTION_HANDLER), null, false, null);
-            MarkId.recordMark(crb, MarkId.DEOPT_HANDLER_ENTRY);
-            SPARCCall.directCall(crb, masm, foreignCalls.lookupForeignCall(DEOPTIMIZATION_HANDLER), null, false, null);
+            crb.recordMark(config.MARKID_EXCEPTION_HANDLER_ENTRY);
+            SPARCCall.directCall(crb, masm, foreignCalls.lookupForeignCall(EXCEPTION_HANDLER), null, null);
+            crb.recordMark(config.MARKID_DEOPT_HANDLER_ENTRY);
+            SPARCCall.directCall(crb, masm, foreignCalls.lookupForeignCall(DEOPTIMIZATION_HANDLER), null, null);
         } else {
             // No need to emit the stubs for entries back into the method since
             // it has no calls that can cause such "return" entries
@@ -265,11 +344,26 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
 
         if (unverifiedStub != null) {
             masm.bind(unverifiedStub);
-            try (SPARCScratchRegister sc = SPARCScratchRegister.get()) {
+            try (ScratchRegister sc = masm.getScratchRegister()) {
                 Register scratch = sc.getRegister();
                 SPARCCall.indirectJmp(crb, masm, scratch, foreignCalls.lookupForeignCall(IC_MISS_HANDLER));
             }
         }
+    }
+
+    private static int calculateConstantSize(LIR lir) {
+        int size = 0;
+        for (AbstractBlockBase<?> block : lir.codeEmittingOrder()) {
+            for (LIRInstruction inst : lir.getLIRforBlock(block)) {
+                if (inst instanceof SPARCLIRInstruction) {
+                    SizeEstimate pred = ((SPARCLIRInstruction) inst).estimateSize();
+                    if (pred != null) {
+                        size += pred.constantSize;
+                    }
+                }
+            }
+        }
+        return size;
     }
 
     private static void resetDelayedControlTransfers(LIR lir) {
@@ -321,12 +415,6 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
                         // We have found a non overlapping LIR instruction which can be delayed
                         ((SPARCTailDelayedLIRInstruction) inst).setDelayedControlTransfer(delayedTransfer);
                         delayedTransfer = null;
-                        // Removed the moving as it causes problems (Nullpointer exceptions)
-                        // if (!adjacent) {
-                        // // If not adjacent, we make it adjacent
-                        // instructions.remove(i);
-                        // instructions.add(delayTransferPosition - 1, inst);
-                        // }
                     }
                 }
             }
@@ -379,5 +467,11 @@ public class SPARCHotSpotBackend extends HotSpotHostBackend {
             inst.visitEachAlive(valueConsumer);
             return overlap;
         }
+    }
+
+    @Override
+    public RegisterAllocationConfig newRegisterAllocationConfig(RegisterConfig registerConfig) {
+        RegisterConfig registerConfigNonNull = registerConfig == null ? getCodeCache().getRegisterConfig() : registerConfig;
+        return new RegisterAllocationConfig(registerConfigNonNull);
     }
 }

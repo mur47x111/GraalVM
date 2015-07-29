@@ -217,8 +217,8 @@ void CollectedHeap::pre_initialize() {
 #ifdef COMPILER2
   _defer_initial_card_mark =    ReduceInitialCardMarks && can_elide_tlab_store_barriers()
                              && (DeferInitialCardMark || card_mark_must_follow_store());
-#elif defined GRAAL
-  _defer_initial_card_mark =   GraalDeferredInitBarriers && can_elide_tlab_store_barriers()
+#elif INCLUDE_JVMCI
+  _defer_initial_card_mark =   JVMCIDeferredInitBarriers && can_elide_tlab_store_barriers()
                                && (DeferInitialCardMark || card_mark_must_follow_store());
 #else
   assert(_defer_initial_card_mark == false, "Who would set it?");
@@ -527,7 +527,7 @@ void CollectedHeap::ensure_parsability(bool retire_tlabs) {
          " to threads list is doomed to failure!");
   for (JavaThread *thread = Threads::first(); thread; thread = thread->next()) {
      if (use_tlab) thread->tlab().make_parsable(retire_tlabs);
-#if defined(COMPILER2) || defined(GRAAL)
+#if defined(COMPILER2) || INCLUDE_JVMCI
      // The deferred store barriers must all have been flushed to the
      // card-table (or other remembered set structure) before GC starts
      // processing the card-table (or other remembered set).
@@ -561,13 +561,13 @@ void CollectedHeap::resize_all_tlabs() {
 
 void CollectedHeap::pre_full_gc_dump(GCTimer* timer) {
   if (HeapDumpBeforeFullGC) {
-    GCTraceTime tt("Heap Dump (before full gc): ", PrintGCDetails, false, timer);
+    GCTraceTime tt("Heap Dump (before full gc): ", PrintGCDetails, false, timer, GCId::create());
     // We are doing a "major" collection and a heap dump before
     // major collection has been requested.
     HeapDumper::dump_heap();
   }
   if (PrintClassHistogramBeforeFullGC) {
-    GCTraceTime tt("Class Histogram (before full gc): ", PrintGCDetails, true, timer);
+    GCTraceTime tt("Class Histogram (before full gc): ", PrintGCDetails, true, timer, GCId::create());
     VM_GC_HeapInspection inspector(gclog_or_tty, false /* ! full gc */);
     inspector.doit();
   }
@@ -575,11 +575,11 @@ void CollectedHeap::pre_full_gc_dump(GCTimer* timer) {
 
 void CollectedHeap::post_full_gc_dump(GCTimer* timer) {
   if (HeapDumpAfterFullGC) {
-    GCTraceTime tt("Heap Dump (after full gc): ", PrintGCDetails, false, timer);
+    GCTraceTime tt("Heap Dump (after full gc): ", PrintGCDetails, false, timer, GCId::create());
     HeapDumper::dump_heap();
   }
   if (PrintClassHistogramAfterFullGC) {
-    GCTraceTime tt("Class Histogram (after full gc): ", PrintGCDetails, true, timer);
+    GCTraceTime tt("Class Histogram (after full gc): ", PrintGCDetails, true, timer, GCId::create());
     VM_GC_HeapInspection inspector(gclog_or_tty, false /* ! full gc */);
     inspector.doit();
   }

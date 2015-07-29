@@ -22,7 +22,7 @@
  */
 package com.oracle.graal.hotspot.meta;
 
-import com.oracle.graal.api.code.*;
+import jdk.internal.jvmci.code.*;
 
 /**
  * Special registers reserved by HotSpot for frequently used values.

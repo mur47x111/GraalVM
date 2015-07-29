@@ -24,8 +24,9 @@ package com.oracle.graal.hotspot.nodes;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.CallingConvention.Type;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.CallingConvention.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;

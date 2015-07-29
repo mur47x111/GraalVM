@@ -25,13 +25,15 @@ package com.oracle.graal.nodes;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
+import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.type.*;
+import com.oracle.graal.nodes.util.*;
 
 /**
  * Value {@link PhiNode}s merge data flow values at control flow merges.
  */
-@NodeInfo(nameTemplate = "ValuePhi({i#values})")
-public class ValuePhiNode extends PhiNode {
+@NodeInfo(nameTemplate = "Phi({i#values})")
+public class ValuePhiNode extends PhiNode implements ArrayLengthProvider {
 
     public static final NodeClass<ValuePhiNode> TYPE = NodeClass.create(ValuePhiNode.class);
     @Input protected NodeInputList<ValueNode> values;
@@ -59,6 +61,29 @@ public class ValuePhiNode extends PhiNode {
 
     @Override
     public boolean inferStamp() {
-        return updateStamp(StampTool.meet(values()));
+        Stamp valuesStamp = StampTool.meet(values());
+        if (stamp.isCompatible(valuesStamp)) {
+            valuesStamp = stamp.join(valuesStamp);
+        }
+        return updateStamp(valuesStamp);
+    }
+
+    public ValueNode length() {
+        if (merge() instanceof LoopBeginNode) {
+            return null;
+        }
+        ValueNode length = null;
+        for (ValueNode input : values()) {
+            ValueNode l = GraphUtil.arrayLength(input);
+            if (l == null) {
+                return null;
+            }
+            if (length == null) {
+                length = l;
+            } else if (length != l) {
+                return null;
+            }
+        }
+        return length;
     }
 }

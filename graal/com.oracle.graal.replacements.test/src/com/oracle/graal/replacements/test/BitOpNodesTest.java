@@ -22,14 +22,14 @@
  */
 package com.oracle.graal.replacements.test;
 
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.compiler.test.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
-import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
 import com.oracle.graal.phases.common.inlining.*;
 import com.oracle.graal.phases.tiers.*;
@@ -248,8 +248,8 @@ public class BitOpNodesTest extends GraalCompilerTest {
      */
     private ValueNode parseAndInline(String name, Class<? extends ValueNode> expectedClass) {
         StructuredGraph graph = parseEager(name, AllowAssumptions.YES);
-        HighTierContext context = new HighTierContext(getProviders(), null, getDefaultGraphBuilderSuite(), OptimisticOptimizations.NONE);
-        CanonicalizerPhase canonicalizer = new CanonicalizerPhase(true);
+        HighTierContext context = getDefaultHighTierContext();
+        CanonicalizerPhase canonicalizer = new CanonicalizerPhase();
         canonicalizer.apply(graph, context);
         new InliningPhase(canonicalizer).apply(graph, context);
         canonicalizer.apply(graph, context);

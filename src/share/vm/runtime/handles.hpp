@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2014, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -62,6 +62,7 @@
 // used operators for ease of use.
 
 class Handle VALUE_OBJ_CLASS_SPEC {
+  friend class VMStructs;
  private:
   oop* _handle;
 
@@ -227,7 +228,7 @@ class HandleArea: public Arena {
   HandleArea* _prev;          // link to outer (older) area
  public:
   // Constructor
-  HandleArea(HandleArea* prev) : Arena(Chunk::tiny_size) {
+  HandleArea(HandleArea* prev) : Arena(mtThread, Chunk::tiny_size) {
     debug_only(_handle_mark_nesting    = 0);
     debug_only(_no_handle_mark_nesting = 0);
     _prev = prev;

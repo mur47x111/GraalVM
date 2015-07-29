@@ -38,8 +38,8 @@
 #ifdef COMPILER1
 #include "c1/c1_globals.hpp"
 #endif
-#ifdef GRAAL
-#include "graal/graalGlobals.hpp"
+#if INCLUDE_JVMCI
+#include "jvmci/jvmciGlobals.hpp"
 #endif
 #ifdef COMPILER2
 #include "opto/c2_globals.hpp"
@@ -246,6 +246,11 @@ bool Flag::is_unlocked() const {
   return is_unlocked_ext();
 }
 
+void Flag::unlock_diagnostic() {
+  assert(is_diagnostic(), "sanity");
+  _flags = Flags(_flags & ~KIND_DIAGNOSTIC);
+}
+
 // Get custom message for this locked flag, or return NULL if
 // none is available.
 void Flag::get_locked_message(char* buf, int buflen) const {
@@ -353,7 +358,7 @@ void Flag::print_kind(outputStream* st) {
 
   Data data[] = {
       { KIND_C1, "C1" },
-      { KIND_GRAAL, "Graal" },
+      { KIND_JVMCI, "JVMCI" },
       { KIND_C2, "C2" },
       { KIND_ARCH, "ARCH" },
       { KIND_SHARK, "SHARK" },
@@ -453,11 +458,11 @@ void Flag::print_as_flag(outputStream* st) {
 #define C1_PD_DEVELOP_FLAG_STRUCT(       type, name,        doc) { #type, XSTR(name), NAME(name), NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_C1 | Flag::KIND_DEVELOP | Flag::KIND_PLATFORM_DEPENDENT) },
 #define C1_NOTPRODUCT_FLAG_STRUCT(       type, name, value, doc) { #type, XSTR(name), NAME(name), NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_C1 | Flag::KIND_NOT_PRODUCT) },
 
-#define GRAAL_PRODUCT_FLAG_STRUCT(          type, name, value, doc) { #type, XSTR(name), &name,      NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_GRAAL | Flag::KIND_PRODUCT) },
-#define GRAAL_PD_PRODUCT_FLAG_STRUCT(       type, name,        doc) { #type, XSTR(name), &name,      NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_GRAAL | Flag::KIND_PRODUCT | Flag::KIND_PLATFORM_DEPENDENT) },
-#define GRAAL_DEVELOP_FLAG_STRUCT(          type, name, value, doc) { #type, XSTR(name), NAME(name), NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_GRAAL | Flag::KIND_DEVELOP) },
-#define GRAAL_PD_DEVELOP_FLAG_STRUCT(       type, name,        doc) { #type, XSTR(name), NAME(name), NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_GRAAL | Flag::KIND_DEVELOP | Flag::KIND_PLATFORM_DEPENDENT) },
-#define GRAAL_NOTPRODUCT_FLAG_STRUCT(       type, name, value, doc) { #type, XSTR(name), NAME(name), NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_GRAAL | Flag::KIND_NOT_PRODUCT) },
+#define JVMCI_PRODUCT_FLAG_STRUCT(          type, name, value, doc) { #type, XSTR(name), &name,      NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_JVMCI | Flag::KIND_PRODUCT) },
+#define JVMCI_PD_PRODUCT_FLAG_STRUCT(       type, name,        doc) { #type, XSTR(name), &name,      NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_JVMCI | Flag::KIND_PRODUCT | Flag::KIND_PLATFORM_DEPENDENT) },
+#define JVMCI_DEVELOP_FLAG_STRUCT(          type, name, value, doc) { #type, XSTR(name), NAME(name), NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_JVMCI | Flag::KIND_DEVELOP) },
+#define JVMCI_PD_DEVELOP_FLAG_STRUCT(       type, name,        doc) { #type, XSTR(name), NAME(name), NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_JVMCI | Flag::KIND_DEVELOP | Flag::KIND_PLATFORM_DEPENDENT) },
+#define JVMCI_NOTPRODUCT_FLAG_STRUCT(       type, name, value, doc) { #type, XSTR(name), NAME(name), NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_JVMCI | Flag::KIND_NOT_PRODUCT) },
 
 #define C2_PRODUCT_FLAG_STRUCT(          type, name, value, doc) { #type, XSTR(name), &name,      NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_C2 | Flag::KIND_PRODUCT) },
 #define C2_PD_PRODUCT_FLAG_STRUCT(       type, name,        doc) { #type, XSTR(name), &name,      NOT_PRODUCT_ARG(doc) Flag::Flags(Flag::DEFAULT | Flag::KIND_C2 | Flag::KIND_PRODUCT | Flag::KIND_PLATFORM_DEPENDENT) },
@@ -489,8 +494,8 @@ static Flag flagTable[] = {
 #ifdef COMPILER1
  C1_FLAGS(C1_DEVELOP_FLAG_STRUCT, C1_PD_DEVELOP_FLAG_STRUCT, C1_PRODUCT_FLAG_STRUCT, C1_PD_PRODUCT_FLAG_STRUCT, C1_DIAGNOSTIC_FLAG_STRUCT, C1_NOTPRODUCT_FLAG_STRUCT)
 #endif
-#ifdef GRAAL
- GRAAL_FLAGS(GRAAL_DEVELOP_FLAG_STRUCT, GRAAL_PD_DEVELOP_FLAG_STRUCT, GRAAL_PRODUCT_FLAG_STRUCT, GRAAL_PD_PRODUCT_FLAG_STRUCT, GRAAL_NOTPRODUCT_FLAG_STRUCT)
+#if INCLUDE_JVMCI
+ JVMCI_FLAGS(JVMCI_DEVELOP_FLAG_STRUCT, JVMCI_PD_DEVELOP_FLAG_STRUCT, JVMCI_PRODUCT_FLAG_STRUCT, JVMCI_PD_PRODUCT_FLAG_STRUCT, JVMCI_NOTPRODUCT_FLAG_STRUCT)
 #endif
 #ifdef COMPILER2
  C2_FLAGS(C2_DEVELOP_FLAG_STRUCT, C2_PD_DEVELOP_FLAG_STRUCT, C2_PRODUCT_FLAG_STRUCT, C2_PD_PRODUCT_FLAG_STRUCT, C2_DIAGNOSTIC_FLAG_STRUCT, C2_EXPERIMENTAL_FLAG_STRUCT, C2_NOTPRODUCT_FLAG_STRUCT)
@@ -624,7 +629,7 @@ static void trace_flag_changed(const char* name, const T old_value, const T new_
   e.commit();
 }
 
-bool CommandLineFlags::boolAt(char* name, size_t len, bool* value) {
+bool CommandLineFlags::boolAt(const char* name, size_t len, bool* value) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_bool()) return false;
@@ -632,7 +637,7 @@ bool CommandLineFlags::boolAt(char* name, size_t len, bool* value) {
   return true;
 }
 
-bool CommandLineFlags::boolAtPut(char* name, size_t len, bool* value, Flag::Flags origin) {
+bool CommandLineFlags::boolAtPut(const char* name, size_t len, bool* value, Flag::Flags origin) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_bool()) return false;
@@ -652,7 +657,7 @@ void CommandLineFlagsEx::boolAtPut(CommandLineFlagWithType flag, bool value, Fla
   faddr->set_origin(origin);
 }
 
-bool CommandLineFlags::intxAt(char* name, size_t len, intx* value) {
+bool CommandLineFlags::intxAt(const char* name, size_t len, intx* value) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_intx()) return false;
@@ -660,7 +665,7 @@ bool CommandLineFlags::intxAt(char* name, size_t len, intx* value) {
   return true;
 }
 
-bool CommandLineFlags::intxAtPut(char* name, size_t len, intx* value, Flag::Flags origin) {
+bool CommandLineFlags::intxAtPut(const char* name, size_t len, intx* value, Flag::Flags origin) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_intx()) return false;
@@ -680,7 +685,7 @@ void CommandLineFlagsEx::intxAtPut(CommandLineFlagWithType flag, intx value, Fla
   faddr->set_origin(origin);
 }
 
-bool CommandLineFlags::uintxAt(char* name, size_t len, uintx* value) {
+bool CommandLineFlags::uintxAt(const char* name, size_t len, uintx* value) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_uintx()) return false;
@@ -688,7 +693,7 @@ bool CommandLineFlags::uintxAt(char* name, size_t len, uintx* value) {
   return true;
 }
 
-bool CommandLineFlags::uintxAtPut(char* name, size_t len, uintx* value, Flag::Flags origin) {
+bool CommandLineFlags::uintxAtPut(const char* name, size_t len, uintx* value, Flag::Flags origin) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_uintx()) return false;
@@ -708,7 +713,7 @@ void CommandLineFlagsEx::uintxAtPut(CommandLineFlagWithType flag, uintx value, F
   faddr->set_origin(origin);
 }
 
-bool CommandLineFlags::uint64_tAt(char* name, size_t len, uint64_t* value) {
+bool CommandLineFlags::uint64_tAt(const char* name, size_t len, uint64_t* value) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_uint64_t()) return false;
@@ -716,7 +721,7 @@ bool CommandLineFlags::uint64_tAt(char* name, size_t len, uint64_t* value) {
   return true;
 }
 
-bool CommandLineFlags::uint64_tAtPut(char* name, size_t len, uint64_t* value, Flag::Flags origin) {
+bool CommandLineFlags::uint64_tAtPut(const char* name, size_t len, uint64_t* value, Flag::Flags origin) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_uint64_t()) return false;
@@ -736,7 +741,7 @@ void CommandLineFlagsEx::uint64_tAtPut(CommandLineFlagWithType flag, uint64_t va
   faddr->set_origin(origin);
 }
 
-bool CommandLineFlags::doubleAt(char* name, size_t len, double* value) {
+bool CommandLineFlags::doubleAt(const char* name, size_t len, double* value) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_double()) return false;
@@ -744,7 +749,7 @@ bool CommandLineFlags::doubleAt(char* name, size_t len, double* value) {
   return true;
 }
 
-bool CommandLineFlags::doubleAtPut(char* name, size_t len, double* value, Flag::Flags origin) {
+bool CommandLineFlags::doubleAtPut(const char* name, size_t len, double* value, Flag::Flags origin) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_double()) return false;
@@ -764,7 +769,7 @@ void CommandLineFlagsEx::doubleAtPut(CommandLineFlagWithType flag, double value,
   faddr->set_origin(origin);
 }
 
-bool CommandLineFlags::ccstrAt(char* name, size_t len, ccstr* value) {
+bool CommandLineFlags::ccstrAt(const char* name, size_t len, ccstr* value) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_ccstr()) return false;
@@ -772,9 +777,7 @@ bool CommandLineFlags::ccstrAt(char* name, size_t len, ccstr* value) {
   return true;
 }
 
-// Contract:  Flag will make private copy of the incoming value.
-// Outgoing value is always malloc-ed, and caller MUST call free.
-bool CommandLineFlags::ccstrAtPut(char* name, size_t len, ccstr* value, Flag::Flags origin) {
+bool CommandLineFlags::ccstrAtPut(const char* name, size_t len, ccstr* value, Flag::Flags origin) {
   Flag* result = Flag::find_flag(name, len);
   if (result == NULL) return false;
   if (!result->is_ccstr()) return false;
@@ -797,7 +800,6 @@ bool CommandLineFlags::ccstrAtPut(char* name, size_t len, ccstr* value, Flag::Fl
   return true;
 }
 
-// Contract:  Flag will make private copy of the incoming value.
 void CommandLineFlagsEx::ccstrAtPut(CommandLineFlagWithType flag, ccstr value, Flag::Flags origin) {
   Flag* faddr = address_of_flag(flag);
   guarantee(faddr != NULL && faddr->is_ccstr(), "wrong flag type");

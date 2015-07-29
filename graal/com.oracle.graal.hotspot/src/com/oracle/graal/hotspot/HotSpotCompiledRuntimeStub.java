@@ -23,27 +23,17 @@
 package com.oracle.graal.hotspot;
 
 import static com.oracle.graal.hotspot.HotSpotHostBackend.*;
-
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.code.CompilationResult.Call;
-import com.oracle.graal.api.code.CompilationResult.ConstantReference;
-import com.oracle.graal.api.code.CompilationResult.DataPatch;
-import com.oracle.graal.api.code.CompilationResult.Infopoint;
-import com.oracle.graal.hotspot.meta.*;
-import com.oracle.graal.hotspot.stubs.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.code.CompilationResult.*;
+import jdk.internal.jvmci.hotspot.*;
 
 /**
  * {@link HotSpotCompiledCode} destined for installation as a RuntimeStub.
  */
 public final class HotSpotCompiledRuntimeStub extends HotSpotCompiledCode {
 
-    private static final long serialVersionUID = -4506206868419153274L;
-
-    public final String stubName;
-
-    public HotSpotCompiledRuntimeStub(Stub stub, CompilationResult compResult) {
+    public HotSpotCompiledRuntimeStub(CompilationResult compResult) {
         super(compResult);
-        this.stubName = stub.toString();
         assert checkStubInvariants(compResult);
     }
 
@@ -55,7 +45,7 @@ public final class HotSpotCompiledRuntimeStub extends HotSpotCompiledCode {
 
         // Stubs cannot be recompiled so they cannot be compiled with
         // assumptions and there is no point in recording evol_method dependencies
-        assert compResult.getAssumptions().isEmpty() : "stubs should not use assumptions: " + this;
+        assert compResult.getAssumptions() == null : "stubs should not use assumptions: " + this;
         assert compResult.getMethods() == null : "stubs should not record evol_method dependencies: " + this;
 
         for (DataPatch data : compResult.getDataPatches()) {
@@ -85,6 +75,6 @@ public final class HotSpotCompiledRuntimeStub extends HotSpotCompiledCode {
 
     @Override
     public String toString() {
-        return stubName != null ? stubName : super.toString();
+        return name;
     }
 }

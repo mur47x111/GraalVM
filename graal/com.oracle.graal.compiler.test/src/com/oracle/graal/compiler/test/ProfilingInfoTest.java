@@ -24,10 +24,9 @@ package com.oracle.graal.compiler.test;
 
 import java.io.*;
 
-import org.junit.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.api.meta.ProfilingInfo.TriState;
+import org.junit.*;
 
 /**
  * Tests profiling information provided by the runtime.

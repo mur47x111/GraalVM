@@ -22,18 +22,20 @@
  */
 package com.oracle.graal.hotspot.replacements;
 
+import jdk.internal.jvmci.hotspot.*;
+
 import com.oracle.graal.api.replacements.*;
-import com.oracle.graal.hotspot.bridge.*;
+import com.oracle.graal.hotspot.word.*;
 import com.oracle.graal.word.*;
 
 /**
  * Substitutions for {@link CompilerToVMImpl} methods.
  */
-@ClassSubstitution(com.oracle.graal.hotspot.bridge.CompilerToVMImpl.class)
+@ClassSubstitution(jdk.internal.jvmci.hotspot.CompilerToVMImpl.class)
 public class CompilerToVMImplSubstitutions {
 
     @MethodSubstitution(isStatic = false)
     public static Class<?> getJavaMirror(@SuppressWarnings("unused") CompilerToVMImpl impl, long metaspaceklass) {
-        return HotSpotClassSubstitutions.readJavaMirror(Word.unsigned(metaspaceklass));
+        return HotSpotClassSubstitutions.readJavaMirror(KlassPointer.fromWord(Word.unsigned(metaspaceklass)));
     }
 }

@@ -22,6 +22,8 @@
  */
 package com.oracle.graal.compiler.common;
 
+import jdk.internal.jvmci.common.*;
+
 public abstract class FieldIntrospection<T> extends UnsafeAccess {
 
     private final Class<T> clazz;
@@ -45,4 +47,6 @@ public abstract class FieldIntrospection<T> extends UnsafeAccess {
     public Fields getData() {
         return data;
     }
+
+    public abstract Fields[] getAllFields();
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,12 +22,11 @@
  */
 package com.oracle.graal.lir.framemap;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
-
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.asm.*;
 
 /**
@@ -42,6 +41,13 @@ public abstract class FrameMap {
 
     private final TargetDescription target;
     private final RegisterConfig registerConfig;
+
+    public interface ReferenceMapBuilderFactory {
+
+        ReferenceMapBuilder newReferenceMapBuilder(int totalFrameSize);
+    }
+
+    private final ReferenceMapBuilderFactory referenceMapFactory;
 
     /**
      * The final frame size, not including the size of the
@@ -87,12 +93,13 @@ public abstract class FrameMap {
      * Creates a new frame map for the specified method. The given registerConfig is optional, in
      * case null is passed the default RegisterConfig from the CodeCacheProvider will be used.
      */
-    public FrameMap(CodeCacheProvider codeCache, RegisterConfig registerConfig) {
+    public FrameMap(CodeCacheProvider codeCache, RegisterConfig registerConfig, ReferenceMapBuilderFactory referenceMapFactory) {
         this.target = codeCache.getTarget();
         this.registerConfig = registerConfig == null ? codeCache.getRegisterConfig() : registerConfig;
         this.frameSize = -1;
         this.outgoingSize = codeCache.getMinimumOutgoingSize();
         this.objectStackSlots = new ArrayList<>();
+        this.referenceMapFactory = referenceMapFactory;
     }
 
     public RegisterConfig getRegisterConfig() {
@@ -101,6 +108,12 @@ public abstract class FrameMap {
 
     public TargetDescription getTarget() {
         return target;
+    }
+
+    public void addLiveValues(ReferenceMapBuilder refMap) {
+        for (Value value : objectStackSlots) {
+            refMap.addLiveValue(value);
+        }
     }
 
     protected int returnAddressSize() {
@@ -185,12 +198,6 @@ public abstract class FrameMap {
      * @return the offset of the stack slot
      */
     public int offsetForStackSlot(StackSlot slot) {
-        // @formatter:off
-        assert (!slot.getRawAddFrameSize() && slot.getRawOffset() <  outgoingSize) ||
-               (slot.getRawAddFrameSize() && slot.getRawOffset()  <  0 && -slot.getRawOffset() <= spillSize) ||
-               (slot.getRawAddFrameSize() && slot.getRawOffset()  >= 0) :
-                   String.format("RawAddFrameSize: %b RawOffset: 0x%x spillSize: 0x%x outgoingSize: 0x%x", slot.getRawAddFrameSize(), slot.getRawOffset(), spillSize, outgoingSize);
-        // @formatter:on
         if (slot.isInCallerFrame()) {
             accessesCallerFrame = true;
         }
@@ -320,43 +327,7 @@ public abstract class FrameMap {
         objectStackSlots.add(objectSlot);
     }
 
-    public ReferenceMap initReferenceMap(boolean hasRegisters) {
-        ReferenceMap refMap = getTarget().createReferenceMap(hasRegisters, frameSize() / getTarget().wordSize);
-        for (StackSlot slot : objectStackSlots) {
-            setReference(slot, refMap);
-        }
-        return refMap;
-    }
-
-    /**
-     * Marks the specified location as a reference in the reference map of the debug information.
-     * The tracked location can be a {@link RegisterValue} or a {@link StackSlot}. Note that a
-     * {@link JavaConstant} is automatically tracked.
-     *
-     * @param location The location to be added to the reference map.
-     * @param refMap A reference map, as created by {@link #initReferenceMap(boolean)}.
-     */
-    public void setReference(Value location, ReferenceMap refMap) {
-        LIRKind kind = location.getLIRKind();
-        if (isRegister(location)) {
-            refMap.setRegister(asRegister(location).getReferenceMapIndex(), kind);
-        } else if (isStackSlot(location)) {
-            int offset = offsetForStackSlot(asStackSlot(location));
-            refMap.setStackSlot(offset, kind);
-        } else {
-            assert isConstant(location);
-        }
-    }
-
-    public void clearReference(Value location, ReferenceMap refMap) {
-        LIRKind kind = location.getLIRKind();
-        if (isRegister(location)) {
-            refMap.clearRegister(asRegister(location).getReferenceMapIndex(), kind);
-        } else if (isStackSlot(location)) {
-            int offset = offsetForStackSlot(asStackSlot(location));
-            refMap.clearStackSlot(offset, kind);
-        } else {
-            assert isConstant(location);
-        }
+    public ReferenceMapBuilder newReferenceMapBuilder() {
+        return referenceMapFactory.newReferenceMapBuilder(totalFrameSize());
     }
 }

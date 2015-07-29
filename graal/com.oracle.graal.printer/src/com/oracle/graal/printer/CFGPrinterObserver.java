@@ -26,11 +26,17 @@ import java.io.*;
 import java.util.*;
 import java.util.concurrent.atomic.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.compiler.gen.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.debug.*;
+
 import com.oracle.graal.debug.*;
+
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.service.*;
+
+import com.oracle.graal.code.*;
+import com.oracle.graal.compiler.gen.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.java.*;
 import com.oracle.graal.lir.*;
@@ -98,7 +104,7 @@ public class CFGPrinterObserver implements DebugDumpHandler {
 
         if (!method.equals(curMethod) || !curDecorators.equals(decorators)) {
             cfgPrinter.printCompilation(method);
-            TTY.println("CFGPrinter: Dumping method %s to %s", method, cfgFile);
+            TTY.println("CFGPrinter: Dumping method %s to %s", method, cfgFile.getAbsolutePath());
         }
         curMethod = method;
         curDecorators = decorators;
@@ -112,6 +118,9 @@ public class CFGPrinterObserver implements DebugDumpHandler {
         return object instanceof Graph || object instanceof BciBlockMapping;
     }
 
+    private LIR lastLIR = null;
+    private Interval[] delayedIntervals = null;
+
     public void dumpSandboxed(Object object, String message) {
 
         if (!dumpFrontend && isFrontendObject(object)) {
@@ -124,9 +133,9 @@ public class CFGPrinterObserver implements DebugDumpHandler {
                 OutputStream out = new BufferedOutputStream(new FileOutputStream(cfgFile));
                 cfgPrinter = new CFGPrinter(out);
             } catch (FileNotFoundException e) {
-                throw new GraalInternalError("Could not open " + cfgFile.getAbsolutePath());
+                throw new JVMCIError("Could not open " + cfgFile.getAbsolutePath());
             }
-            TTY.println("CFGPrinter: Output to file %s", cfgFile);
+            TTY.println("CFGPrinter: Output to file %s", cfgFile.getAbsolutePath());
         }
 
         if (!checkMethodScope()) {
@@ -164,7 +173,11 @@ public class CFGPrinterObserver implements DebugDumpHandler {
         } else if (object instanceof LIR) {
             // Currently no node printing for lir
             cfgPrinter.printCFG(message, cfgPrinter.lir.codeEmittingOrder(), false);
-
+            lastLIR = (LIR) object;
+            if (delayedIntervals != null) {
+                cfgPrinter.printIntervals(message, delayedIntervals);
+                delayedIntervals = null;
+            }
         } else if (object instanceof SchedulePhase) {
             cfgPrinter.printSchedule(message, (SchedulePhase) object);
         } else if (object instanceof StructuredGraph) {
@@ -176,12 +189,19 @@ public class CFGPrinterObserver implements DebugDumpHandler {
 
         } else if (object instanceof CompilationResult) {
             final CompilationResult compResult = (CompilationResult) object;
-            cfgPrinter.printMachineCode(codeCache.disassemble(compResult, null), message);
+            cfgPrinter.printMachineCode(disassemble(codeCache, compResult, null), message);
         } else if (isCompilationResultAndInstalledCode(object)) {
             Object[] tuple = (Object[]) object;
-            cfgPrinter.printMachineCode(codeCache.disassemble((CompilationResult) tuple[0], (InstalledCode) tuple[1]), message);
+            cfgPrinter.printMachineCode(disassemble(codeCache, (CompilationResult) tuple[0], (InstalledCode) tuple[1]), message);
         } else if (object instanceof Interval[]) {
-            cfgPrinter.printIntervals(message, (Interval[]) object);
+            if (lastLIR == cfgPrinter.lir) {
+                cfgPrinter.printIntervals(message, (Interval[]) object);
+            } else {
+                if (delayedIntervals != null) {
+                    Debug.log("Some delayed intervals were dropped (%s)", (Object) delayedIntervals);
+                }
+                delayedIntervals = (Interval[]) object;
+            }
         } else if (object instanceof StackInterval[]) {
             cfgPrinter.printStackIntervals(message, (StackInterval[]) object);
         }
@@ -192,6 +212,37 @@ public class CFGPrinterObserver implements DebugDumpHandler {
         cfgPrinter.cfg = null;
         cfgPrinter.flush();
 
+    }
+
+    private static DisassemblerProvider disassembler;
+
+    private static final DisassemblerProvider NOP_DISASSEMBLER = new DisassemblerProvider() {
+        public String getName() {
+            return null;
+        }
+    };
+
+    private static DisassemblerProvider getDisassembler() {
+        if (disassembler == null) {
+            DisassemblerProvider selected = NOP_DISASSEMBLER;
+            for (DisassemblerProvider d : Services.load(DisassemblerProvider.class)) {
+                String name = d.getName().toLowerCase();
+                if (name.contains("hcf") || name.contains("hexcodefile")) {
+                    selected = d;
+                    break;
+                }
+            }
+            disassembler = selected;
+        }
+        return disassembler;
+    }
+
+    private static String disassemble(CodeCacheProvider codeCache, CompilationResult compResult, InstalledCode installedCode) {
+        DisassemblerProvider dis = getDisassembler();
+        if (installedCode != null) {
+            return dis.disassembleInstalledCode(codeCache, compResult, installedCode);
+        }
+        return dis.disassembleCompiledCode(codeCache, compResult);
     }
 
     private static boolean isCompilationResultAndInstalledCode(Object object) {

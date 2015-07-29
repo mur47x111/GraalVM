@@ -129,20 +129,20 @@
 # include "c1_globals_bsd.hpp"
 #endif
 #endif
-#ifdef COMPILERGRAAL 
+#ifdef COMPILERJVMCI 
 #ifdef TARGET_ARCH_x86
-# include "graalGlobals_x86.hpp"
+# include "jvmciGlobals_x86.hpp"
 #endif
 #ifdef TARGET_ARCH_sparc
-# include "graalGlobals_sparc.hpp"
+# include "jvmciGlobals_sparc.hpp"
 #endif
 #ifdef TARGET_ARCH_arm
-# include "graalGlobals_arm.hpp"
+# include "jvmciGlobals_arm.hpp"
 #endif
 #ifdef TARGET_ARCH_ppc
-# include "graalGlobals_ppc.hpp"
+# include "jvmciGlobals_ppc.hpp"
 #endif
-#endif // COMPILERGRAAL
+#endif // COMPILERJVMCI
 #ifdef COMPILER2
 #ifdef TARGET_ARCH_x86
 # include "c2_globals_x86.hpp"
@@ -178,7 +178,7 @@
 #endif
 #endif
 
-#if !defined(COMPILER1) && !defined(COMPILER2) && !defined(SHARK) && !defined(COMPILERGRAAL)
+#if !defined(COMPILER1) && !defined(COMPILER2) && !defined(SHARK) && !defined(COMPILERJVMCI)
 define_pd_global(bool, BackgroundCompilation,        false);
 define_pd_global(bool, UseTLAB,                      false);
 define_pd_global(bool, CICompileOSR,                 false);
@@ -210,7 +210,7 @@ define_pd_global(uint64_t,MaxRAM,                    1ULL*G);
 #define CI_COMPILER_COUNT 0
 #else
 
-#ifdef COMPILER2
+#if defined(COMPILER2) || defined(COMPILERJVMCI)
 #define CI_COMPILER_COUNT 2
 #else
 #define CI_COMPILER_COUNT 1
@@ -253,7 +253,7 @@ struct Flag {
     KIND_SHARK              = 1 << 15,
     KIND_LP64_PRODUCT       = 1 << 16,
     KIND_COMMERCIAL         = 1 << 17,
-    KIND_GRAAL              = 1 << 18,
+    KIND_JVMCI              = 1 << 18,
 
     KIND_MASK = ~VALUE_ORIGIN_MASK
   };
@@ -328,6 +328,8 @@ struct Flag {
   bool is_writeable_ext() const;
   bool is_external_ext() const;
 
+  void unlock_diagnostic();
+
   void get_locked_message(char*, int) const;
   void get_locked_message_ext(char*, int) const;
 
@@ -378,35 +380,37 @@ class DoubleFlagSetting {
 
 class CommandLineFlags {
  public:
-  static bool boolAt(char* name, size_t len, bool* value);
-  static bool boolAt(char* name, bool* value)      { return boolAt(name, strlen(name), value); }
-  static bool boolAtPut(char* name, size_t len, bool* value, Flag::Flags origin);
-  static bool boolAtPut(char* name, bool* value, Flag::Flags origin)   { return boolAtPut(name, strlen(name), value, origin); }
+  static bool boolAt(const char* name, size_t len, bool* value);
+  static bool boolAt(const char* name, bool* value)      { return boolAt(name, strlen(name), value); }
+  static bool boolAtPut(const char* name, size_t len, bool* value, Flag::Flags origin);
+  static bool boolAtPut(const char* name, bool* value, Flag::Flags origin)   { return boolAtPut(name, strlen(name), value, origin); }
 
-  static bool intxAt(char* name, size_t len, intx* value);
-  static bool intxAt(char* name, intx* value)      { return intxAt(name, strlen(name), value); }
-  static bool intxAtPut(char* name, size_t len, intx* value, Flag::Flags origin);
-  static bool intxAtPut(char* name, intx* value, Flag::Flags origin)   { return intxAtPut(name, strlen(name), value, origin); }
+  static bool intxAt(const char* name, size_t len, intx* value);
+  static bool intxAt(const char* name, intx* value)      { return intxAt(name, strlen(name), value); }
+  static bool intxAtPut(const char* name, size_t len, intx* value, Flag::Flags origin);
+  static bool intxAtPut(const char* name, intx* value, Flag::Flags origin)   { return intxAtPut(name, strlen(name), value, origin); }
 
-  static bool uintxAt(char* name, size_t len, uintx* value);
-  static bool uintxAt(char* name, uintx* value)    { return uintxAt(name, strlen(name), value); }
-  static bool uintxAtPut(char* name, size_t len, uintx* value, Flag::Flags origin);
-  static bool uintxAtPut(char* name, uintx* value, Flag::Flags origin) { return uintxAtPut(name, strlen(name), value, origin); }
+  static bool uintxAt(const char* name, size_t len, uintx* value);
+  static bool uintxAt(const char* name, uintx* value)    { return uintxAt(name, strlen(name), value); }
+  static bool uintxAtPut(const char* name, size_t len, uintx* value, Flag::Flags origin);
+  static bool uintxAtPut(const char* name, uintx* value, Flag::Flags origin) { return uintxAtPut(name, strlen(name), value, origin); }
 
-  static bool uint64_tAt(char* name, size_t len, uint64_t* value);
-  static bool uint64_tAt(char* name, uint64_t* value) { return uint64_tAt(name, strlen(name), value); }
-  static bool uint64_tAtPut(char* name, size_t len, uint64_t* value, Flag::Flags origin);
-  static bool uint64_tAtPut(char* name, uint64_t* value, Flag::Flags origin) { return uint64_tAtPut(name, strlen(name), value, origin); }
+  static bool uint64_tAt(const char* name, size_t len, uint64_t* value);
+  static bool uint64_tAt(const char* name, uint64_t* value) { return uint64_tAt(name, strlen(name), value); }
+  static bool uint64_tAtPut(const char* name, size_t len, uint64_t* value, Flag::Flags origin);
+  static bool uint64_tAtPut(const char* name, uint64_t* value, Flag::Flags origin) { return uint64_tAtPut(name, strlen(name), value, origin); }
 
-  static bool doubleAt(char* name, size_t len, double* value);
-  static bool doubleAt(char* name, double* value)    { return doubleAt(name, strlen(name), value); }
-  static bool doubleAtPut(char* name, size_t len, double* value, Flag::Flags origin);
-  static bool doubleAtPut(char* name, double* value, Flag::Flags origin) { return doubleAtPut(name, strlen(name), value, origin); }
+  static bool doubleAt(const char* name, size_t len, double* value);
+  static bool doubleAt(const char* name, double* value)    { return doubleAt(name, strlen(name), value); }
+  static bool doubleAtPut(const char* name, size_t len, double* value, Flag::Flags origin);
+  static bool doubleAtPut(const char* name, double* value, Flag::Flags origin) { return doubleAtPut(name, strlen(name), value, origin); }
 
-  static bool ccstrAt(char* name, size_t len, ccstr* value);
-  static bool ccstrAt(char* name, ccstr* value)    { return ccstrAt(name, strlen(name), value); }
-  static bool ccstrAtPut(char* name, size_t len, ccstr* value, Flag::Flags origin);
-  static bool ccstrAtPut(char* name, ccstr* value, Flag::Flags origin) { return ccstrAtPut(name, strlen(name), value, origin); }
+  static bool ccstrAt(const char* name, size_t len, ccstr* value);
+  static bool ccstrAt(const char* name, ccstr* value)    { return ccstrAt(name, strlen(name), value); }
+  // Contract:  Flag will make private copy of the incoming value.
+  // Outgoing value is always malloc-ed, and caller MUST call free.
+  static bool ccstrAtPut(const char* name, size_t len, ccstr* value, Flag::Flags origin);
+  static bool ccstrAtPut(const char* name, ccstr* value, Flag::Flags origin) { return ccstrAtPut(name, strlen(name), value, origin); }
 
   // Returns false if name is not a command line flag.
   static bool wasSetOnCmdline(const char* name, bool* value);
@@ -610,6 +614,9 @@ class CommandLineFlags {
   product(bool, UseAES, false,                                              \
           "Control whether AES instructions can be used on x86/x64")        \
                                                                             \
+  product(bool, UseSHA, false,                                              \
+          "Control whether SHA instructions can be used on SPARC")          \
+                                                                            \
   product(uintx, LargePageSizeInBytes, 0,                                   \
           "Large page size (0 to let VM choose the page size)")             \
                                                                             \
@@ -715,6 +722,15 @@ class CommandLineFlags {
                                                                             \
   product(bool, UseAESIntrinsics, false,                                    \
           "Use intrinsics for AES versions of crypto")                      \
+                                                                            \
+  product(bool, UseSHA1Intrinsics, false,                                   \
+          "Use intrinsics for SHA-1 crypto hash function")                  \
+                                                                            \
+  product(bool, UseSHA256Intrinsics, false,                                 \
+          "Use intrinsics for SHA-224 and SHA-256 crypto hash functions")   \
+                                                                            \
+  product(bool, UseSHA512Intrinsics, false,                                 \
+          "Use intrinsics for SHA-384 and SHA-512 crypto hash functions")   \
                                                                             \
   product(bool, UseCRC32Intrinsics, false,                                  \
           "use intrinsics for java.util.zip.CRC32")                         \
@@ -944,11 +960,6 @@ class CommandLineFlags {
   diagnostic(bool, PrintNMTStatistics, false,                               \
           "Print native memory tracking summary data if it is on")          \
                                                                             \
-  diagnostic(bool, AutoShutdownNMT, true,                                   \
-          "Automatically shutdown native memory tracking under stress "     \
-          "situations. When set to false, native memory tracking tries to " \
-          "stay alive at the expense of JVM performance")                   \
-                                                                            \
   diagnostic(bool, LogCompilation, false,                                   \
           "Log compilation activity in detail to LogFile")                  \
                                                                             \
@@ -987,11 +998,14 @@ class CommandLineFlags {
   product(bool, PrintNMethodStatistics, false,                              \
           "Print a summary statistic for the generated nmethods")           \
                                                                             \
-  product(bool, ShareDebugInfo, IS_GRAAL_DEFINED,                           \
+  product(bool, ShareDebugInfo, IS_JVMCI_DEFINED,                           \
           "Always tries to share similar debug info inside a nmethod")      \
                                                                             \
   diagnostic(bool, PrintNMethods, false,                                    \
           "Print assembly code for nmethods when generated")                \
+                                                                            \
+  diagnostic(intx, PrintNMethodsAtLevel, -1,                                \
+          "Only print code for nmethods at the given compilation level")    \
                                                                             \
   diagnostic(bool, PrintNativeNMethods, false,                              \
           "Print assembly code for native nmethods when generated")         \
@@ -1082,6 +1096,9 @@ class CommandLineFlags {
                                                                             \
   product(bool, ClassUnloading, true,                                       \
           "Do unloading of classes")                                        \
+                                                                            \
+  product(bool, ClassUnloadingWithConcurrentMark, true,                     \
+          "Do unloading of classes with a concurrent marking cycle")        \
                                                                             \
   develop(bool, DisableStartThread, false,                                  \
           "Disable starting of additional Java threads "                    \
@@ -1217,8 +1234,16 @@ class CommandLineFlags {
   product(bool, CheckJNICalls, false,                                       \
           "Verify all arguments to JNI calls")                              \
                                                                             \
+  product(bool, CheckEndorsedAndExtDirs, false,                             \
+          "Verify the endorsed and extension directories are not used")     \
+                                                                            \
   product(bool, UseFastJNIAccessors, true,                                  \
           "Use optimized versions of Get<Primitive>Field")                  \
+                                                                            \
+  product(intx, MaxJNILocalCapacity, 65536,                                 \
+          "Maximum allowable local JNI handle capacity to "                 \
+          "EnsureLocalCapacity() and PushLocalFrame(), "                    \
+          "where <= 0 is unlimited, default: 65536")                        \
                                                                             \
   product(bool, EagerXrunInit, false,                                       \
           "Eagerly initialize -Xrun libraries; allows startup profiling, "  \
@@ -1944,6 +1969,10 @@ class CommandLineFlags {
           "not just one of the generations (e.g., G1). A value of 0 "       \
           "denotes 'do constant GC cycles'.")                               \
                                                                             \
+  manageable(intx, CMSTriggerInterval, -1,                                  \
+          "Commence a CMS collection cycle (at least) every so many "       \
+          "milliseconds (0 permanently, -1 disabled)")                      \
+                                                                            \
   product(bool, UseCMSInitiatingOccupancyOnly, false,                       \
           "Only use occupancy as a criterion for starting a CMS collection")\
                                                                             \
@@ -2308,6 +2337,9 @@ class CommandLineFlags {
   manageable(bool, PrintGCTimeStamps, false,                                \
           "Print timestamps at garbage collection")                         \
                                                                             \
+  manageable(bool, PrintGCID, false,                                        \
+          "Print an identifier for each garbage collection")                \
+                                                                            \
   product(bool, PrintGCTaskTimeStamps, false,                               \
           "Print timestamps for individual gc worker thread tasks")         \
                                                                             \
@@ -2330,6 +2362,12 @@ class CommandLineFlags {
                                                                             \
   notproduct(bool, TraceScavenge, false,                                    \
           "Trace scavenge")                                                 \
+                                                                            \
+  product(bool, IgnoreEmptyClassPaths, false,                               \
+          "Ignore empty path elements in -classpath")                       \
+                                                                            \
+  product(bool, TraceClassPaths, false,                                     \
+          "Trace processing of class paths")                                \
                                                                             \
   product_rw(bool, TraceClassLoading, false,                                \
           "Trace all classes loaded")                                       \
@@ -2675,9 +2713,13 @@ class CommandLineFlags {
           "Delay invoking the compiler until main application class is "    \
           "loaded")                                                         \
                                                                             \
-  develop(bool, CompileTheWorld, false,                                     \
+  NOT_JVMCI(develop(bool, CompileTheWorld, false,                           \
           "Compile all methods in all classes in bootstrap class path "     \
-          "(stress test)")                                                  \
+            "(stress test)"))                                               \
+                                                                            \
+  JVMCI_ONLY(product(bool, CompileTheWorld, false,                          \
+          "Compile all methods in all classes in bootstrap class path "     \
+                     "(stress test)"))                                      \
                                                                             \
   develop(bool, CompileTheWorldPreloadClasses, true,                        \
           "Preload all classes used by a class before start loading")       \
@@ -3787,6 +3829,13 @@ class CommandLineFlags {
   product(bool, PrintSharedSpaces, false,                                   \
           "Print usage of shared spaces")                                   \
                                                                             \
+  product(bool, PrintSharedArchiveAndExit, false,                           \
+          "Print shared archive file contents")                             \
+                                                                            \
+  product(bool, PrintSharedDictionary, false,                               \
+          "If PrintSharedArchiveAndExit is true, also print the shared "    \
+          "dictionary")                                                     \
+                                                                            \
   product(uintx, SharedReadWriteSize,  NOT_LP64(12*M) LP64_ONLY(16*M),      \
           "Size of read-write space for metadata (in bytes)")               \
                                                                             \
@@ -3806,6 +3855,10 @@ class CommandLineFlags {
   diagnostic(bool, EnableInvokeDynamic, true,                               \
           "support JSR 292 (method handles, invokedynamic, "                \
           "anonymous classes")                                              \
+                                                                            \
+  diagnostic(bool, IgnoreUnverifiableClassesDuringDump, false,              \
+          "Do not quit -Xshare:dump even if we encounter unverifiable "     \
+          "classes. Just exclude them from the shared dictionary.")         \
                                                                             \
   diagnostic(bool, PrintMethodHandleStubs, false,                           \
           "Print generated stub code for method handles")                   \
@@ -3896,11 +3949,24 @@ class CommandLineFlags {
   product(bool, PrintGCCause, true,                                         \
           "Include GC cause in GC logging")                                 \
                                                                             \
+  experimental(intx, SurvivorAlignmentInBytes, 0,                           \
+           "Default survivor space alignment in bytes")                     \
+                                                                            \
   product(bool , AllowNonVirtualCalls, false,                               \
           "Obey the ACC_SUPER flag and allow invokenonvirtual calls")       \
                                                                             \
+  product(ccstr, DumpLoadedClassList, NULL,                                 \
+          "Dump the names all loaded classes, that could be stored into "   \
+          "the CDS archive, in the specified file")                         \
+                                                                            \
+  product(ccstr, SharedClassListFile, NULL,                                 \
+          "Override the default CDS class list")                            \
+                                                                            \
   diagnostic(ccstr, SharedArchiveFile, NULL,                                \
           "Override the default location of the CDS archive file")          \
+                                                                            \
+  product(ccstr, ExtraSharedClassListFile, NULL,                            \
+          "Extra classlist for building the CDS archive file")              \
                                                                             \
   experimental(uintx, ArrayAllocatorMallocLimit,                            \
           SOLARIS_ONLY(64*K) NOT_SOLARIS(max_uintx),                        \

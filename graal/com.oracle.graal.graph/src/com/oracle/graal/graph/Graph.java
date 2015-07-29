@@ -25,22 +25,26 @@ package com.oracle.graal.graph;
 import static com.oracle.graal.graph.Edges.Type.*;
 
 import java.util.*;
+import java.util.function.*;
+
+import jdk.internal.jvmci.common.*;
+import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.options.*;
 
 import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.internal.*;
 import com.oracle.graal.graph.Node.ValueNumberable;
 import com.oracle.graal.graph.iterators.*;
-import com.oracle.graal.options.*;
 
 /**
  * This class is a graph container, it contains the set of nodes that belong to this graph.
  */
 public class Graph {
 
-    static class Options {
+    public static class Options {
         @Option(help = "Verify graphs often during compilation when assertions are turned on", type = OptionType.Debug)//
         public static final OptionValue<Boolean> VerifyGraalGraphs = new OptionValue<>(true);
+        @Option(help = "Perform expensive verification of graph inputs, usages, successors and predecessors", type = OptionType.Debug)//
+        public static final OptionValue<Boolean> VerifyGraalGraphEdges = new OptionValue<>(false);
     }
 
     public final String name;
@@ -218,8 +222,17 @@ public class Graph {
     /**
      * Creates a copy of this graph.
      */
-    public Graph copy() {
-        return copy(name);
+    public final Graph copy() {
+        return copy(name, null);
+    }
+
+    /**
+     * Creates a copy of this graph.
+     *
+     * @param duplicationMapCallback consumer of the duplication map created during the copying
+     */
+    public final Graph copy(Consumer<Map<Node, Node>> duplicationMapCallback) {
+        return copy(name, duplicationMapCallback);
     }
 
     /**
@@ -227,9 +240,22 @@ public class Graph {
      *
      * @param newName the name of the copy, used for debugging purposes (can be null)
      */
-    public Graph copy(String newName) {
+    public final Graph copy(String newName) {
+        return copy(newName, null);
+    }
+
+    /**
+     * Creates a copy of this graph.
+     *
+     * @param newName the name of the copy, used for debugging purposes (can be null)
+     * @param duplicationMapCallback consumer of the duplication map created during the copying
+     */
+    protected Graph copy(String newName, Consumer<Map<Node, Node>> duplicationMapCallback) {
         Graph copy = new Graph(newName);
-        copy.addDuplicates(getNodes(), this, this.getNodeCount(), (Map<Node, Node>) null);
+        Map<Node, Node> duplicates = copy.addDuplicates(getNodes(), this, this.getNodeCount(), (Map<Node, Node>) null);
+        if (duplicationMapCallback != null) {
+            duplicationMapCallback.accept(duplicates);
+        }
         return copy;
     }
 
@@ -296,7 +322,20 @@ public class Graph {
         return add(node);
     }
 
+    public <T extends Node> void addWithoutUniqueWithInputs(T node) {
+        addInputs(node);
+        addHelper(node);
+    }
+
     public <T extends Node> T addOrUniqueWithInputs(T node) {
+        addInputs(node);
+        if (node.getNodeClass().valueNumberable()) {
+            return uniqueHelper(node, true);
+        }
+        return add(node);
+    }
+
+    private <T extends Node> void addInputs(T node) {
         NodePosIterator iterator = node.inputs().iterator();
         while (iterator.hasNext()) {
             Position pos = iterator.nextPosition();
@@ -306,10 +345,6 @@ public class Graph {
                 pos.initialize(node, addOrUniqueWithInputs(input));
             }
         }
-        if (node.getNodeClass().valueNumberable()) {
-            return uniqueHelper(node, true);
-        }
-        return add(node);
     }
 
     private <T extends Node> T addHelper(T node) {
@@ -715,9 +750,66 @@ public class Graph {
         return getNodes(type).iterator().hasNext();
     }
 
-    Node getStartNode(int iterableId) {
-        Node start = iterableNodesFirst.size() <= iterableId ? null : iterableNodesFirst.get(iterableId);
+    /**
+     * @param iterableId
+     * @return the first live Node with a matching iterableId
+     */
+    Node getIterableNodeStart(int iterableId) {
+        if (iterableNodesFirst.size() <= iterableId) {
+            return null;
+        }
+        Node start = iterableNodesFirst.get(iterableId);
+        if (start == null || !start.isDeleted()) {
+            return start;
+        }
+        return findFirstLiveIterable(iterableId, start);
+    }
+
+    private Node findFirstLiveIterable(int iterableId, Node node) {
+        assert iterableNodesFirst.get(iterableId) == node;
+        Node start = node;
+        while (start != null && start.isDeleted()) {
+            start = start.typeCacheNext;
+        }
+        iterableNodesFirst.set(iterableId, start);
+        if (start == null) {
+            iterableNodesLast.set(iterableId, start);
+        }
         return start;
+    }
+
+    /**
+     * @param node
+     * @return return the first live Node with a matching iterableId starting from {@code node}
+     */
+    Node getIterableNodeNext(Node node) {
+        if (node == null) {
+            return null;
+        }
+        Node n = node;
+        if (n == null || !n.isDeleted()) {
+            return n;
+        }
+
+        return findNextLiveiterable(node);
+    }
+
+    private Node findNextLiveiterable(Node start) {
+        Node n = start;
+        while (n != null && n.isDeleted()) {
+            n = n.typeCacheNext;
+        }
+        if (n == null) {
+            // Only dead nodes after this one
+            start.typeCacheNext = null;
+            int nodeClassId = start.getNodeClass().iterableId();
+            assert nodeClassId != Node.NOT_ITERABLE;
+            iterableNodesLast.set(nodeClassId, start);
+        } else {
+            // Everything in between is dead
+            start.typeCacheNext = n;
+        }
+        return n;
     }
 
     public NodeBitMap createNodeBitMap() {
@@ -816,12 +908,12 @@ public class Graph {
                     try {
                         assert node.verify();
                     } catch (AssertionError t) {
-                        throw new GraalInternalError(t);
+                        throw new JVMCIError(t);
                     } catch (RuntimeException t) {
-                        throw new GraalInternalError(t);
+                        throw new JVMCIError(t);
                     }
-                } catch (GraalInternalError e) {
-                    throw GraalGraphInternalError.transformAndAddContext(e, node).addContext(this);
+                } catch (JVMCIError e) {
+                    throw GraalGraphJVMCIError.transformAndAddContext(e, node).addContext(this);
                 }
             }
         }
@@ -887,8 +979,18 @@ public class Graph {
 
     @SuppressWarnings("all")
     public Map<Node, Node> addDuplicates(Iterable<? extends Node> newNodes, final Graph oldGraph, int estimatedNodeCount, DuplicationReplacement replacements) {
-        try (TimerCloseable s = DuplicateGraph.start()) {
+        try (DebugCloseable s = DuplicateGraph.start()) {
             return NodeClass.addGraphDuplicate(this, oldGraph, estimatedNodeCount, newNodes, replacements);
+        }
+    }
+
+    /**
+     * Reverses the usage orders of all nodes. This is used for debugging to make sure an unorthodox
+     * usage order does not trigger bugs in the compiler.
+     */
+    public void reverseUsageOrder() {
+        for (Node n : getNodes()) {
+            n.reverseUsageOrder();
         }
     }
 

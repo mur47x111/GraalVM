@@ -22,14 +22,14 @@
  */
 package com.oracle.graal.compiler.test.backend;
 
-import static com.oracle.graal.api.code.CodeUtil.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.code.CallingConvention.*;
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.*;
+import static jdk.internal.jvmci.code.CodeUtil.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.code.CallingConvention.Type;
 import com.oracle.graal.compiler.*;
 import com.oracle.graal.compiler.test.*;
-import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
 import com.oracle.graal.lir.gen.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.*;
@@ -48,8 +48,8 @@ public abstract class BackendTest extends GraalCompilerTest {
     protected LIRGenerationResult getLIRGenerationResult(final StructuredGraph graph) {
         SchedulePhase schedule = null;
         try (Scope s = Debug.scope("FrontEnd")) {
-            schedule = GraalCompiler.emitFrontEnd(getProviders(), getBackend().getTarget(), graph, null, getDefaultGraphBuilderSuite(), OptimisticOptimizations.NONE,
-                            graph.method().getProfilingInfo(), null, getSuites());
+            schedule = GraalCompiler.emitFrontEnd(getProviders(), getBackend().getTarget(), graph, getDefaultGraphBuilderSuite(), OptimisticOptimizations.NONE, graph.method().getProfilingInfo(),
+                            getSuites());
         } catch (Throwable e) {
             throw Debug.handle(e);
         }

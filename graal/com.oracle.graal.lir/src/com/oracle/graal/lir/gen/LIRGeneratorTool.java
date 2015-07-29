@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,19 +22,36 @@
  */
 package com.oracle.graal.lir.gen;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.compiler.common.spi.*;
 import com.oracle.graal.lir.*;
 
-public interface LIRGeneratorTool extends ArithmeticLIRGenerator {
+public interface LIRGeneratorTool extends ArithmeticLIRGenerator, BenchmarkCounterFactory {
 
+    /**
+     * Factory for creating spill moves.
+     *
+     * The instructions returned by the methods must only depend on the input values. References to
+     * values that require interaction with register allocation are strictly forbidden.
+     */
     public interface SpillMoveFactory {
 
         LIRInstruction createMove(AllocatableValue result, Value input);
+
+        LIRInstruction createStackMove(AllocatableValue result, Value input);
+    }
+
+    public abstract class BlockScope implements AutoCloseable {
+
+        public abstract AbstractBlockBase<?> getCurrentBlock();
+
+        public abstract void close();
+
     }
 
     CodeGenProviders getProviders();
@@ -55,9 +72,7 @@ public interface LIRGeneratorTool extends ArithmeticLIRGenerator {
 
     SpillMoveFactory getSpillMoveFactory();
 
-    void doBlockStart(AbstractBlockBase<?> block);
-
-    void doBlockEnd(AbstractBlockBase<?> block);
+    BlockScope getBlockScope(AbstractBlockBase<?> block);
 
     Value emitLoadConstant(LIRKind kind, Constant constant);
 
@@ -76,7 +91,7 @@ public interface LIRGeneratorTool extends ArithmeticLIRGenerator {
      * @param delta the value to be added
      */
     default Value emitAtomicReadAndAdd(Value address, Value delta) {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     /**
@@ -86,7 +101,7 @@ public interface LIRGeneratorTool extends ArithmeticLIRGenerator {
      * @param newValue the new value to be written
      */
     default Value emitAtomicReadAndWrite(Value address, Value newValue) {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     void emitDeoptimize(Value actionAndReason, Value failedSpeculation, LIRFrameState state);
@@ -116,8 +131,6 @@ public interface LIRGeneratorTool extends ArithmeticLIRGenerator {
      * @param data the data to be installed with the generated code
      */
     void emitData(AllocatableValue dst, byte[] data);
-
-    Value emitAddress(Value base, long displacement, Value index, int scale);
 
     Variable emitAddress(StackSlotValue slot);
 
@@ -159,7 +172,7 @@ public interface LIRGeneratorTool extends ArithmeticLIRGenerator {
      */
     AllocatableValue resultOperandFor(LIRKind kind);
 
-    void append(LIRInstruction op);
+    <I extends LIRInstruction> I append(I op);
 
     void emitJump(LabelRef label);
 
@@ -194,12 +207,12 @@ public interface LIRGeneratorTool extends ArithmeticLIRGenerator {
 
     @SuppressWarnings("unused")
     default Value emitCountLeadingZeros(Value value) {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     @SuppressWarnings("unused")
     default Value emitCountTrailingZeros(Value value) {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
 }

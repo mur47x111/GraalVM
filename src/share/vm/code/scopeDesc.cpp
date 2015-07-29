@@ -226,17 +226,18 @@ void ScopeDesc::print_on(outputStream* st, PcDesc* pd) const {
     }
   }
 
-#if defined(COMPILER2) || defined(GRAAL)
-  if (NOT_GRAAL(DoEscapeAnalysis &&) is_top() && _objects != NULL) {
+#if defined(COMPILER2) || INCLUDE_JVMCI
+  if (NOT_JVMCI(DoEscapeAnalysis &&) is_top() && _objects != NULL) {
     tty->print_cr("Objects");
     for (int i = 0; i < _objects->length(); i++) {
       ObjectValue* sv = _objects->at(i)->as_ObjectValue();
       tty->print(" - %d: ", sv->id());
+      tty->print("%s ", java_lang_Class::as_Klass(sv->klass()->as_ConstantOopReadValue()->value()())->external_name());
       sv->print_fields_on(tty);
       tty->cr();
     }
   }
-#endif // COMPILER2 || GRAAL
+#endif // COMPILER2 || INCLUDE_JVMCI
 }
 
 #endif

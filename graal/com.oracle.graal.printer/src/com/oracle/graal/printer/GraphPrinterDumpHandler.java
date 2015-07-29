@@ -22,8 +22,8 @@
  */
 package com.oracle.graal.printer;
 
-import static com.oracle.graal.compiler.GraalDebugConfig.*;
 import static com.oracle.graal.compiler.common.GraalOptions.*;
+import static com.oracle.graal.debug.JVMCIDebugConfig.*;
 
 import java.io.*;
 import java.net.*;
@@ -32,11 +32,16 @@ import java.nio.file.*;
 import java.text.*;
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
+import com.oracle.graal.debug.Debug.*;
+
+import jdk.internal.jvmci.debug.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.phases.schedule.*;
+
+//JaCoCo Exclude
 
 /**
  * Observes compilation events and uses {@link IdealGraphPrinter} to generate a graph representation

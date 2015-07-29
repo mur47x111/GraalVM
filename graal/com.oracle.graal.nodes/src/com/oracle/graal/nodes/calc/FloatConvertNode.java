@@ -22,7 +22,10 @@
  */
 package com.oracle.graal.nodes.calc;
 
-import com.oracle.graal.api.meta.*;
+import java.util.*;
+
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.FloatConvertOp;
@@ -43,8 +46,16 @@ public final class FloatConvertNode extends UnaryArithmeticNode<FloatConvertOp> 
 
     protected final FloatConvert op;
 
+    private static final EnumMap<FloatConvert, SerializableUnaryFunction<FloatConvertOp>> getOps;
+    static {
+        getOps = new EnumMap<>(FloatConvert.class);
+        for (FloatConvert op : FloatConvert.values()) {
+            getOps.put(op, table -> table.getFloatConvert(op));
+        }
+    }
+
     public FloatConvertNode(FloatConvert op, ValueNode input) {
-        super(TYPE, table -> table.getFloatConvert(op), input);
+        super(TYPE, getOps.get(op), input);
         this.op = op;
     }
 
@@ -102,7 +113,7 @@ public final class FloatConvertNode extends UnaryArithmeticNode<FloatConvertOp> 
         tool.getLowerer().lower(this, tool);
     }
 
-    public void generate(NodeMappableLIRBuilder builder, ArithmeticLIRGenerator gen) {
-        builder.setResult(this, gen.emitFloatConvert(getFloatConvert(), builder.operand(getValue())));
+    public void generate(NodeValueMap nodeValueMap, ArithmeticLIRGenerator gen) {
+        nodeValueMap.setResult(this, gen.emitFloatConvert(getFloatConvert(), nodeValueMap.operand(getValue())));
     }
 }

@@ -734,6 +734,12 @@ void frame::print_on_error(outputStream* st, char* buf, int buflen, bool verbose
                   nm->compile_id(), (nm->is_osr_method() ? "%" : ""),
                   ((nm->compiler() != NULL) ? nm->compiler()->name() : ""),
                   buf, m->code_size(), _pc, _cb->code_begin(), _pc - _cb->code_begin());
+#if INCLUDE_JVMCI
+        char* jvmciName = nm->jvmci_installed_code_name(buf, buflen);
+        if (jvmciName != NULL) {
+          st->print(" (%s)", jvmciName);
+        }
+#endif
       } else {
         st->print("J  " PTR_FORMAT, pc());
       }
@@ -900,7 +906,7 @@ oop* frame::interpreter_callee_receiver_addr(Symbol* signature) {
 }
 
 
-void frame::oops_interpreted_do(OopClosure* f, CLDToOopClosure* cld_f,
+void frame::oops_interpreted_do(OopClosure* f, CLDClosure* cld_f,
     const RegisterMap* map, bool query_oop_map_cache) {
   assert(is_interpreted_frame(), "Not an interpreted frame");
   assert(map != NULL, "map must be set");
@@ -1140,7 +1146,7 @@ void frame::oops_entry_do(OopClosure* f, const RegisterMap* map) {
 }
 
 
-void frame::oops_do_internal(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf, RegisterMap* map, bool use_interpreter_oop_map_cache) {
+void frame::oops_do_internal(OopClosure* f, CLDClosure* cld_f, CodeBlobClosure* cf, RegisterMap* map, bool use_interpreter_oop_map_cache) {
 #ifndef PRODUCT
   // simulate GC crash here to dump java thread in error report
   if (CrashGCForDumpingJavaThread) {
@@ -1307,7 +1313,9 @@ void frame::verify(const RegisterMap* map) {
       // make sure we have the right receiver type
     }
   }
-  COMPILER2_PRESENT(assert(DerivedPointerTable::is_empty(), "must be empty before verify");)
+#if defined(COMPILER2) || INCLUDE_JVMCI
+  assert(DerivedPointerTable::is_empty(), "must be empty before verify");
+#endif
   oops_do_internal(&VerifyOopClosure::verify_oop, NULL, NULL, (RegisterMap*)map, false);
 }
 

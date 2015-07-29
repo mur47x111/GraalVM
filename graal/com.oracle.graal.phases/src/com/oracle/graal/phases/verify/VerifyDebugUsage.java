@@ -22,8 +22,9 @@
  */
 package com.oracle.graal.phases.verify;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.phases.*;

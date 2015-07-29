@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,15 +22,18 @@
  */
 package com.oracle.graal.replacements.nodes;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.util.*;
+
+// JaCoCo Exclude
 
 /**
  * Compares two arrays with the same length.
@@ -53,13 +56,9 @@ public final class ArrayEqualsNode extends FixedWithNextNode implements LIRLower
 
     @OptionalInput(InputType.Memory) MemoryNode lastLocationAccess;
 
-    public ArrayEqualsNode(ValueNode array1, ValueNode array2, ValueNode length) {
+    public ArrayEqualsNode(ValueNode array1, ValueNode array2, ValueNode length, @ConstantNodeParameter Kind kind) {
         super(TYPE, StampFactory.forKind(Kind.Boolean));
-        // Ignore nullness in stamp equality test
-        assert array1.stamp().join(StampFactory.objectNonNull()).equals(array2.stamp().join(StampFactory.objectNonNull()));
-        ObjectStamp array1Stamp = (ObjectStamp) array1.stamp();
-        ResolvedJavaType componentType = array1Stamp.type().getComponentType();
-        this.kind = componentType.getKind();
+        this.kind = kind;
         this.array1 = array1;
         this.array2 = array2;
         this.length = length;
@@ -67,7 +66,7 @@ public final class ArrayEqualsNode extends FixedWithNextNode implements LIRLower
 
     @Override
     public Node canonical(CanonicalizerTool tool) {
-        if (hasNoUsages()) {
+        if (tool.allUsagesAvailable() && hasNoUsages()) {
             return null;
         }
         if (GraphUtil.unproxify(array1) == GraphUtil.unproxify(array2)) {
@@ -84,7 +83,7 @@ public final class ArrayEqualsNode extends FixedWithNextNode implements LIRLower
                 if (state1.getVirtualObject() == state2.getVirtualObject()) {
                     // the same virtual objects will always have the same contents
                     tool.replaceWithValue(ConstantNode.forBoolean(true, graph()));
-                } else if (state1.getVirtualObject().entryCount() == state2.getVirtualObject().entryCount()) {
+                } else if (state1.getVirtualObject().entryCount() == state2.getVirtualObject().entryCount() && state1.getState() == EscapeState.Virtual && state2.getState() == EscapeState.Virtual) {
                     int entryCount = state1.getVirtualObject().entryCount();
                     boolean allEqual = true;
                     for (int i = 0; i < entryCount; i++) {
@@ -109,28 +108,39 @@ public final class ArrayEqualsNode extends FixedWithNextNode implements LIRLower
     }
 
     @NodeIntrinsic
-    public static native boolean equals(boolean[] array1, boolean[] array2, int length);
+    public static native boolean equals(Object array1, Object array2, int length, @ConstantNodeParameter Kind kind);
 
-    @NodeIntrinsic
-    public static native boolean equals(byte[] array1, byte[] array2, int length);
+    public static boolean equals(boolean[] array1, boolean[] array2, int length) {
+        return equals(array1, array2, length, Kind.Boolean);
+    }
 
-    @NodeIntrinsic
-    public static native boolean equals(char[] array1, char[] array2, int length);
+    public static boolean equals(byte[] array1, byte[] array2, int length) {
+        return equals(array1, array2, length, Kind.Byte);
+    }
 
-    @NodeIntrinsic
-    public static native boolean equals(short[] array1, short[] array2, int length);
+    public static boolean equals(char[] array1, char[] array2, int length) {
+        return equals(array1, array2, length, Kind.Char);
+    }
 
-    @NodeIntrinsic
-    public static native boolean equals(int[] array1, int[] array2, int length);
+    public static boolean equals(short[] array1, short[] array2, int length) {
+        return equals(array1, array2, length, Kind.Short);
+    }
 
-    @NodeIntrinsic
-    public static native boolean equals(long[] array1, long[] array2, int length);
+    public static boolean equals(int[] array1, int[] array2, int length) {
+        return equals(array1, array2, length, Kind.Int);
+    }
 
-    @NodeIntrinsic
-    public static native boolean equals(float[] array1, float[] array2, int length);
+    public static boolean equals(long[] array1, long[] array2, int length) {
+        return equals(array1, array2, length, Kind.Long);
+    }
 
-    @NodeIntrinsic
-    public static native boolean equals(double[] array1, double[] array2, int length);
+    public static boolean equals(float[] array1, float[] array2, int length) {
+        return equals(array1, array2, length, Kind.Float);
+    }
+
+    public static boolean equals(double[] array1, double[] array2, int length) {
+        return equals(array1, array2, length, Kind.Double);
+    }
 
     @Override
     public void generate(NodeLIRBuilderTool gen) {

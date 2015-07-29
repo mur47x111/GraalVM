@@ -22,7 +22,10 @@
  */
 package com.oracle.graal.nodes.java;
 
-import com.oracle.graal.api.meta.*;
+import java.lang.reflect.*;
+
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -30,31 +33,53 @@ import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 
 @NodeInfo
-public final class DynamicNewInstanceNode extends AbstractNewObjectNode implements Canonicalizable {
+public class DynamicNewInstanceNode extends AbstractNewObjectNode implements Canonicalizable {
     public static final NodeClass<DynamicNewInstanceNode> TYPE = NodeClass.create(DynamicNewInstanceNode.class);
 
     @Input ValueNode clazz;
 
     public DynamicNewInstanceNode(ValueNode clazz, boolean fillContents) {
-        super(TYPE, StampFactory.objectNonNull(), fillContents);
-        this.clazz = clazz;
+        this(TYPE, clazz, fillContents, null);
     }
 
-    @Override
-    public Node canonical(CanonicalizerTool tool) {
-        if (clazz.isConstant()) {
-            ResolvedJavaType type = tool.getConstantReflection().asJavaType(clazz.asConstant());
-            if (type != null && type.isInitialized() && !type.isArray() && !type.isInterface() && !type.isPrimitive()) {
-                return new NewInstanceNode(type, fillContents());
-            }
-        }
-        return this;
+    protected DynamicNewInstanceNode(NodeClass<? extends DynamicNewInstanceNode> c, ValueNode clazz, boolean fillContents, FrameState stateBefore) {
+        super(c, StampFactory.objectNonNull(), fillContents, stateBefore);
+        this.clazz = clazz;
     }
 
     public ValueNode getInstanceType() {
         return clazz;
     }
 
-    @NodeIntrinsic
-    public static native Object allocateInstance(Class<?> clazz, @ConstantNodeParameter boolean fillContents);
+    @Override
+    public void simplify(SimplifierTool tool) {
+        /*
+         * Do not call the super implementation: we must not eliminate unused allocations because
+         * throwing an InstantiationException is a possible side effect of an unused allocation.
+         */
+    }
+
+    @Override
+    public Node canonical(CanonicalizerTool tool) {
+        if (clazz.isConstant()) {
+            ResolvedJavaType type = tool.getConstantReflection().asJavaType(clazz.asConstant());
+            if (type != null && type.isInitialized() && !throwsInstantiationException(type, tool.getMetaAccess())) {
+                return createNewInstanceNode(type);
+            }
+        }
+        return this;
+    }
+
+    /** Hook for subclasses to instantiate a subclass of {@link NewInstanceNode}. */
+    protected NewInstanceNode createNewInstanceNode(ResolvedJavaType type) {
+        return new NewInstanceNode(type, fillContents(), stateBefore());
+    }
+
+    public static boolean throwsInstantiationException(Class<?> type) {
+        return type.isPrimitive() || type.isArray() || type.isInterface() || Modifier.isAbstract(type.getModifiers()) || type == Class.class;
+    }
+
+    public static boolean throwsInstantiationException(ResolvedJavaType type, MetaAccessProvider metaAccess) {
+        return type.isPrimitive() || type.isArray() || type.isInterface() || Modifier.isAbstract(type.getModifiers()) || type.equals(metaAccess.lookupJavaType(Class.class));
+    }
 }

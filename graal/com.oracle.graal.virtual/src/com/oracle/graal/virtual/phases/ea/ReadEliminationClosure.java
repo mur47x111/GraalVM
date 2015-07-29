@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,11 +22,12 @@
  */
 package com.oracle.graal.virtual.phases.ea;
 
-import static com.oracle.graal.api.meta.LocationIdentity.*;
+import static jdk.internal.jvmci.meta.LocationIdentity.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
@@ -34,6 +35,8 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.cfg.*;
 import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.java.*;
+import com.oracle.graal.nodes.memory.*;
+import com.oracle.graal.nodes.memory.address.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.virtual.phases.ea.ReadEliminationBlockState.CacheEntry;
 import com.oracle.graal.virtual.phases.ea.ReadEliminationBlockState.LoadCacheEntry;
@@ -57,10 +60,10 @@ public class ReadEliminationClosure extends EffectsClosure<ReadEliminationBlockS
         if (node instanceof AccessFieldNode) {
             AccessFieldNode access = (AccessFieldNode) node;
             if (access.isVolatile()) {
-                processIdentity(state, ANY_LOCATION);
+                processIdentity(state, any());
             } else {
                 ValueNode object = GraphUtil.unproxify(access.object());
-                LoadCacheEntry identifier = new LoadCacheEntry(object, access.field());
+                LoadCacheEntry identifier = new LoadCacheEntry(object, access.field().getLocationIdentity());
                 ValueNode cachedValue = state.getCacheEntry(identifier);
                 if (node instanceof LoadFieldNode) {
                     if (cachedValue != null && access.stamp().isCompatible(cachedValue.stamp())) {
@@ -78,48 +81,52 @@ public class ReadEliminationClosure extends EffectsClosure<ReadEliminationBlockS
                         effects.deleteNode(store);
                         deleted = true;
                     }
-                    state.killReadCache(store.field());
+                    state.killReadCache(store.field().getLocationIdentity());
                     state.addCacheEntry(identifier, value);
                 }
             }
         } else if (node instanceof ReadNode) {
             ReadNode read = (ReadNode) node;
-            if (read.location() instanceof ConstantLocationNode) {
-                ValueNode object = GraphUtil.unproxify(read.object());
-                ReadCacheEntry identifier = new ReadCacheEntry(object, read.location());
-                ValueNode cachedValue = state.getCacheEntry(identifier);
-                if (cachedValue != null && read.stamp().isCompatible(cachedValue.stamp())) {
-                    if (read.getGuard() != null && !(read.getGuard() instanceof FixedNode)) {
-                        effects.addFixedNodeBefore(new ValueAnchorNode((ValueNode) read.getGuard()), read);
+            if (read.getAddress() instanceof OffsetAddressNode) {
+                OffsetAddressNode address = (OffsetAddressNode) read.getAddress();
+                if (address.getOffset().isConstant()) {
+                    ValueNode object = GraphUtil.unproxify(address.getBase());
+                    ReadCacheEntry identifier = new ReadCacheEntry(object, address.getOffset(), read.getLocationIdentity());
+                    ValueNode cachedValue = state.getCacheEntry(identifier);
+                    if (cachedValue != null && read.stamp().isCompatible(cachedValue.stamp())) {
+                        // Anchor guard if it is not fixed and different from cachedValue's guard
+                        if (read.getGuard() != null && !(read.getGuard() instanceof FixedNode)) {
+                            if (!(cachedValue instanceof GuardedNode) || ((GuardedNode) cachedValue).getGuard() != read.getGuard()) {
+                                effects.addFixedNodeBefore(new ValueAnchorNode((ValueNode) read.getGuard()), read);
+                            }
+                        }
                     }
-                    effects.replaceAtUsages(read, cachedValue);
-                    addScalarAlias(read, cachedValue);
-                    deleted = true;
-                } else {
-                    state.addCacheEntry(identifier, read);
                 }
             }
         } else if (node instanceof WriteNode) {
             WriteNode write = (WriteNode) node;
-            if (write.location() instanceof ConstantLocationNode) {
-                ValueNode object = GraphUtil.unproxify(write.object());
-                ReadCacheEntry identifier = new ReadCacheEntry(object, write.location());
-                ValueNode cachedValue = state.getCacheEntry(identifier);
+            if (write.getAddress() instanceof OffsetAddressNode) {
+                OffsetAddressNode address = (OffsetAddressNode) write.getAddress();
+                if (address.getOffset().isConstant()) {
+                    ValueNode object = GraphUtil.unproxify(address.getBase());
+                    ReadCacheEntry identifier = new ReadCacheEntry(object, address.getOffset(), write.getLocationIdentity());
+                    ValueNode cachedValue = state.getCacheEntry(identifier);
 
-                ValueNode value = getScalarAlias(write.value());
-                if (GraphUtil.unproxify(value) == GraphUtil.unproxify(cachedValue)) {
-                    effects.deleteNode(write);
-                    deleted = true;
+                    ValueNode value = getScalarAlias(write.value());
+                    if (GraphUtil.unproxify(value) == GraphUtil.unproxify(cachedValue)) {
+                        effects.deleteNode(write);
+                        deleted = true;
+                    }
+                    processIdentity(state, write.getLocationIdentity());
+                    state.addCacheEntry(identifier, value);
+                } else {
+                    processIdentity(state, write.getLocationIdentity());
                 }
-                processIdentity(state, write.location().getLocationIdentity());
-                state.addCacheEntry(identifier, value);
-            } else {
-                processIdentity(state, write.location().getLocationIdentity());
             }
         } else if (node instanceof UnsafeAccessNode) {
             if (node instanceof UnsafeLoadNode) {
                 UnsafeLoadNode load = (UnsafeLoadNode) node;
-                if (load.offset().isConstant() && !load.getLocationIdentity().equals(LocationIdentity.ANY_LOCATION)) {
+                if (load.offset().isConstant() && !load.getLocationIdentity().equals(LocationIdentity.any())) {
                     ValueNode object = GraphUtil.unproxify(load.object());
                     UnsafeLoadCacheEntry identifier = new UnsafeLoadCacheEntry(object, load.offset(), load.getLocationIdentity());
                     ValueNode cachedValue = state.getCacheEntry(identifier);
@@ -134,7 +141,7 @@ public class ReadEliminationClosure extends EffectsClosure<ReadEliminationBlockS
             } else {
                 assert node instanceof UnsafeStoreNode;
                 UnsafeStoreNode write = (UnsafeStoreNode) node;
-                if (write.offset().isConstant() && !write.getLocationIdentity().equals(LocationIdentity.ANY_LOCATION)) {
+                if (write.offset().isConstant() && !write.getLocationIdentity().equals(LocationIdentity.any())) {
                     ValueNode object = GraphUtil.unproxify(write.object());
                     UnsafeLoadCacheEntry identifier = new UnsafeLoadCacheEntry(object, write.offset(), write.getLocationIdentity());
                     ValueNode cachedValue = state.getCacheEntry(identifier);
@@ -162,7 +169,7 @@ public class ReadEliminationClosure extends EffectsClosure<ReadEliminationBlockS
     }
 
     private static void processIdentity(ReadEliminationBlockState state, LocationIdentity identity) {
-        if (identity.equals(ANY_LOCATION)) {
+        if (identity.isAny()) {
             state.killReadCache();
             return;
         }
@@ -203,7 +210,7 @@ public class ReadEliminationClosure extends EffectsClosure<ReadEliminationBlockS
         protected <T> PhiNode getCachedPhi(T virtual, Stamp stamp) {
             ValuePhiNode result = materializedPhis.get(virtual);
             if (result == null) {
-                result = new ValuePhiNode(stamp, merge);
+                result = createValuePhi(stamp);
                 materializedPhis.put(virtual, result);
             }
             return result;
@@ -236,17 +243,17 @@ public class ReadEliminationClosure extends EffectsClosure<ReadEliminationBlockS
                     PhiNode phiNode = getCachedPhi(entry, value.stamp().unrestricted());
                     mergeEffects.addFloatingNode(phiNode, "mergeReadCache");
                     for (int i = 0; i < states.size(); i++) {
-                        afterMergeEffects.addPhiInput(phiNode, states.get(i).getCacheEntry(key));
+                        setPhiInput(phiNode, i, states.get(i).getCacheEntry(key));
                     }
                     newState.addCacheEntry(key, phiNode);
                 } else if (value != null) {
                     newState.addCacheEntry(key, value);
                 }
             }
-            for (PhiNode phi : merge.phis()) {
+            for (PhiNode phi : getPhis()) {
                 if (phi.getKind() == Kind.Object) {
                     for (Map.Entry<CacheEntry<?>, ValueNode> entry : states.get(0).readCache.entrySet()) {
-                        if (entry.getKey().object == phi.valueAt(0)) {
+                        if (entry.getKey().object == getPhiValueAt(phi, 0)) {
                             mergeReadCachePhi(phi, entry.getKey(), states);
                         }
                     }
@@ -256,9 +263,9 @@ public class ReadEliminationClosure extends EffectsClosure<ReadEliminationBlockS
         }
 
         private void mergeReadCachePhi(PhiNode phi, CacheEntry<?> identifier, List<ReadEliminationBlockState> states) {
-            ValueNode[] values = new ValueNode[phi.valueCount()];
-            for (int i = 0; i < phi.valueCount(); i++) {
-                ValueNode value = states.get(i).getCacheEntry(identifier.duplicateWithObject(phi.valueAt(i)));
+            ValueNode[] values = new ValueNode[states.size()];
+            for (int i = 0; i < states.size(); i++) {
+                ValueNode value = states.get(i).getCacheEntry(identifier.duplicateWithObject(getPhiValueAt(phi, i)));
                 if (value == null) {
                     return;
                 }
@@ -269,7 +276,7 @@ public class ReadEliminationClosure extends EffectsClosure<ReadEliminationBlockS
             PhiNode phiNode = getCachedPhi(newIdentifier, values[0].stamp().unrestricted());
             mergeEffects.addFloatingNode(phiNode, "mergeReadCachePhi");
             for (int i = 0; i < values.length; i++) {
-                afterMergeEffects.addPhiInput(phiNode, values[i]);
+                setPhiInput(phiNode, i, values[i]);
             }
             newState.addCacheEntry(newIdentifier, phiNode);
         }

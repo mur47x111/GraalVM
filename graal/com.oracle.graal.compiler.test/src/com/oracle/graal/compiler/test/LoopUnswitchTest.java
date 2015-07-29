@@ -22,10 +22,11 @@
  */
 package com.oracle.graal.compiler.test;
 
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.*;
+
 import org.junit.*;
 
-import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.loop.phases.*;
 import com.oracle.graal.nodes.*;
@@ -134,8 +135,8 @@ public class LoopUnswitchTest extends GraalCompilerTest {
             ((StateSplit) stateSplit).setStateAfter(null);
         }
 
-        new CanonicalizerPhase(true).apply(graph, new PhaseContext(getProviders()));
-        new CanonicalizerPhase(true).apply(referenceGraph, new PhaseContext(getProviders()));
+        new CanonicalizerPhase().apply(graph, new PhaseContext(getProviders()));
+        new CanonicalizerPhase().apply(referenceGraph, new PhaseContext(getProviders()));
         try (Scope s = Debug.scope("Test", new DebugDumpScope("Test:" + snippet))) {
             assertEquals(referenceGraph, graph);
         } catch (Throwable e) {

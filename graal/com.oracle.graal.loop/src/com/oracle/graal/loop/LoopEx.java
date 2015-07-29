@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,11 +26,12 @@ import static com.oracle.graal.graph.Node.*;
 
 import java.util.*;
 
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+import com.oracle.graal.debug.*;
+
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.compiler.common.type.*;
-import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.iterators.*;
 import com.oracle.graal.loop.InductionVariable.Direction;
@@ -45,7 +46,7 @@ public class LoopEx {
     private final Loop<Block> loop;
     private LoopFragmentInside inside;
     private LoopFragmentWhole whole;
-    private CountedLoopInfo counted; // TODO (gd) detect
+    private CountedLoopInfo counted;
     private LoopsData data;
     private Map<Node, InductionVariable> ivs;
 
@@ -162,7 +163,7 @@ public class LoopEx {
     public boolean detectCounted() {
         LoopBeginNode loopBegin = loopBegin();
         FixedNode next = loopBegin.next();
-        while (next instanceof FixedGuardNode || next instanceof ValueAnchorNode) {
+        while (next instanceof FixedGuardNode || next instanceof ValueAnchorNode || next instanceof InfopointNode) {
             next = ((FixedWithNextNode) next).next();
         }
         if (next instanceof IfNode) {
@@ -198,9 +199,6 @@ public class LoopEx {
                     limit = lessThan.getY();
                 }
             }
-            if (iv != null && iv.isConstantStride() && iv.constantStride() != 1 && !(ifTest instanceof IntegerLessThanNode)) {
-                return false;
-            }
             if (condition == null) {
                 return false;
             }
@@ -212,17 +210,21 @@ public class LoopEx {
                 case EQ:
                     return false;
                 case NE: {
+                    if (!iv.isConstantStride() || Math.abs(iv.constantStride()) != 1) {
+                        return false;
+                    }
                     IntegerStamp initStamp = (IntegerStamp) iv.initNode().stamp();
                     IntegerStamp limitStamp = (IntegerStamp) limit.stamp();
                     if (iv.direction() == Direction.Up) {
                         if (initStamp.upperBound() > limitStamp.lowerBound()) {
                             return false;
                         }
-                    } else {
-                        assert iv.direction() == Direction.Down;
+                    } else if (iv.direction() == Direction.Down) {
                         if (initStamp.lowerBound() < limitStamp.upperBound()) {
                             return false;
                         }
+                    } else {
+                        return false;
                     }
                     oneOff = true;
                     break;
@@ -242,7 +244,7 @@ public class LoopEx {
                     }
                     break;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
             counted = new CountedLoopInfo(this, iv, limit, oneOff, negated ? ifNode.falseSuccessor() : ifNode.trueSuccessor());
             return true;
@@ -258,16 +260,19 @@ public class LoopEx {
         Collection<AbstractBeginNode> blocks = new LinkedList<>();
         Collection<LoopExitNode> exits = new LinkedList<>();
         Queue<Block> work = new LinkedList<>();
-        ControlFlowGraph cfg = loopsData().controlFlowGraph();
+        ControlFlowGraph cfg = loopsData().getCFG();
         work.add(cfg.blockFor(branch));
         while (!work.isEmpty()) {
             Block b = work.remove();
             if (loop().getExits().contains(b)) {
                 exits.add((LoopExitNode) b.getBeginNode());
             } else {
-                assert loop().getBlocks().contains(b);
                 blocks.add(b.getBeginNode());
-                work.addAll(b.getDominated());
+                for (Block d : b.getDominated()) {
+                    if (loop.getBlocks().contains(d)) {
+                        work.add(d);
+                    }
+                }
             }
         }
         return LoopFragment.computeNodes(branch.graph(), blocks, exits);
@@ -329,6 +334,16 @@ public class LoopEx {
                     iv = new DerivedScaledInductionVariable(loop, baseIv, (NegateNode) op);
                 } else if ((scale = mul(loop, op, baseIvNode)) != null) {
                     iv = new DerivedScaledInductionVariable(loop, baseIv, scale, op);
+                } else {
+                    boolean isValidConvert = op instanceof PiNode || op instanceof SignExtendNode;
+                    if (!isValidConvert && op instanceof ZeroExtendNode) {
+                        IntegerStamp inputStamp = (IntegerStamp) ((ZeroExtendNode) op).getValue().stamp();
+                        isValidConvert = inputStamp.isPositive();
+                    }
+
+                    if (isValidConvert) {
+                        iv = new DerivedConvertedInductionVariable(loop, baseIv, op.stamp(), op);
+                    }
                 }
 
                 if (iv != null) {
@@ -364,7 +379,7 @@ public class LoopEx {
         if (op instanceof LeftShiftNode) {
             LeftShiftNode shift = (LeftShiftNode) op;
             if (shift.getX() == base && shift.getY().isConstant()) {
-                return ConstantNode.forInt(1 << shift.getY().asJavaConstant().asInt(), base.graph());
+                return ConstantNode.forIntegerStamp(base.stamp(), 1 << shift.getY().asJavaConstant().asInt(), base.graph());
             }
         }
         return null;

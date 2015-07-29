@@ -22,6 +22,8 @@
  */
 package com.oracle.graal.nodes.calc;
 
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -50,7 +52,7 @@ public final class IsNullNode extends UnaryOpLogicNode implements LIRLowerable, 
     @Override
     public boolean verify() {
         assertTrue(getValue() != null, "is null input must not be null");
-        assertTrue(getValue().stamp() instanceof AbstractPointerStamp, "is null input must be a pointer");
+        assertTrue(getValue().stamp() instanceof AbstractPointerStamp, "input must be a pointer not %s", getValue().stamp());
         return super.verify();
     }
 
@@ -86,4 +88,22 @@ public final class IsNullNode extends UnaryOpLogicNode implements LIRLowerable, 
 
     @NodeIntrinsic
     public static native IsNullNode isNull(Object object);
+
+    @Override
+    public Stamp getSucceedingStampForValue(boolean negated) {
+        return negated ? StampFactory.objectNonNull() : StampFactory.alwaysNull();
+    }
+
+    @Override
+    public TriState tryFold(Stamp valueStamp) {
+        if (valueStamp instanceof ObjectStamp) {
+            ObjectStamp objectStamp = (ObjectStamp) valueStamp;
+            if (objectStamp.alwaysNull()) {
+                return TriState.TRUE;
+            } else if (objectStamp.nonNull()) {
+                return TriState.FALSE;
+            }
+        }
+        return TriState.UNKNOWN;
+    }
 }

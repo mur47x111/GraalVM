@@ -22,11 +22,11 @@
  */
 package com.oracle.graal.lir.amd64;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.asm.amd64.*;
-import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.asm.*;
 
@@ -57,7 +57,7 @@ public final class AMD64MathIntrinsicOp extends AMD64LIRInstruction {
             case SIN:   masm.fsin(asDoubleReg(result), asDoubleReg(input)); break;
             case COS:   masm.fcos(asDoubleReg(result), asDoubleReg(input)); break;
             case TAN:   masm.ftan(asDoubleReg(result), asDoubleReg(input)); break;
-            default:    throw GraalInternalError.shouldNotReachHere();
+            default:    throw JVMCIError.shouldNotReachHere();
         }
     }
 }

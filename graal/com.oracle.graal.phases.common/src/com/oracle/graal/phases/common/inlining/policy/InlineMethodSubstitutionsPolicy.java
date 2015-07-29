@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.phases.common.inlining.policy;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
@@ -38,7 +39,7 @@ public final class InlineMethodSubstitutionsPolicy extends InlineEverythingPolic
         CallTargetNode callTarget = invocation.callee().invoke().callTarget();
         if (callTarget instanceof MethodCallTargetNode) {
             ResolvedJavaMethod calleeMethod = ((MethodCallTargetNode) callTarget).targetMethod();
-            if (replacements.getMethodSubstitution(calleeMethod) != null) {
+            if (replacements.getSubstitution(calleeMethod, invocation.callee().invoke().bci()) != null) {
                 return true;
             }
         }

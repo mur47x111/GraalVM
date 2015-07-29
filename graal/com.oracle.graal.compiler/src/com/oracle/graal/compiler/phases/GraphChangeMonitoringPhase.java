@@ -26,7 +26,8 @@ import java.util.*;
 import java.util.stream.*;
 
 import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
+import com.oracle.graal.debug.Debug.*;
+
 import com.oracle.graal.graph.Graph.NodeEvent;
 import com.oracle.graal.graph.Graph.NodeEventScope;
 import com.oracle.graal.graph.Node;
@@ -66,7 +67,7 @@ public class GraphChangeMonitoringPhase<C extends PhaseContext> extends PhaseSui
          * having their inputs change are the main interesting differences.
          */
         HashSetNodeEventListener listener = new HashSetNodeEventListener().exclude(NodeEvent.NODE_ADDED);
-        StructuredGraph graphCopy = graph.copy();
+        StructuredGraph graphCopy = (StructuredGraph) graph.copy();
         try (NodeEventScope s = graphCopy.trackNodeEvents(listener)) {
             try (Scope s2 = Debug.sandbox("WithoutMonitoring", null)) {
                 super.run(graphCopy, context);

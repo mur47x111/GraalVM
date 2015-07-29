@@ -24,31 +24,20 @@ package com.oracle.graal.hotspot.debug;
 
 import java.io.*;
 import java.util.*;
+import java.util.Map.Entry;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
-import sun.misc.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.debug.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.compiler.common.type.*;
-import com.oracle.graal.debug.*;
-import com.oracle.graal.graph.*;
-import com.oracle.graal.hotspot.*;
-import com.oracle.graal.hotspot.bridge.*;
-import com.oracle.graal.hotspot.meta.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.options.*;
+
 import com.oracle.graal.hotspot.replacements.*;
-import com.oracle.graal.nodeinfo.*;
-import com.oracle.graal.nodes.HeapAccess.BarrierType;
-import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.debug.*;
-import com.oracle.graal.nodes.extended.*;
-import com.oracle.graal.nodes.spi.*;
-import com.oracle.graal.options.*;
-import com.oracle.graal.replacements.nodes.*;
 
-import edu.umd.cs.findbugs.annotations.*;
+//JaCoCo Exclude
 
 /**
  * This class contains infrastructure to maintain counters based on {@link DynamicCounterNode}s. The
@@ -98,6 +87,10 @@ public class BenchmarkCounters {
                        "  dacapo = 'err, starting =====, PASSED in'%n" +
                        "  specjvm2008 = 'out,Iteration ~ (~s) begins:,Iteration ~ (~s) ends:'", type = OptionType.Debug)
         private static final OptionValue<String> BenchmarkDynamicCounters = new OptionValue<>(null);
+        @Option(help = "Use grouping separators for number printing", type = OptionType.Debug)
+        private static final OptionValue<Boolean> DynamicCountersPrintGroupSeparator = new OptionValue<>(true);
+        @Option(help = "Print in human readable format", type = OptionType.Debug)
+        private static final OptionValue<Boolean> DynamicCountersHumanReadable = new OptionValue<>(true);
         //@formatter:on
     }
 
@@ -105,59 +98,62 @@ public class BenchmarkCounters {
 
     public static boolean enabled = false;
 
-    public static final ConcurrentHashMap<String, Integer> indexes = new ConcurrentHashMap<>();
-    public static final ArrayList<String> groups = new ArrayList<>();
+    private static class Counter {
+        public final int index;
+        public final String group;
+        public final AtomicLong staticCounters;
+
+        public Counter(int index, String group, AtomicLong staticCounters) {
+            this.index = index;
+            this.group = group;
+            this.staticCounters = staticCounters;
+        }
+    }
+
+    public static final ConcurrentHashMap<String, Counter> counterMap = new ConcurrentHashMap<>();
     public static long[] delta;
-    public static final ArrayList<AtomicLong> staticCounters = new ArrayList<>();
+
+    public static int getIndexConstantIncrement(String name, String group, HotSpotVMConfig config, long increment) {
+        Counter counter = getCounter(name, group, config);
+        counter.staticCounters.addAndGet(increment);
+        return counter.index;
+    }
+
+    public static int getIndex(String name, String group, HotSpotVMConfig config) {
+        Counter counter = getCounter(name, group, config);
+        return counter.index;
+    }
 
     @SuppressFBWarnings(value = "AT_OPERATION_SEQUENCE_ON_CONCURRENT_ABSTRACTION", justification = "concurrent abstraction calls are in synchronized block")
-    private static int getIndex(DynamicCounterNode counter, StructuredGraph currentGraph) {
+    private static Counter getCounter(String name, String group, HotSpotVMConfig config) throws JVMCIError {
         if (!enabled) {
-            throw new GraalInternalError("counter nodes shouldn't exist when counters are not enabled: " + counter.getGroup() + ", " + counter.getName());
+            throw new JVMCIError("cannot access count index when counters are not enabled: " + group + ", " + name);
         }
-        String name;
-        String group = counter.getGroup();
-        if (counter.isWithContext()) {
-            name = counter.getName() + " @ ";
-            if (currentGraph.method() != null) {
-                StackTraceElement stackTraceElement = currentGraph.method().asStackTraceElement(0);
-                if (stackTraceElement != null) {
-                    name += " " + stackTraceElement.toString();
-                } else {
-                    name += currentGraph.method().format("%h.%n");
-                }
-            }
-            if (currentGraph.name != null) {
-                name += " (" + currentGraph.name + ")";
-            }
-            name += "#" + group;
-
-        } else {
-            name = counter.getName() + "#" + group;
-        }
-        Integer index = indexes.get(name);
-        if (index == null) {
+        String nameGroup = name + "#" + group;
+        Counter counter = counterMap.get(nameGroup);
+        if (counter == null) {
             synchronized (BenchmarkCounters.class) {
-                index = indexes.get(name);
-                if (index == null) {
-                    index = indexes.size();
-                    indexes.put(name, index);
-                    groups.add(group);
-                    staticCounters.add(new AtomicLong());
+                counter = counterMap.get(nameGroup);
+                if (counter == null) {
+                    counter = new Counter(counterMap.size(), group, new AtomicLong());
+                    counterMap.put(nameGroup, counter);
                 }
             }
         }
-        assert groups.get(index).equals(group) : "mismatching groups: " + groups.get(index) + " vs. " + group;
-        if (counter.getIncrement().isConstant()) {
-            staticCounters.get(index).addAndGet(counter.getIncrement().asJavaConstant().asLong());
+        assert counter.group.equals(group) : "mismatching groups: " + counter.group + " vs. " + group;
+        int countersSize = config.jvmciCountersSize;
+        if (counter.index >= countersSize) {
+            throw new JVMCIError("too many counters, reduce number of counters or increase -XX:GraalCounterSize=... (current value: " + countersSize + ")");
         }
-        return index;
+        return counter;
     }
 
     private static synchronized void dump(PrintStream out, double seconds, long[] counters, int maxRows) {
-        if (!groups.isEmpty()) {
-            out.println("====== dynamic counters (" + staticCounters.size() + " in total) ======");
-            for (String group : new TreeSet<>(groups)) {
+        if (!counterMap.isEmpty()) {
+            out.println("====== dynamic counters (" + counterMap.size() + " in total) ======");
+            TreeSet<String> set = new TreeSet<>();
+            counterMap.forEach((nameGroup, counter) -> set.add(counter.group));
+            for (String group : set) {
                 if (group != null) {
                     if (DUMP_STATIC) {
                         dumpCounters(out, seconds, counters, true, group, maxRows);
@@ -176,14 +172,13 @@ public class BenchmarkCounters {
     }
 
     private static synchronized void dumpCounters(PrintStream out, double seconds, long[] counters, boolean staticCounter, String group, int maxRows) {
-        TreeMap<Long, String> sorted = new TreeMap<>();
 
         // collect the numbers
         long[] array;
         if (staticCounter) {
-            array = new long[indexes.size()];
-            for (int i = 0; i < array.length; i++) {
-                array[i] = staticCounters.get(i).get();
+            array = new long[counterMap.size()];
+            for (Counter counter : counterMap.values()) {
+                array[counter.index] = counter.staticCounters.get();
             }
         } else {
             array = counters.clone();
@@ -191,13 +186,28 @@ public class BenchmarkCounters {
                 array[i] -= delta[i];
             }
         }
+        Set<Entry<String, Counter>> counterEntrySet = counterMap.entrySet();
+        if (Options.DynamicCountersHumanReadable.getValue()) {
+            dumpHumanReadable(out, seconds, staticCounter, group, maxRows, array, counterEntrySet);
+        } else {
+            dumpComputerReadable(out, staticCounter, group, array, counterEntrySet);
+        }
+    }
+
+    private static String getName(String nameGroup, String group) {
+        return nameGroup.substring(0, nameGroup.length() - group.length() - 1);
+    }
+
+    private static void dumpHumanReadable(PrintStream out, double seconds, boolean staticCounter, String group, int maxRows, long[] array, Set<Entry<String, Counter>> counterEntrySet) {
         // sort the counters by putting them into a sorted map
+        TreeMap<Long, String> sorted = new TreeMap<>();
         long sum = 0;
-        for (Map.Entry<String, Integer> entry : indexes.entrySet()) {
-            int index = entry.getValue();
-            if (groups.get(index).equals(group)) {
+        for (Map.Entry<String, Counter> entry : counterEntrySet) {
+            Counter counter = entry.getValue();
+            int index = counter.index;
+            if (counter.group.equals(group)) {
                 sum += array[index];
-                sorted.put(array[index] * array.length + index, entry.getKey().substring(0, entry.getKey().length() - group.length() - 1));
+                sorted.put(array[index] * array.length + index, getName(entry.getKey(), group));
             }
         }
 
@@ -216,29 +226,44 @@ public class BenchmarkCounters {
                 cnt--;
             }
 
+            String numFmt = Options.DynamicCountersPrintGroupSeparator.getValue() ? "%,19d" : "%19d";
             if (staticCounter) {
                 out.println("=========== " + group + " (static counters):");
                 for (Map.Entry<Long, String> entry : sorted.entrySet()) {
                     long counter = entry.getKey() / array.length;
-                    out.format(Locale.US, "%,19d %3d%%  %s\n", counter, percentage(counter, sum), entry.getValue());
+                    out.format(Locale.US, numFmt + " %3d%%  %s\n", counter, percentage(counter, sum), entry.getValue());
                 }
-                out.format(Locale.US, "%,19d total\n", sum);
+                out.format(Locale.US, numFmt + " total\n", sum);
             } else {
                 if (group.startsWith("~")) {
                     out.println("=========== " + group + " (dynamic counters), time = " + seconds + " s:");
                     for (Map.Entry<Long, String> entry : sorted.entrySet()) {
                         long counter = entry.getKey() / array.length;
-                        out.format(Locale.US, "%,19d/s %3d%%  %s\n", (long) (counter / seconds), percentage(counter, sum), entry.getValue());
+                        out.format(Locale.US, numFmt + "/s %3d%%  %s\n", (long) (counter / seconds), percentage(counter, sum), entry.getValue());
                     }
-                    out.format(Locale.US, "%,19d/s total\n", (long) (sum / seconds));
+                    out.format(Locale.US, numFmt + "/s total\n", (long) (sum / seconds));
                 } else {
                     out.println("=========== " + group + " (dynamic counters):");
                     for (Map.Entry<Long, String> entry : sorted.entrySet()) {
                         long counter = entry.getKey() / array.length;
-                        out.format(Locale.US, "%,19d %3d%%  %s\n", counter, percentage(counter, sum), entry.getValue());
+                        out.format(Locale.US, numFmt + " %3d%%  %s\n", counter, percentage(counter, sum), entry.getValue());
                     }
-                    out.format(Locale.US, "%,19d total\n", sum);
+                    out.format(Locale.US, numFmt + " total\n", sum);
                 }
+            }
+        }
+    }
+
+    private static void dumpComputerReadable(PrintStream out, boolean staticCounter, String group, long[] array, Set<Entry<String, Counter>> counterEntrySet) {
+        String category = staticCounter ? "static counters" : "dynamic counters";
+        for (Map.Entry<String, Counter> entry : counterEntrySet) {
+            Counter counter = entry.getValue();
+            if (counter.group.equals(group)) {
+                String name = getName(entry.getKey(), group);
+                int index = counter.index;
+                long value = array[index];
+                // TODO(je): escape strings
+                out.printf("%s;%s;%s;%d\n", category, group, name, value);
             }
         }
     }
@@ -334,7 +359,7 @@ public class BenchmarkCounters {
         if (Options.BenchmarkDynamicCounters.getValue() != null) {
             String[] arguments = Options.BenchmarkDynamicCounters.getValue().split(",");
             if (arguments.length == 0 || (arguments.length % 3) != 0) {
-                throw new GraalInternalError("invalid arguments to BenchmarkDynamicCounters: (err|out),start,end,(err|out),start,end,... (~ matches multiple digits)");
+                throw new JVMCIError("invalid arguments to BenchmarkDynamicCounters: (err|out),start,end,(err|out),start,end,... (~ matches multiple digits)");
             }
             for (int i = 0; i < arguments.length; i += 3) {
                 if (arguments[i].equals("err")) {
@@ -342,7 +367,7 @@ public class BenchmarkCounters {
                 } else if (arguments[i].equals("out")) {
                     System.setOut(new PrintStream(new BenchmarkCountersOutputStream(System.out, arguments[i + 1], arguments[i + 2])));
                 } else {
-                    throw new GraalInternalError("invalid arguments to BenchmarkDynamicCounters: err|out");
+                    throw new JVMCIError("invalid arguments to BenchmarkDynamicCounters: err|out");
                 }
             }
             enabled = true;
@@ -353,7 +378,7 @@ public class BenchmarkCounters {
         if (Options.TimedDynamicCounters.getValue() > 0) {
             Thread thread = new Thread() {
                 long lastTime = System.nanoTime();
-                PrintStream out = TTY.cachedOut;
+                PrintStream out = TTY.out;
 
                 @Override
                 public void run() {
@@ -380,54 +405,7 @@ public class BenchmarkCounters {
 
     public static void shutdown(CompilerToVM compilerToVM, long compilerStartTime) {
         if (Options.GenericDynamicCounters.getValue()) {
-            dump(TTY.cachedOut, (System.nanoTime() - compilerStartTime) / 1000000000d, compilerToVM.collectCounters(), 100);
+            dump(TTY.out, (System.nanoTime() - compilerStartTime) / 1000000000d, compilerToVM.collectCounters(), 100);
         }
-    }
-
-    private static final LocationIdentity COUNTER_ARRAY_LOCATION = NamedLocationIdentity.mutable("COUNTER_ARRAY_LOCATION");
-    private static final LocationIdentity COUNTER_LOCATION = NamedLocationIdentity.mutable("COUNTER_LOCATION");
-
-    @NodeInfo(nameTemplate = "CounterIndex")
-    private static final class CounterIndexNode extends FloatingNode implements LIRLowerable {
-
-        public static final NodeClass<CounterIndexNode> TYPE = NodeClass.create(CounterIndexNode.class);
-        protected final Object counter;
-        protected final int countersSize;
-
-        protected CounterIndexNode(Stamp stamp, DynamicCounterNode counter, int countersSize) {
-            super(TYPE, stamp);
-            this.countersSize = countersSize;
-            this.counter = counter;
-        }
-
-        @Override
-        public void generate(NodeLIRBuilderTool generator) {
-            int index = BenchmarkCounters.getIndex((DynamicCounterNode) counter, graph());
-            if (index >= countersSize) {
-                throw new GraalInternalError("too many counters, reduce number of counters or increase -XX:GraalCounterSize=... (current value: " + countersSize + ")");
-            }
-
-            generator.setResult(this, JavaConstant.forIntegerKind(getKind(), index));
-        }
-    }
-
-    public static void lower(DynamicCounterNode counter, HotSpotRegistersProvider registers, HotSpotVMConfig config, Kind wordKind) {
-        StructuredGraph graph = counter.graph();
-
-        ReadRegisterNode thread = graph.add(new ReadRegisterNode(registers.getThreadRegister(), wordKind, true, false));
-
-        CounterIndexNode index = graph.unique(new CounterIndexNode(StampFactory.forKind(wordKind), counter, config.graalCountersSize));
-        ConstantLocationNode arrayLocation = graph.unique(new ConstantLocationNode(COUNTER_ARRAY_LOCATION, config.graalCountersThreadOffset));
-        ReadNode readArray = graph.add(new ReadNode(thread, arrayLocation, StampFactory.forKind(wordKind), BarrierType.NONE));
-        IndexedLocationNode location = graph.unique(new IndexedLocationNode(COUNTER_LOCATION, 0, index, Unsafe.ARRAY_LONG_INDEX_SCALE));
-        ReadNode read = graph.add(new ReadNode(readArray, location, StampFactory.forKind(Kind.Long), BarrierType.NONE));
-        AddNode add = graph.unique(new AddNode(read, counter.getIncrement()));
-        WriteNode write = graph.add(new WriteNode(readArray, add, location, BarrierType.NONE));
-
-        graph.addBeforeFixed(counter, thread);
-        graph.addBeforeFixed(counter, readArray);
-        graph.addBeforeFixed(counter, read);
-        graph.addBeforeFixed(counter, write);
-        graph.removeFixed(counter);
     }
 }

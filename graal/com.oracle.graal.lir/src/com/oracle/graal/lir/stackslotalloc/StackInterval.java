@@ -22,14 +22,15 @@
  */
 package com.oracle.graal.lir.stackslotalloc;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 
 public final class StackInterval {
 
     private static final int INVALID_START = Integer.MAX_VALUE;
     private static final int INVALID_END = Integer.MIN_VALUE;
     private final VirtualStackSlot operand;
+    private StackInterval hint;
     private final LIRKind kind;
     private int from = INVALID_START;
     private int to = INVALID_END;
@@ -98,7 +99,15 @@ public final class StackInterval {
 
     @Override
     public String toString() {
-        return String.format("SI[%d-%d] k=%s o=%s l=%s", from, to, kind, operand, location);
+        return String.format("SI[%d-%d] k=%s o=%s l=%s h=%s", from, to, kind, operand, location, hint != null ? hint.getOperand() : "null");
+    }
+
+    public void setLocationHint(StackInterval locationHint) {
+        hint = locationHint;
+    }
+
+    public StackInterval locationHint() {
+        return hint;
     }
 
 }

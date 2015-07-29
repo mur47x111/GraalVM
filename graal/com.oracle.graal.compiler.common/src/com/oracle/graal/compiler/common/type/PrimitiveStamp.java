@@ -22,7 +22,7 @@
  */
 package com.oracle.graal.compiler.common.type;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
 
 /**
  * Type describing primitive values.

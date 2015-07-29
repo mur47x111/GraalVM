@@ -22,9 +22,10 @@
  */
 package com.oracle.graal.truffle.test;
 
+import jdk.internal.jvmci.code.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.code.*;
 import com.oracle.graal.truffle.test.nodes.*;
 import com.oracle.truffle.api.*;
 import com.oracle.truffle.api.frame.*;

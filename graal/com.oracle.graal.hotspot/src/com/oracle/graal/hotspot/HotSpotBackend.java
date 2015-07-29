@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,9 +26,12 @@ import static com.oracle.graal.hotspot.stubs.StubUtil.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.code.stack.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.code.stack.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.options.*;
+
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.compiler.target.*;
 import com.oracle.graal.hotspot.meta.*;
@@ -40,28 +43,31 @@ import com.oracle.graal.lir.LIRInstruction.OperandFlag;
 import com.oracle.graal.lir.LIRInstruction.OperandMode;
 import com.oracle.graal.lir.StandardOp.LabelOp;
 import com.oracle.graal.lir.StandardOp.SaveRegistersOp;
+import com.oracle.graal.lir.asm.*;
 import com.oracle.graal.lir.framemap.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.options.*;
 import com.oracle.graal.phases.tiers.*;
 import com.oracle.graal.word.*;
 
 /**
  * HotSpot specific backend.
  */
-public abstract class HotSpotBackend extends Backend {
+public abstract class HotSpotBackend extends Backend implements FrameMap.ReferenceMapBuilderFactory {
 
     public static class Options {
         // @formatter:off
         @Option(help = "Use Graal stubs instead of HotSpot stubs where possible")
         public static final OptionValue<Boolean> PreferGraalStubs = new OptionValue<>(false);
+        @Option(help = "Enables instruction profiling on assembler level. Valid values are a comma separated list of supported instructions." +
+                        " Compare with subclasses of Assembler.InstructionCounter.", type = OptionType.Debug)
+        public static final OptionValue<String> ASMInstructionProfiling = new OptionValue<>(null);
         // @formatter:on
     }
 
     /**
      * Descriptor for {@link ExceptionHandlerStub}. This stub is called by the
-     * {@linkplain HotSpotVMConfig#codeInstallerMarkIdExceptionHandlerEntry exception handler} in a
-     * compiled method.
+     * {@linkplain HotSpotVMConfig#MARKID_EXCEPTION_HANDLER_ENTRY exception handler} in a compiled
+     * method.
      */
     public static final ForeignCallDescriptor EXCEPTION_HANDLER = new ForeignCallDescriptor("exceptionHandler", void.class, Object.class, Word.class);
 
@@ -119,17 +125,17 @@ public abstract class HotSpotBackend extends Backend {
     public static final ForeignCallDescriptor VM_ERROR = new ForeignCallDescriptor("vm_error", void.class, Object.class, Object.class, long.class);
 
     /**
-     * @see NewMultiArrayStubCall
+     * New multi array stub call.
      */
     public static final ForeignCallDescriptor NEW_MULTI_ARRAY = new ForeignCallDescriptor("new_multi_array", Object.class, Word.class, int.class, Word.class);
 
     /**
-     * @see NewArrayStubCall
+     * New array stub.
      */
     public static final ForeignCallDescriptor NEW_ARRAY = new ForeignCallDescriptor("new_array", Object.class, Word.class, int.class);
 
     /**
-     * @see NewInstanceStubCall
+     * New insstance stub.
      */
     public static final ForeignCallDescriptor NEW_INSTANCE = new ForeignCallDescriptor("new_instance", Object.class, Word.class);
 
@@ -231,8 +237,14 @@ public abstract class HotSpotBackend extends Backend {
         return getProviders().getSuites();
     }
 
+    protected void profileInstructions(LIR lir, CompilationResultBuilder crb) {
+        if (HotSpotBackend.Options.ASMInstructionProfiling.getValue() != null) {
+            HotSpotInstructionProfiling.countInstructions(lir, crb.asm);
+        }
+    }
+
     @Override
-    public DisassemblerProvider getDisassembler() {
-        return getProviders().getDisassembler();
+    public ReferenceMapBuilder newReferenceMapBuilder(int totalFrameSize) {
+        return new HotSpotReferenceMapBuilder(getTarget(), totalFrameSize);
     }
 }

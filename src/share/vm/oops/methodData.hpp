@@ -542,7 +542,8 @@ protected:
     // null_seen:
     //  saw a null operand (cast/aastore/instanceof)
       null_seen_flag              = DataLayout::first_flag + 0
-#ifdef GRAAL
+
+#if INCLUDE_JVMCI
     // bytecode threw any exception
     , exception_seen_flag         = null_seen_flag + 1
 #endif
@@ -568,7 +569,8 @@ public:
   // Consulting it allows the compiler to avoid setting up null_check traps.
   bool null_seen()     { return flag_at(null_seen_flag); }
   void set_null_seen()    { set_flag_at(null_seen_flag); }
-#ifdef GRAAL
+
+#if INCLUDE_JVMCI
   // true if an exception was thrown at the specific BCI
   bool exception_seen() { return flag_at(exception_seen_flag); }
   void set_exception_seen() { set_flag_at(exception_seen_flag); }
@@ -1177,17 +1179,17 @@ public:
 class ReceiverTypeData : public CounterData {
 protected:
   enum {
-#ifdef GRAAL
+#if INCLUDE_JVMCI
     // Description of the different counters
     // ReceiverTypeData for instanceof/checkcast/aastore:
     //   C1/C2: count is incremented on type overflow and decremented for failed type checks
-    //   Graal: count decremented for failed type checks and nonprofiled_count is incremented on type overflow
-    //          TODO (chaeubl): in fact, Graal should also increment the count for failed type checks to mimic the C1/C2 behavior
+    //   JVMCI: count decremented for failed type checks and nonprofiled_count is incremented on type overflow
+    //          TODO (chaeubl): in fact, JVMCI should also increment the count for failed type checks to mimic the C1/C2 behavior
     // VirtualCallData for invokevirtual/invokeinterface:
     //   C1/C2: count is incremented on type overflow
-    //   Graal: count is incremented on type overflow, nonprofiled_count is incremented on method overflow
+    //   JVMCI: count is incremented on type overflow, nonprofiled_count is incremented on method overflow
 
-    // Graal is interested in knowing the percentage of type checks involving a type not explicitly in the profile
+    // JVMCI is interested in knowing the percentage of type checks involving a type not explicitly in the profile
     nonprofiled_count_off_set = counter_cell_count,
     receiver0_offset,
 #else
@@ -1207,7 +1209,7 @@ public:
   virtual bool is_ReceiverTypeData() const { return true; }
 
   static int static_cell_count() {
-    return counter_cell_count + (uint) TypeProfileWidth * receiver_type_row_cell_count GRAAL_ONLY(+ 1);
+    return counter_cell_count + (uint) TypeProfileWidth * receiver_type_row_cell_count JVMCI_ONLY(+ 1);
   }
 
   virtual int cell_count() const {
@@ -1269,9 +1271,9 @@ public:
     set_count(0);
     set_receiver(row, NULL);
     set_receiver_count(row, 0);
-#ifdef GRAAL
+#if INCLUDE_JVMCI
     if (!this->is_VirtualCallData()) {
-      // if this is a ReceiverTypeData for Graal, the nonprofiled_count
+      // if this is a ReceiverTypeData for JVMCI, the nonprofiled_count
       // must also be reset (see "Description of the different counters" above)
       set_nonprofiled_count(0);
     }
@@ -1285,7 +1287,7 @@ public:
   static ByteSize receiver_count_offset(uint row) {
     return cell_offset(receiver_count_cell_index(row));
   }
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   static ByteSize nonprofiled_receiver_count_offset() {
     return cell_offset(nonprofiled_count_off_set);
   }
@@ -1362,7 +1364,7 @@ public:
   static int static_cell_count() {
     // At this point we could add more profile state, e.g., for arguments.
     // But for now it's the same size as the base record type.
-    return ReceiverTypeData::static_cell_count() GRAAL_ONLY(+ (uint) MethodProfileWidth * receiver_type_row_cell_count);
+    return ReceiverTypeData::static_cell_count() JVMCI_ONLY(+ (uint) MethodProfileWidth * receiver_type_row_cell_count);
   }
 
   virtual int cell_count() const {
@@ -1384,7 +1386,7 @@ public:
   }
 #endif // CC_INTERP
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   static ByteSize method_offset(uint row) {
     return cell_offset(method_cell_index(row));
   }
@@ -1440,7 +1442,7 @@ public:
 #endif
 
 #ifndef PRODUCT
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   void print_method_data_on(outputStream* st) const;
 #endif
   void print_data_on(outputStream* st, const char* extra = NULL) const;
@@ -2163,7 +2165,7 @@ public:
 
   // Whole-method sticky bits and flags
   enum {
-    _trap_hist_limit    = 19 GRAAL_ONLY(+5),   // decoupled from Deoptimization::Reason_LIMIT
+    _trap_hist_limit    = 20 JVMCI_ONLY(+5),   // decoupled from Deoptimization::Reason_LIMIT
     _trap_hist_mask     = max_jubyte,
     _extra_data_count   = 4     // extra DataLayout headers, for trap history
   }; // Public flag values
@@ -2173,7 +2175,7 @@ private:
   uint _nof_overflow_traps;         // trap count, excluding _trap_hist
   union {
     intptr_t _align;
-    u1 _array[GRAAL_ONLY(2*)_trap_hist_limit];
+    u1 _array[_trap_hist_limit];
   } _trap_hist;
 
   // Support for interprocedural escape analysis, from Thomas Kotzmann.
@@ -2204,16 +2206,13 @@ private:
   // time with C1. It is used to determine if method is trivial.
   short             _num_loops;
   short             _num_blocks;
-  // Highest compile level this method has ever seen.
-  u1                _highest_comp_level;
-  // Same for OSR level
-  u1                _highest_osr_comp_level;
   // Does this method contain anything worth profiling?
-  bool              _would_profile;
+  enum WouldProfile {unknown, no_profile, profile};
+  WouldProfile      _would_profile;
 
-#ifdef GRAAL
-  // Support for HotSpotMethodData.setCompiledGraphSize(int)
-  int               _graal_node_count;
+#if INCLUDE_JVMCI
+  // Support for HotSpotMethodData.setCompiledIRSize(int)
+  int               _jvmci_ir_size;
 #endif
 
   // Size of _data array in bytes.  (Excludes header and extra_data fields.)
@@ -2383,13 +2382,8 @@ public:
   }
 #endif
 
-  void set_would_profile(bool p)              { _would_profile = p;    }
-  bool would_profile() const                  { return _would_profile; }
-
-  int highest_comp_level() const              { return _highest_comp_level;      }
-  void set_highest_comp_level(int level)      { _highest_comp_level = level;     }
-  int highest_osr_comp_level() const          { return _highest_osr_comp_level;  }
-  void set_highest_osr_comp_level(int level)  { _highest_osr_comp_level = level; }
+  void set_would_profile(bool p)              { _would_profile = p ? profile : no_profile; }
+  bool would_profile() const                  { return _would_profile != no_profile; }
 
   int num_loops() const                       { return _num_loops;  }
   void set_num_loops(int n)                   { _num_loops = n;     }
@@ -2497,7 +2491,7 @@ public:
 
   // Return (uint)-1 for overflow.
   uint trap_count(int reason) const {
-    assert((uint)reason < GRAAL_ONLY(2*) _trap_hist_limit, "oob");
+    assert((uint)reason < JVMCI_ONLY(2*) _trap_hist_limit, "oob");
     return (int)((_trap_hist._array[reason]+1) & _trap_hist_mask) - 1;
   }
   // For loops:
@@ -2506,7 +2500,7 @@ public:
   uint inc_trap_count(int reason) {
     // Count another trap, anywhere in this method.
     assert(reason >= 0, "must be single trap");
-    assert((uint)reason < GRAAL_ONLY(2*) _trap_hist_limit, "oob");
+    assert((uint)reason < JVMCI_ONLY(2*) _trap_hist_limit, "oob");
     uint cnt1 = 1 + _trap_hist._array[reason];
     if ((cnt1 & _trap_hist_mask) != 0) {  // if no counter overflow...
       _trap_hist._array[reason] = cnt1;

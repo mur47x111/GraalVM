@@ -24,12 +24,12 @@ package com.oracle.graal.truffle.nodes;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
 
 /**
  * A {@link LocationIdentity} wrapping an object.
  */
-public final class ObjectLocationIdentity implements LocationIdentity {
+public final class ObjectLocationIdentity extends LocationIdentity {
 
     private JavaConstant object;
 
@@ -54,6 +54,11 @@ public final class ObjectLocationIdentity implements LocationIdentity {
 
     private ObjectLocationIdentity(JavaConstant object) {
         this.object = object;
+    }
+
+    @Override
+    public boolean isImmutable() {
+        return false;
     }
 
     @Override

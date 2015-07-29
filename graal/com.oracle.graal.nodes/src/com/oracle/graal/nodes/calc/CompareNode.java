@@ -22,8 +22,9 @@
  */
 package com.oracle.graal.nodes.calc;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
@@ -99,7 +100,7 @@ public abstract class CompareNode extends BinaryOpLogicNode implements Canonical
     }
 
     protected ValueNode optimizeNormalizeCmp(Constant constant, NormalizeCompareNode normalizeNode, boolean mirrored) {
-        throw new GraalInternalError("NormalizeCompareNode connected to %s (%s %s %s)", this, constant, normalizeNode, mirrored);
+        throw new JVMCIError("NormalizeCompareNode connected to %s (%s %s %s)", this, constant, normalizeNode, mirrored);
     }
 
     @Override
@@ -182,7 +183,7 @@ public abstract class CompareNode extends BinaryOpLogicNode implements Canonical
             if (x.stamp() instanceof AbstractObjectStamp) {
                 comparison = ObjectEqualsNode.create(x, y, constantReflection);
             } else if (x.stamp() instanceof AbstractPointerStamp) {
-                comparison = new PointerEqualsNode(x, y);
+                comparison = PointerEqualsNode.create(x, y);
             } else {
                 assert x.getKind().isNumericInteger();
                 comparison = IntegerEqualsNode.create(x, y, constantReflection);

@@ -26,10 +26,11 @@ import static com.oracle.graal.truffle.TruffleCompilerOptions.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
+import jdk.internal.jvmci.code.*;
+
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.truffle.*;
-import com.oracle.graal.truffle.TruffleInlining.*;
+import com.oracle.graal.truffle.TruffleInlining.CallTreeNodeVisitor;
 import com.oracle.truffle.api.nodes.*;
 
 public final class TraceCompilationCallTreeListener extends AbstractDebugCompilationListener {
@@ -45,7 +46,7 @@ public final class TraceCompilationCallTreeListener extends AbstractDebugCompila
 
     @Override
     public void notifyCompilationSuccess(OptimizedCallTarget target, StructuredGraph graph, CompilationResult result) {
-        log(0, "opt call tree", target.toString(), target.getDebugProperties());
+        log(target, 0, "opt call tree", target.toString(), target.getDebugProperties());
         logTruffleCallTree(target);
     }
 
@@ -65,10 +66,10 @@ public final class TraceCompilationCallTreeListener extends AbstractDebugCompila
                     addASTSizeProperty(callNode.getCurrentCallTarget(), properties);
                     properties.putAll(callNode.getCurrentCallTarget().getDebugProperties());
                     properties.put("Stamp", callNode.getCurrentCallTarget().getArgumentStamp());
-                    log(depth, "opt call tree", callNode.getCurrentCallTarget().toString() + dispatched, properties);
+                    log(compilable, depth, "opt call tree", callNode.getCurrentCallTarget().toString() + dispatched, properties);
                 } else if (node instanceof OptimizedIndirectCallNode) {
                     int depth = decisionStack == null ? 0 : decisionStack.size() - 1;
-                    log(depth, "opt call tree", "<indirect>", new LinkedHashMap<String, Object>());
+                    log(compilable, depth, "opt call tree", "<indirect>", new LinkedHashMap<String, Object>());
                 }
                 return true;
             }

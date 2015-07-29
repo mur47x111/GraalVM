@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.lir;
 
-import com.oracle.graal.api.code.*;
+import jdk.internal.jvmci.code.*;
+
 import com.oracle.graal.lir.asm.*;
 
 /**

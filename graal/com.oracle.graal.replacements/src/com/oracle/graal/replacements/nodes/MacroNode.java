@@ -22,13 +22,14 @@
  */
 package com.oracle.graal.replacements.nodes;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.api.replacements.*;
-import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.compiler.common.type.*;
+import static jdk.internal.jvmci.code.BytecodeFrame.*;
+import jdk.internal.jvmci.common.*;
 import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.api.replacements.*;
+import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.CallTargetNode.InvokeKind;
@@ -42,9 +43,8 @@ import com.oracle.graal.phases.tiers.*;
 import com.oracle.graal.replacements.*;
 
 /**
- * Macro nodes can be used to temporarily replace an invoke (usually by using the
- * {@link MacroSubstitution} annotation). They can, for example, be used to implement constant
- * folding for known JDK functions like {@link Class#isInterface()}.<br/>
+ * Macro nodes can be used to temporarily replace an invoke. They can, for example, be used to
+ * implement constant folding for known JDK functions like {@link Class#isInterface()}.<br/>
  * <br/>
  * During lowering, multiple sources are queried in order to look for a replacement:
  * <ul>
@@ -67,14 +67,24 @@ public abstract class MacroNode extends FixedWithNextNode implements Lowerable {
     protected final JavaType returnType;
     protected final InvokeKind invokeKind;
 
-    protected MacroNode(NodeClass<? extends MacroNode> c, Invoke invoke) {
-        super(c, StampFactory.forKind(((MethodCallTargetNode) invoke.callTarget()).targetMethod().getSignature().getReturnKind()));
-        MethodCallTargetNode methodCallTarget = (MethodCallTargetNode) invoke.callTarget();
-        this.arguments = new NodeInputList<>(this, methodCallTarget.arguments());
-        this.bci = invoke.bci();
-        this.targetMethod = methodCallTarget.targetMethod();
-        this.returnType = methodCallTarget.returnType();
-        this.invokeKind = methodCallTarget.invokeKind();
+    protected MacroNode(NodeClass<? extends MacroNode> c, InvokeKind invokeKind, ResolvedJavaMethod targetMethod, int bci, JavaType returnType, ValueNode... arguments) {
+        super(c, returnStamp(returnType));
+        assert targetMethod.getSignature().getParameterCount(!targetMethod.isStatic()) == arguments.length;
+        this.arguments = new NodeInputList<>(this, arguments);
+        this.bci = bci;
+        this.targetMethod = targetMethod;
+        this.returnType = returnType;
+        this.invokeKind = invokeKind;
+        assert !isPlaceholderBci(bci);
+    }
+
+    private static Stamp returnStamp(JavaType returnType) {
+        Kind kind = returnType.getKind();
+        if (kind == Kind.Object) {
+            return StampFactory.declared((ResolvedJavaType) returnType);
+        } else {
+            return StampFactory.forKind(kind);
+        }
     }
 
     public int getBci() {
@@ -109,16 +119,9 @@ public abstract class MacroNode extends FixedWithNextNode implements Lowerable {
      * lowered}.
      */
     protected StructuredGraph getLoweredSubstitutionGraph(LoweringTool tool) {
-        StructuredGraph methodSubstitution = tool.getReplacements().getMethodSubstitution(getTargetMethod());
+        StructuredGraph methodSubstitution = tool.getReplacements().getSubstitution(getTargetMethod(), true, bci);
         if (methodSubstitution != null) {
-            methodSubstitution = methodSubstitution.copy();
-            if (stateAfter() == null || stateAfter().bci == BytecodeFrame.AFTER_BCI) {
-                /*
-                 * handles the case of a MacroNode inside a snippet used for another MacroNode
-                 * lowering
-                 */
-                new CollapseFrameForSingleSideEffectPhase().apply(methodSubstitution);
-            }
+            methodSubstitution = (StructuredGraph) methodSubstitution.copy();
             return lowerReplacement(methodSubstitution, tool);
         }
         return null;
@@ -142,7 +145,7 @@ public abstract class MacroNode extends FixedWithNextNode implements Lowerable {
             }
         }
         try (Scope s = Debug.scope("LoweringSnippetTemplate", replacementGraph)) {
-            new LoweringPhase(new CanonicalizerPhase(true), tool.getLoweringStage()).apply(replacementGraph, c);
+            new LoweringPhase(new CanonicalizerPhase(), tool.getLoweringStage()).apply(replacementGraph, c);
         } catch (Throwable e) {
             throw Debug.handle(e);
         }
@@ -171,8 +174,21 @@ public abstract class MacroNode extends FixedWithNextNode implements Lowerable {
             InliningUtil.inline(invoke, replacementGraph, false, null);
             Debug.dump(graph(), "After inlining replacement %s", replacementGraph);
         } else {
+            if (isPlaceholderBci(invoke.bci())) {
+                throw new JVMCIError("%s: cannot lower to invoke with placeholder BCI: %s", graph(), this);
+            }
+
             if (invoke.stateAfter() == null) {
-                throw new GraalInternalError("cannot lower to invoke without state: %s", this);
+                ResolvedJavaMethod method = graph().method();
+                if (method.getAnnotation(MethodSubstitution.class) != null || method.getAnnotation(Snippet.class) != null) {
+                    // One cause for this is that a MacroNode is created for a method that
+                    // no longer needs a MacroNode. For example, Class.getComponentType()
+                    // only needs a MacroNode prior to JDK9 as it was given a non-native
+                    // implementation in JDK9.
+                    throw new JVMCIError("%s macro created for call to %s in %s must be lowerable to a snippet or intrinsic graph. "
+                                    + "Maybe a macro node is not needed for this method in the current JDK?", getClass().getSimpleName(), targetMethod.format("%h.%n(%p)"), graph());
+                }
+                throw new JVMCIError("%s: cannot lower to invoke without state: %s", graph(), this);
             }
             invoke.lower(tool);
         }
@@ -185,7 +201,7 @@ public abstract class MacroNode extends FixedWithNextNode implements Lowerable {
     }
 
     protected InvokeNode createInvoke() {
-        MethodCallTargetNode callTarget = graph().add(new MethodCallTargetNode(invokeKind, targetMethod, arguments.toArray(new ValueNode[arguments.size()]), returnType));
+        MethodCallTargetNode callTarget = graph().add(new MethodCallTargetNode(invokeKind, targetMethod, arguments.toArray(new ValueNode[arguments.size()]), returnType, null));
         InvokeNode invoke = graph().add(new InvokeNode(callTarget, bci));
         if (stateAfter() != null) {
             invoke.setStateAfter(stateAfter().duplicate());

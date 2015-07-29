@@ -24,10 +24,11 @@ package com.oracle.graal.phases.common;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.CallTargetNode.InvokeKind;
@@ -725,7 +726,7 @@ public class ConditionalEliminationPhase extends Phase {
                     if (!Objects.equals(type, StampTool.typeOrNull(receiver))) {
                         ResolvedJavaMethod method = type.resolveConcreteMethod(callTarget.targetMethod(), invoke.getContextType());
                         if (method != null) {
-                            if (method.canBeStaticallyBound() || type.isFinal()) {
+                            if (method.canBeStaticallyBound() || type.isLeaf() || type.isArray()) {
                                 callTarget.setInvokeKind(InvokeKind.Special);
                                 callTarget.setTargetMethod(method);
                             }
@@ -778,6 +779,8 @@ public class ConditionalEliminationPhase extends Phase {
             ResolvedJavaType type = state.getNodeType(object);
             if (isNull || (type != null && checkCast.type().isAssignableFrom(type))) {
                 boolean nonNull = state.isNonNull(object);
+                // if (true)
+                // throw new RuntimeException(checkCast.toString());
                 GuardingNode replacementAnchor = null;
                 if (nonNull) {
                     replacementAnchor = searchAnchor(GraphUtil.unproxify(object), type);
@@ -785,6 +788,7 @@ public class ConditionalEliminationPhase extends Phase {
                 if (replacementAnchor == null) {
                     replacementAnchor = AbstractBeginNode.prevBegin(checkCast);
                 }
+                assert !(replacementAnchor instanceof FloatingNode) : "unsafe to mix unlowered Checkcast with floating guards";
                 PiNode piNode;
                 if (isNull) {
                     ConstantNode nullObject = ConstantNode.defaultForKind(Kind.Object, graph);

@@ -40,8 +40,8 @@
 #ifdef COMPILER2
 #include "opto/runtime.hpp"
 #endif
-#ifdef GRAAL
-#include "graal/graalJavaAccess.hpp"
+#if INCLUDE_JVMCI
+#include "jvmci/jvmciJavaAccess.hpp"
 #endif
 
 #define __ masm->
@@ -140,16 +140,18 @@ class RegisterSaver {
 
 OopMap* RegisterSaver::save_live_registers(MacroAssembler* masm, int additional_frame_words, int* total_frame_words, bool save_vectors) {
   int vect_words = 0;
-#ifdef COMPILER2
+  int ymmhi_offset = -1;
+#if defined(COMPILER2) || INCLUDE_JVMCI
   if (save_vectors) {
     assert(UseAVX > 0, "256bit vectors are supported only with AVX");
     assert(MaxVectorSize == 32, "only 256bit vectors are supported now");
     // Save upper half of YMM registes
     vect_words = 16 * 16 / wordSize;
+    ymmhi_offset = additional_frame_words;
     additional_frame_words += vect_words;
   }
 #else
-  assert(!save_vectors, "vectors are generated only by C2");
+  assert(!save_vectors, "vectors are generated only by C2 and JVMCI");
 #endif
 
   // Always make the frame size 16-byte aligned
@@ -206,6 +208,7 @@ OopMap* RegisterSaver::save_live_registers(MacroAssembler* masm, int additional_
   OopMap* map = new OopMap(frame_size_in_slots, 0);
 
 #define STACK_OFFSET(x) VMRegImpl::stack2reg((x) + additional_frame_slots)
+#define YMMHI_STACK_OFFSET(x) VMRegImpl::stack2reg((x / VMRegImpl::stack_slot_size) + ymmhi_offset)
 
   map->set_callee_saved(STACK_OFFSET( rax_off ), rax->as_VMReg());
   map->set_callee_saved(STACK_OFFSET( rcx_off ), rcx->as_VMReg());
@@ -239,6 +242,29 @@ OopMap* RegisterSaver::save_live_registers(MacroAssembler* masm, int additional_
   map->set_callee_saved(STACK_OFFSET(xmm13_off), xmm13->as_VMReg());
   map->set_callee_saved(STACK_OFFSET(xmm14_off), xmm14->as_VMReg());
   map->set_callee_saved(STACK_OFFSET(xmm15_off), xmm15->as_VMReg());
+
+
+#if defined(COMPILER2) || INCLUDE_JVMCI
+  if (save_vectors) {
+    assert(ymmhi_offset != -1, "save area must exist");
+    map->set_callee_saved(YMMHI_STACK_OFFSET(  0), xmm0->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET( 16), xmm1->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET( 32), xmm2->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET( 48), xmm3->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET( 64), xmm4->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET( 80), xmm5->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET( 96), xmm6->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET(112), xmm7->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET(128), xmm8->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET(144), xmm9->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET(160), xmm10->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET(176), xmm11->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET(192), xmm12->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET(208), xmm13->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET(224), xmm14->as_VMReg()->next()->next()->next()->next());
+    map->set_callee_saved(YMMHI_STACK_OFFSET(240), xmm15->as_VMReg()->next()->next()->next()->next());
+  }
+#endif
 
   // %%% These should all be a waste but we'll keep things as they were for now
   if (true) {
@@ -283,7 +309,7 @@ void RegisterSaver::restore_live_registers(MacroAssembler* masm, bool restore_ve
     // Pop arg register save area
     __ addptr(rsp, frame::arg_reg_save_area_bytes);
   }
-#ifdef COMPILER2
+#if defined(COMPILER2) || INCLUDE_JVMCI
   if (restore_vectors) {
     // Restore upper half of YMM registes.
     assert(UseAVX > 0, "256bit vectors are supported only with AVX");
@@ -307,7 +333,7 @@ void RegisterSaver::restore_live_registers(MacroAssembler* masm, bool restore_ve
     __ addptr(rsp, 256);
   }
 #else
-  assert(!restore_vectors, "vectors are generated only by C2");
+  assert(!restore_vectors, "vectors are generated only by C2 and JVMCI");
 #endif
   // Recover CPU state
   __ pop_CPU_state();
@@ -705,7 +731,7 @@ void SharedRuntime::gen_i2c_adapter(MacroAssembler *masm,
     __ block_comment("} verify_i2ce ");
   }
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   if (frame_extension_argument != -1) {
     // The frame_extension_argument is an int that describes the
     // expected amount of argument space in the caller frame.  If that
@@ -776,13 +802,13 @@ void SharedRuntime::gen_i2c_adapter(MacroAssembler *masm,
   // Pre-load the register-jump target early, to schedule it better.
   __ movptr(r11, Address(rbx, in_bytes(Method::from_compiled_offset())));
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   // check if this call should be routed towards a specific entry point
-  __ cmpptr(Address(r15_thread, in_bytes(JavaThread::graal_alternate_call_target_offset())), 0);
+  __ cmpptr(Address(r15_thread, in_bytes(JavaThread::jvmci_alternate_call_target_offset())), 0);
   Label no_alternative_target;
   __ jcc(Assembler::equal, no_alternative_target);
-  __ movptr(r11, Address(r15_thread, in_bytes(JavaThread::graal_alternate_call_target_offset())));
-  __ movptr(Address(r15_thread, in_bytes(JavaThread::graal_alternate_call_target_offset())), 0);
+  __ movptr(r11, Address(r15_thread, in_bytes(JavaThread::jvmci_alternate_call_target_offset())));
+  __ movptr(Address(r15_thread, in_bytes(JavaThread::jvmci_alternate_call_target_offset())), 0);
   __ bind(no_alternative_target);
 #endif
 
@@ -3390,8 +3416,8 @@ void SharedRuntime::generate_deopt_blob() {
   __ jmp(cont);
 
   int reexecute_offset = __ pc() - start;
-#if defined(COMPILERGRAAL) && !defined(COMPILER1)
-  // Graal does not use this kind of deoptimization
+#if defined(COMPILERJVMCI) && !defined(COMPILER1)
+  // JVMCI does not use this kind of deoptimization
   __ should_not_reach_here();
 #endif
 
@@ -3404,10 +3430,10 @@ void SharedRuntime::generate_deopt_blob() {
   __ movl(r14, Deoptimization::Unpack_reexecute); // callee-saved
   __ jmp(cont);
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   int implicit_exception_uncommon_trap_offset = __ pc() - start;
 
-  __ pushptr(Address(r15_thread, in_bytes(JavaThread::graal_implicit_exception_pc_offset())));
+  __ pushptr(Address(r15_thread, in_bytes(JavaThread::jvmci_implicit_exception_pc_offset())));
 
   int uncommon_trap_offset = __ pc() - start;
 
@@ -3428,7 +3454,7 @@ void SharedRuntime::generate_deopt_blob() {
 
   Label after_fetch_unroll_info_call;
   __ jmp(after_fetch_unroll_info_call);
-#endif // GRAAL
+#endif // INCLUDE_JVMCI
 
   int exception_offset = __ pc() - start;
 
@@ -3515,7 +3541,7 @@ void SharedRuntime::generate_deopt_blob() {
 
   __ reset_last_Java_frame(false, false);
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   __ bind(after_fetch_unroll_info_call);
 #endif
 
@@ -3693,7 +3719,7 @@ void SharedRuntime::generate_deopt_blob() {
 
   _deopt_blob = DeoptimizationBlob::create(&buffer, oop_maps, 0, exception_offset, reexecute_offset, frame_size_in_words);
   _deopt_blob->set_unpack_with_exception_in_tls_offset(exception_in_tls_offset);
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   _deopt_blob->set_uncommon_trap_offset(uncommon_trap_offset);
   _deopt_blob->set_implicit_exception_uncommon_trap_offset(implicit_exception_uncommon_trap_offset);
 #endif

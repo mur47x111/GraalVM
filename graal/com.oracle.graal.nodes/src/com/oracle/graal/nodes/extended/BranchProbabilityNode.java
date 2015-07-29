@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.nodes.extended;
 
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -74,9 +75,9 @@ public final class BranchProbabilityNode extends FloatingNode implements Simplif
         if (probability.isConstant()) {
             double probabilityValue = probability.asJavaConstant().asDouble();
             if (probabilityValue < 0.0) {
-                throw new GraalInternalError("A negative probability of " + probabilityValue + " is not allowed!");
+                throw new JVMCIError("A negative probability of " + probabilityValue + " is not allowed!");
             } else if (probabilityValue > 1.0) {
-                throw new GraalInternalError("A probability of more than 1.0 (" + probabilityValue + ") is not allowed!");
+                throw new JVMCIError("A probability of more than 1.0 (" + probabilityValue + ") is not allowed!");
             } else if (Double.isNaN(probabilityValue)) {
                 /*
                  * We allow NaN if the node is in unreachable code that will eventually fall away,
@@ -110,10 +111,12 @@ public final class BranchProbabilityNode extends FloatingNode implements Simplif
             if (couldSet) {
                 ValueNode currentCondition = condition;
                 replaceAndDelete(currentCondition);
-                tool.addToWorkList(currentCondition.usages());
+                if (tool != null) {
+                    tool.addToWorkList(currentCondition.usages());
+                }
             } else {
                 if (!isSubstitutionGraph()) {
-                    throw new GraalInternalError("Wrong usage of branch probability injection!");
+                    throw new JVMCIError("Wrong usage of branch probability injection!");
                 }
             }
         }
@@ -135,13 +138,10 @@ public final class BranchProbabilityNode extends FloatingNode implements Simplif
      * @return the condition
      */
     @NodeIntrinsic
-    public static boolean probability(double probability, boolean condition) {
-        assert probability >= 0.0 && probability <= 1.0;
-        return condition;
-    }
+    public static native boolean probability(double probability, boolean condition);
 
     @Override
     public void lower(LoweringTool tool) {
-        throw new GraalInternalError("Branch probability could not be injected, because the probability value did not reduce to a constant value.");
+        throw new JVMCIError("Branch probability could not be injected, because the probability value did not reduce to a constant value.");
     }
 }

@@ -22,8 +22,6 @@
  */
 package com.oracle.graal.compiler.test;
 
-import static org.junit.Assert.*;
-
 import org.junit.*;
 
 import com.oracle.graal.nodes.*;
@@ -36,7 +34,7 @@ public class CompareCanonicalizerTest extends GraalCompilerTest {
 
     private StructuredGraph getCanonicalizedGraph(String name) {
         StructuredGraph graph = parseEager(name, AllowAssumptions.YES);
-        new CanonicalizerPhase(true).apply(graph, new PhaseContext(getProviders()));
+        new CanonicalizerPhase().apply(graph, new PhaseContext(getProviders()));
         return graph;
     }
 
@@ -53,7 +51,7 @@ public class CompareCanonicalizerTest extends GraalCompilerTest {
             StructuredGraph graph = parseEager("canonicalCompare" + i, AllowAssumptions.NO);
             assertEquals(referenceGraph, graph);
         }
-        new CanonicalizerPhase(true).apply(referenceGraph, new PhaseContext(getProviders()));
+        new CanonicalizerPhase().apply(referenceGraph, new PhaseContext(getProviders()));
         for (int i = 1; i < 4; i++) {
             StructuredGraph graph = getCanonicalizedGraph("canonicalCompare" + i);
             assertEquals(referenceGraph, graph);

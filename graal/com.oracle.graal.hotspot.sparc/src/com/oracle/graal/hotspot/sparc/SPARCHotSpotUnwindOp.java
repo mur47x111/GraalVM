@@ -22,15 +22,13 @@
  */
 package com.oracle.graal.hotspot.sparc;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import jdk.internal.jvmci.code.*;
 import static com.oracle.graal.hotspot.HotSpotBackend.*;
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
-import static com.oracle.graal.sparc.SPARC.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import static jdk.internal.jvmci.sparc.SPARC.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.asm.sparc.SPARCAssembler.*;
 import com.oracle.graal.asm.sparc.*;
-import com.oracle.graal.asm.sparc.SPARCMacroAssembler.Mov;
 import com.oracle.graal.hotspot.stubs.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.asm.*;
@@ -42,11 +40,12 @@ import com.oracle.graal.lir.sparc.*;
 @Opcode("UNWIND")
 final class SPARCHotSpotUnwindOp extends SPARCHotSpotEpilogueOp {
     public static final LIRInstructionClass<SPARCHotSpotUnwindOp> TYPE = LIRInstructionClass.create(SPARCHotSpotUnwindOp.class);
+    public static final SizeEstimate SIZE = SizeEstimate.create(32);
 
     @Use({REG}) protected RegisterValue exception;
 
     SPARCHotSpotUnwindOp(RegisterValue exception) {
-        super(TYPE);
+        super(TYPE, SIZE);
         this.exception = exception;
     }
 
@@ -54,7 +53,7 @@ final class SPARCHotSpotUnwindOp extends SPARCHotSpotEpilogueOp {
     public void emitCode(CompilationResultBuilder crb, SPARCMacroAssembler masm) {
         // This Frame is left but the called unwind (which is sibling) method needs the exception as
         // input in i0
-        new Mov(o0, i0).emit(masm);
+        masm.mov(o0, i0);
         leaveFrame(crb);
 
         ForeignCallLinkage linkage = crb.foreignCalls.lookupForeignCall(UNWIND_EXCEPTION_TO_CALLER);
@@ -64,7 +63,7 @@ final class SPARCHotSpotUnwindOp extends SPARCHotSpotEpilogueOp {
 
         // Get return address (is in o7 after leave).
         Register returnAddress = asRegister(cc.getArgument(1));
-        new Add(o7, Return.PC_RETURN_OFFSET, returnAddress).emit(masm);
+        masm.add(o7, SPARCAssembler.PC_RETURN_OFFSET, returnAddress);
         Register scratch = g5;
         SPARCCall.indirectJmp(crb, masm, scratch, linkage);
     }

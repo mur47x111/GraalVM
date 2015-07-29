@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.loop;
 
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.nodes.*;
 
@@ -42,7 +43,7 @@ public abstract class InductionVariable {
                 case Down:
                     return Up;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     }

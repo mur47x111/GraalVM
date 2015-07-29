@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,10 +22,11 @@
  */
 package com.oracle.graal.nodes.spi;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.address.*;
 
 /**
  * Provides a capability for replacing a higher node with one or more lower level nodes.
@@ -35,12 +36,12 @@ public interface LoweringProvider {
     void lower(Node n, LoweringTool tool);
 
     /**
-     * Reconstructs the array index from a location node that was created as a lowering of an
+     * Reconstructs the array index from an address node that was created as a lowering of an
      * indexed access to an array.
      *
      * @param elementKind the {@link Kind} of the array elements
-     * @param location a location pointing to an element in an array
+     * @param address an {@link AddressNode} pointing to an element in an array
      * @return a node that gives the index of the element
      */
-    ValueNode reconstructArrayIndex(Kind elementKind, LocationNode location);
+    ValueNode reconstructArrayIndex(Kind elementKind, AddressNode address);
 }

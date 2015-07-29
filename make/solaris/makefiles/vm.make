@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1998, 2014, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -100,10 +100,6 @@ ifneq ($(LP64), 1)
 CXXFLAGS/ostream.o += -D_FILE_OFFSET_BITS=64
 endif # ifneq ($(LP64), 1)
 
-ifeq ($(INCLUDE_GRAAL), true)
-  CXXFLAGS += -DGRAAL_VERSION="\"$(GRAAL_VERSION)\""
-endif
-
 # CFLAGS_WARN holds compiler options to suppress/enable warnings.
 CFLAGS += $(CFLAGS_WARN)
 
@@ -157,14 +153,6 @@ JDK_LIBDIR = $(JAVA_HOME)/jre/lib/$(LIBARCH)
 include $(MAKEFILES_DIR)/dtrace.make
 
 #----------------------------------------------------------------------
-# add_gnu_debuglink tool
-include $(MAKEFILES_DIR)/add_gnu_debuglink.make
-
-#----------------------------------------------------------------------
-# fix_empty_sec_hdr_flags tool
-include $(MAKEFILES_DIR)/fix_empty_sec_hdr_flags.make
-
-#----------------------------------------------------------------------
 # JVM
 
 JVM      = jvm
@@ -173,7 +161,7 @@ LIBJVM   = lib$(JVM).so
 LIBJVM_DEBUGINFO   = lib$(JVM).debuginfo
 LIBJVM_DIZ         = lib$(JVM).diz
 
-SPECIAL_PATHS:=adlc c1 dist gc_implementation opto shark libadt graal
+SPECIAL_PATHS:=adlc c1 dist gc_implementation opto shark libadt jvmci
 
 SOURCE_PATHS=\
   $(shell find $(HS_COMMON_SRC)/share/vm/* -type d \! \
@@ -201,17 +189,17 @@ COMPILER2_PATHS += $(HS_COMMON_SRC)/share/vm/opto
 COMPILER2_PATHS += $(HS_COMMON_SRC)/share/vm/libadt
 COMPILER2_PATHS +=  $(GENERATED)/adfiles
 
-GRAAL_PATHS += $(call altsrc,$(HS_COMMON_SRC)/share/vm/graal)
-GRAAL_PATHS += $(HS_COMMON_SRC)/share/vm/graal
+JVMCI_PATHS += $(call altsrc,$(HS_COMMON_SRC)/share/vm/jvmci)
+JVMCI_PATHS += $(HS_COMMON_SRC)/share/vm/jvmci
 
 # Include dirs per type.
 Src_Dirs/CORE      := $(CORE_PATHS)
-Src_Dirs/COMPILER1 := $(CORE_PATHS) $(COMPILER1_PATHS) $(GRAAL_PATHS)
-Src_Dirs/COMPILER2 := $(CORE_PATHS) $(COMPILER2_PATHS) $(GRAAL_PATHS)
-Src_Dirs/TIERED    := $(CORE_PATHS) $(COMPILER1_PATHS) $(COMPILER2_PATHS) $(GRAAL_PATHS)
+Src_Dirs/COMPILER1 := $(CORE_PATHS) $(COMPILER1_PATHS) $(JVMCI_PATHS)
+Src_Dirs/COMPILER2 := $(CORE_PATHS) $(COMPILER2_PATHS) $(JVMCI_PATHS)
+Src_Dirs/TIERED    := $(CORE_PATHS) $(COMPILER1_PATHS) $(COMPILER2_PATHS) $(JVMCI_PATHS)
 Src_Dirs/ZERO      := $(CORE_PATHS)
 Src_Dirs/SHARK     := $(CORE_PATHS) $(SHARK_PATHS)
-Src_Dirs/GRAAL     := $(CORE_PATHS) $(COMPILER1_PATHS) $(GRAAL_PATHS)
+Src_Dirs/JVMCI     := $(CORE_PATHS) $(COMPILER1_PATHS) $(JVMCI_PATHS)
 Src_Dirs := $(Src_Dirs/$(TYPE))
 
 COMPILER2_SPECIFIC_FILES := opto libadt bcEscapeAnalyzer.cpp c2_\* runtime_\*
@@ -219,24 +207,24 @@ COMPILER1_SPECIFIC_FILES := c1_\*
 SHARK_SPECIFIC_FILES     := shark
 ZERO_SPECIFIC_FILES      := zero
 
-ifneq ($(INCLUDE_GRAAL), true)
-  GRAAL_SPECIFIC_FILES   := graal\* 
+ifneq ($(INCLUDE_JVMCI), true)
+  JVMCI_SPECIFIC_FILES   := jvmci\* 
 else
-  GRAAL_SPECIFIC_FILES   :=
-  Src_Dirs_I += $(HS_COMMON_SRC)/../graal/com.oracle.graal.hotspot/src_gen/hotspot
+  JVMCI_SPECIFIC_FILES   :=
+  Src_Dirs_I += $(HS_COMMON_SRC)/../jvmci/jdk.internal.jvmci.hotspot/src_gen/hotspot
 endif
 
 # Always exclude these.
 Src_Files_EXCLUDE := dtrace jsig.c jvmtiEnvRecommended.cpp jvmtiEnvStub.cpp
 
 # Exclude per type.
-Src_Files_EXCLUDE/CORE      := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES) ciTypeFlow.cpp
-Src_Files_EXCLUDE/COMPILER1 := $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES) ciTypeFlow.cpp
-Src_Files_EXCLUDE/COMPILER2 := $(COMPILER1_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES)
-Src_Files_EXCLUDE/TIERED    := $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES)
-Src_Files_EXCLUDE/ZERO      := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES) ciTypeFlow.cpp
-Src_Files_EXCLUDE/SHARK     := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES)
-Src_Files_EXCLUDE/GRAAL     := $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) ciTypeFlow.cpp
+Src_Files_EXCLUDE/CORE      := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES) ciTypeFlow.cpp
+Src_Files_EXCLUDE/COMPILER1 := $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES) ciTypeFlow.cpp
+Src_Files_EXCLUDE/COMPILER2 := $(COMPILER1_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES)
+Src_Files_EXCLUDE/TIERED    := $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES)
+Src_Files_EXCLUDE/ZERO      := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES) ciTypeFlow.cpp
+Src_Files_EXCLUDE/SHARK     := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES)
+Src_Files_EXCLUDE/JVMCI     := $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) ciTypeFlow.cpp
 
 Src_Files_EXCLUDE +=  $(Src_Files_EXCLUDE/$(TYPE))
 
@@ -263,11 +251,12 @@ JVM_OBJ_FILES = $(Obj_Files) $(DTRACE_OBJS)
 
 vm_version.o: $(filter-out vm_version.o,$(JVM_OBJ_FILES))
 
-mapfile : $(MAPFILE) $(MAPFILE_DTRACE_OPT) vm.def
+mapfile : $(MAPFILE) $(MAPFILE_DTRACE_OPT) vm.def mapfile_ext
 	rm -f $@
 	cat $(MAPFILE) $(MAPFILE_DTRACE_OPT) \
 	    | $(NAWK) '{                                         \
 	              if ($$0 ~ "INSERT VTABLE SYMBOLS HERE") {  \
+	                  system ("cat mapfile_ext");            \
 	                  system ("cat vm.def");                 \
 	              } else {                                   \
 	                  print $$0;                             \
@@ -280,6 +269,13 @@ mapfile_extended : mapfile $(MAPFILE_DTRACE_OPT)
 
 vm.def: $(Obj_Files)
 	sh $(GAMMADIR)/make/solaris/makefiles/build_vm_def.sh *.o > $@
+
+mapfile_ext:
+	rm -f $@
+	touch $@
+	if [ -f $(HS_ALT_MAKE)/solaris/makefiles/mapfile-ext ]; then \
+	  cat $(HS_ALT_MAKE)/solaris/makefiles/mapfile-ext > $@; \
+	fi
 
 ifeq ($(LINK_INTO),AOUT)
   LIBJVM.o                 =
@@ -307,7 +303,7 @@ else
 LINK_VM = $(LINK_LIB.CXX)
 endif
 # making the library:
-$(LIBJVM): $(ADD_GNU_DEBUGLINK) $(FIX_EMPTY_SEC_HDR_FLAGS) $(LIBJVM.o) $(LIBJVM_MAPFILE)
+$(LIBJVM): $(LIBJVM.o) $(LIBJVM_MAPFILE)
 ifeq ($(filter -sbfast -xsbfast, $(CFLAGS_BROWSE)),)
 	@echo Linking vm...
 	$(QUIETLY) $(LINK_LIB.CXX/PRE_HOOK)
@@ -315,17 +311,8 @@ ifeq ($(filter -sbfast -xsbfast, $(CFLAGS_BROWSE)),)
 	$(QUIETLY) $(LINK_LIB.CXX/POST_HOOK)
 	$(QUIETLY) rm -f $@.1 && ln -s $@ $@.1
 ifeq ($(ENABLE_FULL_DEBUG_SYMBOLS),1)
-# gobjcopy crashes on "empty" section headers with the SHF_ALLOC flag set.
-# Clear the SHF_ALLOC flag (if set) from empty section headers.
-# An empty section header has sh_addr == 0 and sh_size == 0.
-# This problem has only been seen on Solaris X64, but we call this tool
-# on all Solaris builds just in case.
-	$(QUIETLY) $(FIX_EMPTY_SEC_HDR_FLAGS) $@
 	$(QUIETLY) $(OBJCOPY) --only-keep-debug $@ $(LIBJVM_DEBUGINFO)
-# $(OBJCOPY) --add-gnu-debuglink=... corrupts SUNW_* sections.
-# Use $(ADD_GNU_DEBUGLINK) until a fixed $(OBJCOPY) is available.
-#	$(QUIETLY) $(OBJCOPY) --add-gnu-debuglink=$(LIBJVM_DEBUGINFO) $@
-	$(QUIETLY) $(ADD_GNU_DEBUGLINK) $(LIBJVM_DEBUGINFO) $@
+	$(QUIETLY) $(OBJCOPY) --add-gnu-debuglink=$(LIBJVM_DEBUGINFO) $@
   ifeq ($(STRIP_POLICY),all_strip)
 	$(QUIETLY) $(STRIP) $@
   else

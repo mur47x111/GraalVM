@@ -24,12 +24,14 @@ package com.oracle.graal.nodes;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.java.*;
+import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.util.*;
 
@@ -62,6 +64,11 @@ public final class InvokeNode extends AbstractMemoryCheckpoint implements Invoke
     @Override
     public CallTargetNode callTarget() {
         return callTarget;
+    }
+
+    void setCallTarget(CallTargetNode callTarget) {
+        updateUsages(this.callTarget, callTarget);
+        this.callTarget = callTarget;
     }
 
     @Override
@@ -107,7 +114,7 @@ public final class InvokeNode extends AbstractMemoryCheckpoint implements Invoke
 
     @Override
     public LocationIdentity getLocationIdentity() {
-        return LocationIdentity.ANY_LOCATION;
+        return LocationIdentity.any();
     }
 
     @Override

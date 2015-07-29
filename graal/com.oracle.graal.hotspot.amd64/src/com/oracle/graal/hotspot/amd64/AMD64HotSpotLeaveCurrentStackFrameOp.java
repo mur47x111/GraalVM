@@ -22,10 +22,10 @@
  */
 package com.oracle.graal.hotspot.amd64;
 
-import static com.oracle.graal.amd64.AMD64.*;
+import static jdk.internal.jvmci.amd64.AMD64.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.asm.amd64.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.StandardOp.SaveRegistersOp;
@@ -43,8 +43,8 @@ final class AMD64HotSpotLeaveCurrentStackFrameOp extends AMD64HotSpotEpilogueOp 
 
     private final SaveRegistersOp saveRegisterOp;
 
-    public AMD64HotSpotLeaveCurrentStackFrameOp(SaveRegistersOp saveRegisterOp) {
-        super(TYPE);
+    public AMD64HotSpotLeaveCurrentStackFrameOp(SaveRegistersOp saveRegisterOp, AllocatableValue savedRbp) {
+        super(TYPE, savedRbp);
         this.saveRegisterOp = saveRegisterOp;
     }
 

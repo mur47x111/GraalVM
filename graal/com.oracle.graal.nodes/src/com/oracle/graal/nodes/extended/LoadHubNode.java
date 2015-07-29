@@ -22,7 +22,9 @@
  */
 package com.oracle.graal.nodes.extended;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.meta.Assumptions.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -48,47 +50,68 @@ public final class LoadHubNode extends FloatingGuardedNode implements Lowerable,
         return stampProvider.createHubStamp(((ObjectStamp) value.stamp()));
     }
 
+    public static ValueNode create(ValueNode value, StampProvider stampProvider, MetaAccessProvider metaAccess) {
+        Stamp stamp = hubStamp(stampProvider, value);
+        ValueNode synonym = findSynonym(value, stamp, null, metaAccess);
+        if (synonym != null) {
+            return synonym;
+        }
+        return new LoadHubNode(stamp, value, null);
+    }
+
     public LoadHubNode(@InjectedNodeParameter StampProvider stampProvider, ValueNode value) {
         this(stampProvider, value, null);
     }
 
     public LoadHubNode(@InjectedNodeParameter StampProvider stampProvider, ValueNode value, ValueNode guard) {
-        super(TYPE, hubStamp(stampProvider, value), (GuardingNode) guard);
+        this(hubStamp(stampProvider, value), value, guard);
+    }
+
+    private LoadHubNode(Stamp stamp, ValueNode value, ValueNode guard) {
+        super(TYPE, stamp, (GuardingNode) guard);
         assert value != guard;
         this.value = value;
     }
 
     @Override
     public void lower(LoweringTool tool) {
-        if (tool.getLoweringStage() == LoweringTool.StandardLoweringStage.HIGH_TIER) {
-            return;
-        }
         tool.getLowerer().lower(this, tool);
     }
 
     @Override
     public ValueNode canonical(CanonicalizerTool tool) {
         MetaAccessProvider metaAccess = tool.getMetaAccess();
-        if (metaAccess != null && getValue().stamp() instanceof ObjectStamp) {
-            ObjectStamp objectStamp = (ObjectStamp) getValue().stamp();
-
-            ResolvedJavaType exactType;
-            if (objectStamp.isExactType()) {
-                exactType = objectStamp.type();
-            } else if (objectStamp.type() != null && graph().getAssumptions() != null) {
-                exactType = objectStamp.type().findUniqueConcreteSubtype();
-                if (exactType != null) {
-                    graph().getAssumptions().recordConcreteSubtype(objectStamp.type(), exactType);
-                }
-            } else {
-                exactType = null;
-            }
-
-            if (exactType != null) {
-                return ConstantNode.forConstant(stamp(), exactType.getObjectHub(), metaAccess);
-            }
+        ValueNode curValue = getValue();
+        ValueNode newNode = findSynonym(curValue, stamp(), graph(), metaAccess);
+        if (newNode != null) {
+            return newNode;
         }
         return this;
+    }
+
+    public static ValueNode findSynonym(ValueNode curValue, Stamp stamp, StructuredGraph graph, MetaAccessProvider metaAccess) {
+        ResolvedJavaType exactType = findSynonymType(graph, metaAccess, curValue);
+        if (exactType != null) {
+            return ConstantNode.forConstant(stamp, exactType.getObjectHub(), metaAccess);
+        }
+        return null;
+    }
+
+    public static ResolvedJavaType findSynonymType(StructuredGraph graph, MetaAccessProvider metaAccess, ValueNode curValue) {
+        ResolvedJavaType exactType = null;
+        if (metaAccess != null && curValue.stamp() instanceof ObjectStamp) {
+            ObjectStamp objectStamp = (ObjectStamp) curValue.stamp();
+            if (objectStamp.isExactType()) {
+                exactType = objectStamp.type();
+            } else if (objectStamp.type() != null && graph != null && graph.getAssumptions() != null) {
+                AssumptionResult<ResolvedJavaType> leafConcreteSubtype = objectStamp.type().findLeafConcreteSubtype();
+                if (leafConcreteSubtype != null) {
+                    exactType = leafConcreteSubtype.getResult();
+                    graph.getAssumptions().record(leafConcreteSubtype);
+                }
+            }
+        }
+        return exactType;
     }
 
     @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,24 +23,22 @@
  */
 package com.sun.hotspot.igv.graph;
 
+import com.sun.hotspot.igv.data.InputBlock;
 import com.sun.hotspot.igv.data.InputGraph;
 import com.sun.hotspot.igv.data.InputNode;
 import com.sun.hotspot.igv.data.Properties;
 import com.sun.hotspot.igv.data.Source;
+import com.sun.hotspot.igv.layout.Cluster;
 import com.sun.hotspot.igv.layout.Vertex;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.util.List;
 import java.util.*;
 
-/**
- *
- * @author Thomas Wuerthinger
- */
 public class Figure extends Properties.Entity implements Source.Provider, Vertex {
 
-    public static final int INSET = 12;
-    public static int SLOT_WIDTH = 12;
+    public static final int INSET = 8;
+    public static int SLOT_WIDTH = 10;
     public static final int OVERLAPPING = 6;
     public static final int SLOT_START = 4;
     public static final int SLOT_OFFSET = 8;
@@ -341,6 +339,19 @@ public class Figure extends Properties.Entity implements Source.Provider, Vertex
     @Override
     public String toString() {
         return idString;
+    }
+    
+    public Cluster getCluster() {
+        if (getSource().getSourceNodes().size() == 0) {
+            assert false : "Should never reach here, every figure must have at least one source node!";
+            return null;
+        } else {
+            final InputBlock inputBlock = diagram.getGraph().getBlock(getSource().getSourceNodes().get(0));
+            assert inputBlock != null;
+            Cluster result = diagram.getBlock(inputBlock);
+            assert result != null;
+            return result;
+        }
     }
 
     @Override

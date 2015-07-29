@@ -43,8 +43,8 @@
 #include "compiler/compileBroker.hpp"
 #include "shark/sharkCompiler.hpp"
 #endif
-#ifdef GRAAL
-#include "graal/graalJavaAccess.hpp"
+#if INCLUDE_JVMCI
+#include "jvmci/jvmciJavaAccess.hpp"
 #endif
 
 #define __ masm->
@@ -995,16 +995,16 @@ void AdapterGenerator::gen_i2c_adapter(int total_args_passed,
 
   // Jump to the compiled code just as if compiled code was doing it.
   __ ld_ptr(G5_method, in_bytes(Method::from_compiled_offset()), G3);
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   // check if this call should be routed towards a specific entry point
-  __ ld(Address(G2_thread, in_bytes(JavaThread::graal_alternate_call_target_offset())), G1);
+  __ ld(Address(G2_thread, in_bytes(JavaThread::jvmci_alternate_call_target_offset())), G1);
   __ cmp(G0, G1);
   Label no_alternative_target;
   __ br(Assembler::equal, false, Assembler::pn, no_alternative_target);
   __ delayed()->nop();
 
-  __ ld_ptr(G2_thread, in_bytes(JavaThread::graal_alternate_call_target_offset()), G3);
-  __ st(G0, Address(G2_thread, in_bytes(JavaThread::graal_alternate_call_target_offset())));
+  __ ld_ptr(G2_thread, in_bytes(JavaThread::jvmci_alternate_call_target_offset()), G3);
+  __ st(G0, Address(G2_thread, in_bytes(JavaThread::jvmci_alternate_call_target_offset())));
 
   __ bind(no_alternative_target);
 #endif
@@ -1154,51 +1154,82 @@ int SharedRuntime::c_calling_convention(const BasicType *sig_bt,
     // Hoist any int/ptr/long's in the first 6 to int regs.
     // Hoist any flt/dbl's in the first 16 dbl regs.
     int j = 0;                  // Count of actual args, not HALVES
-    for( int i=0; i<total_args_passed; i++, j++ ) {
-      switch( sig_bt[i] ) {
+    VMRegPair param_array_reg;  // location of the argument in the parameter array
+    for (int i = 0; i < total_args_passed; i++, j++) {
+      param_array_reg.set_bad();
+      switch (sig_bt[i]) {
       case T_BOOLEAN:
       case T_BYTE:
       case T_CHAR:
       case T_INT:
       case T_SHORT:
-        regs[i].set1( int_stk_helper( j ) ); break;
+        regs[i].set1(int_stk_helper(j));
+        break;
       case T_LONG:
-        assert( sig_bt[i+1] == T_VOID, "expecting half" );
+        assert(sig_bt[i+1] == T_VOID, "expecting half");
       case T_ADDRESS: // raw pointers, like current thread, for VM calls
       case T_ARRAY:
       case T_OBJECT:
       case T_METADATA:
-        regs[i].set2( int_stk_helper( j ) );
+        regs[i].set2(int_stk_helper(j));
         break;
       case T_FLOAT:
-        if ( j < 16 ) {
-          // V9ism: floats go in ODD registers
-          regs[i].set1(as_FloatRegister(1 + (j<<1))->as_VMReg());
-        } else {
-          // V9ism: floats go in ODD stack slot
-          regs[i].set1(VMRegImpl::stack2reg(1 + (j<<1)));
+        // Per SPARC Compliance Definition 2.4.1, page 3P-12 available here
+        // http://www.sparc.org/wp-content/uploads/2014/01/SCD.2.4.1.pdf.gz
+        //
+        // "When a callee prototype exists, and does not indicate variable arguments,
+        // floating-point values assigned to locations %sp+BIAS+128 through %sp+BIAS+248
+        // will be promoted to floating-point registers"
+        //
+        // By "promoted" it means that the argument is located in two places, an unused
+        // spill slot in the "parameter array" (starts at %sp+BIAS+128), and a live
+        // float register.  In most cases, there are 6 or fewer arguments of any type,
+        // and the standard parameter array slots (%sp+BIAS+128 to %sp+BIAS+176 exclusive)
+        // serve as shadow slots.  Per the spec floating point registers %d6 to %d16
+        // require slots beyond that (up to %sp+BIAS+248).
+        //
+        {
+          // V9ism: floats go in ODD registers and stack slots
+          int float_index = 1 + (j << 1);
+          param_array_reg.set1(VMRegImpl::stack2reg(float_index));
+          if (j < 16) {
+            regs[i].set1(as_FloatRegister(float_index)->as_VMReg());
+          } else {
+            regs[i] = param_array_reg;
+          }
         }
         break;
       case T_DOUBLE:
-        assert( sig_bt[i+1] == T_VOID, "expecting half" );
-        if ( j < 16 ) {
-          // V9ism: doubles go in EVEN/ODD regs
-          regs[i].set2(as_FloatRegister(j<<1)->as_VMReg());
-        } else {
-          // V9ism: doubles go in EVEN/ODD stack slots
-          regs[i].set2(VMRegImpl::stack2reg(j<<1));
+        {
+          assert(sig_bt[i + 1] == T_VOID, "expecting half");
+          // V9ism: doubles go in EVEN/ODD regs and stack slots
+          int double_index = (j << 1);
+          param_array_reg.set2(VMRegImpl::stack2reg(double_index));
+          if (j < 16) {
+            regs[i].set2(as_FloatRegister(double_index)->as_VMReg());
+          } else {
+            // V9ism: doubles go in EVEN/ODD stack slots
+            regs[i] = param_array_reg;
+          }
         }
         break;
-      case T_VOID:  regs[i].set_bad(); j--; break; // Do not count HALVES
+      case T_VOID:
+        regs[i].set_bad();
+        j--;
+        break; // Do not count HALVES
       default:
         ShouldNotReachHere();
       }
-      if (regs[i].first()->is_stack()) {
-        int off =  regs[i].first()->reg2stack();
+      // Keep track of the deepest parameter array slot.
+      if (!param_array_reg.first()->is_valid()) {
+        param_array_reg = regs[i];
+      }
+      if (param_array_reg.first()->is_stack()) {
+        int off = param_array_reg.first()->reg2stack();
         if (off > max_stack_slots) max_stack_slots = off;
       }
-      if (regs[i].second()->is_stack()) {
-        int off =  regs[i].second()->reg2stack();
+      if (param_array_reg.second()->is_stack()) {
+        int off = param_array_reg.second()->reg2stack();
         if (off > max_stack_slots) max_stack_slots = off;
       }
     }
@@ -1206,8 +1237,8 @@ int SharedRuntime::c_calling_convention(const BasicType *sig_bt,
 #else // _LP64
     // V8 convention: first 6 things in O-regs, rest on stack.
     // Alignment is willy-nilly.
-    for( int i=0; i<total_args_passed; i++ ) {
-      switch( sig_bt[i] ) {
+    for (int i = 0; i < total_args_passed; i++) {
+      switch (sig_bt[i]) {
       case T_ADDRESS: // raw pointers, like current thread, for VM calls
       case T_ARRAY:
       case T_BOOLEAN:
@@ -1218,23 +1249,23 @@ int SharedRuntime::c_calling_convention(const BasicType *sig_bt,
       case T_OBJECT:
       case T_METADATA:
       case T_SHORT:
-        regs[i].set1( int_stk_helper( i ) );
+        regs[i].set1(int_stk_helper(i));
         break;
       case T_DOUBLE:
       case T_LONG:
-        assert( sig_bt[i+1] == T_VOID, "expecting half" );
-        regs[i].set_pair( int_stk_helper( i+1 ), int_stk_helper( i ) );
+        assert(sig_bt[i + 1] == T_VOID, "expecting half");
+        regs[i].set_pair(int_stk_helper(i + 1), int_stk_helper(i));
         break;
       case T_VOID: regs[i].set_bad(); break;
       default:
         ShouldNotReachHere();
       }
       if (regs[i].first()->is_stack()) {
-        int off =  regs[i].first()->reg2stack();
+        int off = regs[i].first()->reg2stack();
         if (off > max_stack_slots) max_stack_slots = off;
       }
       if (regs[i].second()->is_stack()) {
-        int off =  regs[i].second()->reg2stack();
+        int off = regs[i].second()->reg2stack();
         if (off > max_stack_slots) max_stack_slots = off;
       }
     }
@@ -1383,11 +1414,10 @@ static void object_move(MacroAssembler* masm,
     const Register rOop = src.first()->as_Register();
     const Register rHandle = L5;
     int oop_slot = rOop->input_number() * VMRegImpl::slots_per_word + oop_handle_offset;
-    int offset = oop_slot*VMRegImpl::stack_slot_size;
-    Label skip;
+    int offset = oop_slot * VMRegImpl::stack_slot_size;
     __ st_ptr(rOop, SP, offset + STACK_BIAS);
     if (is_receiver) {
-      *receiver_offset = oop_slot * VMRegImpl::stack_slot_size;
+       *receiver_offset = offset;
     }
     map->set_oop(VMRegImpl::stack2reg(oop_slot));
     __ add(SP, offset + STACK_BIAS, rHandle);
@@ -3443,8 +3473,8 @@ void SharedRuntime::generate_deopt_blob() {
     pad += StackShadowPages*16 + 32;
   }
 #endif
-#ifdef GRAAL
-  pad += 1000; // Increase the buffer size when compiling for GRAAL
+#if INCLUDE_JVMCI
+  pad += 1000; // Increase the buffer size when compiling for JVMCI
 #endif
 #ifdef _LP64
   CodeBuffer buffer("deopt_blob", 2100+pad+1000, 512);
@@ -3513,14 +3543,11 @@ void SharedRuntime::generate_deopt_blob() {
   __ delayed()->mov(Deoptimization::Unpack_deopt, L0deopt_mode);
 
 
-#ifdef GRAAL
-  masm->block_comment("BEGIN GRAAL");
+#if INCLUDE_JVMCI
+  masm->block_comment("BEGIN JVMCI");
   int implicit_exception_uncommon_trap_offset = __ offset() - start;
-  //__ pushptr(Address(G2_thread, in_bytes(JavaThread::graal_implicit_exception_pc_offset())));
-  __ ld_ptr(G2_thread, in_bytes(JavaThread::graal_implicit_exception_pc_offset()), O7);
-  //__ add(G0, 0x321, O7);
+  __ ld_ptr(G2_thread, in_bytes(JavaThread::jvmci_implicit_exception_pc_offset()), O7);
   __ add(O7, -8, O7);
-  //__ st_ptr(I7, SP, I7->sp_offset_in_saved_window()*wordSize + STACK_BIAS);
 
   int uncommon_trap_offset = __ offset() - start;
 
@@ -3528,15 +3555,11 @@ void SharedRuntime::generate_deopt_blob() {
   masm->block_comment("save_live_regs");
   (void) RegisterSaver::save_live_registers(masm, 0, &frame_size_words);
   masm->block_comment("/save_live_regs");
-  //__ ld_ptr(G2_thread, in_bytes(JavaThread::graal_implicit_exception_pc_offset()), O7);
-  // fetch_unroll_info needs to call last_java_frame()
   masm->block_comment("set_last_java_frame");
   __ set_last_Java_frame(SP, NULL);
   masm->block_comment("/set_last_java_frame");
 
-  //__ movl(c_rarg1, Address(r15_thread, in_bytes(ThreadShadow::pending_deoptimization_offset())));
   __ ld(G2_thread, in_bytes(ThreadShadow::pending_deoptimization_offset()), O1);
-  //__ movl(Address(r15_thread, in_bytes(ThreadShadow::pending_deoptimization_offset())), -1);
   __ sub(G0, 1, L1);
   __ st_ptr(L1, G2_thread, in_bytes(ThreadShadow::pending_deoptimization_offset()));
 
@@ -3552,8 +3575,8 @@ void SharedRuntime::generate_deopt_blob() {
   Label after_fetch_unroll_info_call;
   __ ba(after_fetch_unroll_info_call);
   __ delayed()->nop(); // Delay slot
-  masm->block_comment("END GRAAL");
-#endif // GRAAL
+  masm->block_comment("END JVMCI");
+#endif // INCLUDE_JVMCI
 
   int exception_offset = __ offset() - start;
 
@@ -3583,33 +3606,6 @@ void SharedRuntime::generate_deopt_blob() {
   // Restore G2_thread
   __ get_thread();
 
-#ifdef GRAAL
-  // load throwing pc from JavaThread and patch it as the return address
-  // of the current frame. Then clear the field in JavaThread
-  __ block_comment("load throwing pc and patch return");
-  Address exception_pc(G2_thread, JavaThread::exception_pc_offset());
-  Label has_no_pc;
-  // TODO: Remove this weird check if we should patch the return pc
-  // This is because when graal decides to deoptimize and the ExceptionHandlerStub.java
-  // jumps back to this code and the I7 register contains the pc pointing to the begin
-  // of this code. If this is the case (PC within a certain range) then we need to patch
-  // the return pc.
-  // THIS NEEDS REWORK! (sa)
-  __ rdpc(L0);
-  __ sub(L0, I7, L0);
-  __ cmp(L0, 0xFFF);
-  __ br(Assembler::greater, false, Assembler::pt, has_no_pc);
-  __ delayed() -> nop();
-  __ cmp(L0, -0xFFF);
-  __ br(Assembler::less, false, Assembler::pt, has_no_pc);
-  __ delayed() -> nop();
-  __ ld_ptr(exception_pc, I7);
-  __ sub(I7, 8, I7);
-  __ st_ptr(G0, exception_pc);
-  __ bind(has_no_pc);
-  __ block_comment("/load throwing pc and patch return");
-#endif // GAAL
-
 #ifdef ASSERT
   {
     // verify that there is really an exception oop in exception_oop
@@ -3636,8 +3632,8 @@ void SharedRuntime::generate_deopt_blob() {
   // Reexecute entry, similar to c2 uncommon trap
   //
   int reexecute_offset = __ offset() - start;
-#if defined(COMPILERGRAAL) && !defined(COMPILER1)
-  // Graal does not use this kind of deoptimization
+#if defined(COMPILERJVMCI) && !defined(COMPILER1)
+  // JVMCI does not use this kind of deoptimization
   __ should_not_reach_here();
 #endif
   // No need to update oop_map  as each call to save_live_registers will produce identical oopmap
@@ -3663,7 +3659,7 @@ void SharedRuntime::generate_deopt_blob() {
 
   __ reset_last_Java_frame();
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   __ bind(after_fetch_unroll_info_call);
 #endif
   // NOTE: we know that only O0/O1 will be reloaded by restore_result_registers
@@ -3731,7 +3727,7 @@ void SharedRuntime::generate_deopt_blob() {
   masm->flush();
   _deopt_blob = DeoptimizationBlob::create(&buffer, oop_maps, 0, exception_offset, reexecute_offset, frame_size_words);
   _deopt_blob->set_unpack_with_exception_in_tls_offset(exception_in_tls_offset);
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   _deopt_blob->set_uncommon_trap_offset(uncommon_trap_offset);
   _deopt_blob->set_implicit_exception_uncommon_trap_offset(implicit_exception_uncommon_trap_offset);
 #endif

@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.phases.verify;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
@@ -107,7 +108,11 @@ public class VerifyUsageWithEquals extends VerifyPhase<PhaseContext> {
         for (ObjectEqualsNode cn : graph.getNodes().filter(ObjectEqualsNode.class)) {
             // bail out if we compare an object of type klass with == or != (except null checks)
             ResolvedJavaMethod method = graph.method();
-            if (isIllegalUsage(method, cn.getX(), cn.getY(), context.getMetaAccess()) || isIllegalUsage(method, cn.getY(), cn.getX(), context.getMetaAccess())) {
+            ResolvedJavaType restrictedType = context.getMetaAccess().lookupJavaType(restrictedClass);
+
+            if (method.getDeclaringClass().equals(restrictedType)) {
+                // Allow violation in methods of the restricted type itself.
+            } else if (isIllegalUsage(method, cn.getX(), cn.getY(), context.getMetaAccess()) || isIllegalUsage(method, cn.getY(), cn.getX(), context.getMetaAccess())) {
                 throw new VerificationError("Verification of " + restrictedClass.getName() + " usage failed: Comparing " + cn.getX() + " and " + cn.getY() + " in " + method +
                                 " must use .equals() for object equality, not '==' or '!='");
             }

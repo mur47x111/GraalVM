@@ -22,10 +22,12 @@
  */
 package com.oracle.graal.hotspot.test;
 
+import java.lang.invoke.*;
+
 import org.junit.*;
 
+import com.oracle.graal.api.directives.*;
 import com.oracle.graal.api.replacements.*;
-import com.oracle.graal.hotspot.replacements.*;
 import com.oracle.graal.replacements.test.*;
 
 /**
@@ -37,8 +39,8 @@ public class HotSpotMethodSubstitutionTest extends MethodSubstitutionTest {
     public void testObjectSubstitutions() {
         TestClassA obj = new TestClassA();
 
-        test("getClass0");
-        test("objectHashCode");
+        testGraph("getClass0");
+        testGraph("objectHashCode");
 
         test("getClass0", "a string");
         test("objectHashCode", obj);
@@ -56,12 +58,12 @@ public class HotSpotMethodSubstitutionTest extends MethodSubstitutionTest {
 
     @Test
     public void testClassSubstitutions() {
-        test("getModifiers");
-        test("isInterface");
-        test("isArray");
-        test("isPrimitive");
-        test("getSuperClass");
-        test("getComponentType");
+        testGraph("getModifiers");
+        testGraph("isInterface");
+        testGraph("isArray");
+        testGraph("isPrimitive");
+        testGraph("getSuperClass");
+        testGraph("getComponentType");
 
         for (Class<?> c : new Class[]{getClass(), Cloneable.class, int[].class, String[][].class}) {
             test("getModifiers", c);
@@ -105,9 +107,9 @@ public class HotSpotMethodSubstitutionTest extends MethodSubstitutionTest {
 
     @Test
     public void testThreadSubstitutions() {
-        test("currentThread");
-        test("threadIsInterrupted");
-        test("threadInterrupted");
+        testGraph("currentThread");
+        testGraph("threadIsInterrupted");
+        testGraph("threadInterrupted");
 
         Thread currentThread = Thread.currentThread();
         test("currentThread", currentThread);
@@ -131,11 +133,9 @@ public class HotSpotMethodSubstitutionTest extends MethodSubstitutionTest {
 
     @Test
     public void testSystemSubstitutions() {
-        test("systemTime");
-        test("systemIdentityHashCode");
+        testGraph("systemTime");
+        testGraph("systemIdentityHashCode");
 
-        SystemSubstitutions.currentTimeMillis();
-        SystemSubstitutions.nanoTime();
         for (Object o : new Object[]{this, new int[5], new String[2][], new Object()}) {
             test("systemIdentityHashCode", o);
         }
@@ -152,5 +152,68 @@ public class HotSpotMethodSubstitutionTest extends MethodSubstitutionTest {
     }
 
     private static class TestClassA {
+    }
+
+    public static String testCallSiteGetTargetSnippet(int i) throws Exception {
+        ConstantCallSite site;
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        switch (i) {
+            case 1:
+                site = GraalDirectives.opaque(new ConstantCallSite(lookup.findVirtual(String.class, "replace", MethodType.methodType(String.class, char.class, char.class))));
+                break;
+            default:
+                site = GraalDirectives.opaque(new ConstantCallSite(lookup.findStatic(java.util.Arrays.class, "asList", MethodType.methodType(java.util.List.class, Object[].class))));
+        }
+        return site.getTarget().toString();
+    }
+
+    public static String testCastSnippet(int i, Object obj) throws Exception {
+        Class<?> c;
+        switch (i) {
+            case 1:
+                c = GraalDirectives.opaque(Number.class);
+                break;
+            default:
+                c = GraalDirectives.opaque(Integer.class);
+                break;
+        }
+        return c.cast(obj).toString();
+    }
+
+    public static String testGetClassSnippet(int i) {
+        Object c;
+        switch (i) {
+            case 1:
+                c = GraalDirectives.opaque(new Object());
+                break;
+            default:
+                c = GraalDirectives.opaque("TEST");
+                break;
+        }
+        return c.getClass().toString();
+    }
+
+    /**
+     * Tests ambiguous receiver of CallSite.getTarget.
+     */
+    @Test
+    public void testCallSiteGetTarget() {
+        test("testCallSiteGetTargetSnippet", 1);
+    }
+
+    /**
+     * Tests ambiguous receiver of Class.cast.
+     */
+    @Test
+    public void testCast() {
+        test("testCastSnippet", 1, new Integer(1));
+    }
+
+    /**
+     * Tests ambiguous receiver of Object.getClass.
+     */
+    @Test
+    public void testGetClass() {
+        test("testGetClassSnippet", 1);
     }
 }

@@ -25,9 +25,10 @@ package com.oracle.graal.compiler.test.tutorial;
 import java.lang.reflect.*;
 import java.util.*;
 
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.api.runtime.*;
 import com.oracle.graal.compiler.target.*;
 import com.oracle.graal.compiler.test.tutorial.StaticAnalysis.MethodState;

@@ -40,9 +40,9 @@
 #include "runtime/signature.hpp"
 #include "runtime/stubRoutines.hpp"
 #include "runtime/thread.inline.hpp"
-#ifdef GRAAL
-#include "graal/graalJavaAccess.hpp"
-#include "graal/graalRuntime.hpp"
+#if INCLUDE_JVMCI
+#include "jvmci/jvmciJavaAccess.hpp"
+#include "jvmci/jvmciRuntime.hpp"
 #endif
 
 // -----------------------------------------------------
@@ -329,6 +329,10 @@ void JavaCalls::call(JavaValue* result, methodHandle method, JavaCallArguments* 
 }
 
 void JavaCalls::call_helper(JavaValue* result, methodHandle* m, JavaCallArguments* args, TRAPS) {
+  // During dumping, Java execution environment is not fully initialized. Also, Java execution
+  // may cause undesirable side-effects in the class metadata.
+  assert(!DumpSharedSpaces, "must not execute Java bytecodes when dumping");
+
   methodHandle method = *m;
   JavaThread* thread = (JavaThread*)THREAD;
   assert(thread->is_Java_thread(), "must be called by a java thread");
@@ -339,7 +343,7 @@ void JavaCalls::call_helper(JavaValue* result, methodHandle* m, JavaCallArgument
 
   CHECK_UNHANDLED_OOPS_ONLY(thread->clear_unhandled_oops();)
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   nmethod* nm = args->alternative_target();
   if (nm == NULL) {
 #endif
@@ -349,7 +353,7 @@ void JavaCalls::call_helper(JavaValue* result, methodHandle* m, JavaCallArgument
     args->verify(method, result->get_type(), thread);
   }
   else debug_only(args->verify(method, result->get_type(), thread));
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   }
 #else
 
@@ -414,13 +418,13 @@ void JavaCalls::call_helper(JavaValue* result, methodHandle* m, JavaCallArgument
     os::bang_stack_shadow_pages();
   }
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   if (nm != NULL) {
     if (nm->is_alive()) {
-      ((JavaThread*) THREAD)->set_graal_alternate_call_target(nm->verified_entry_point());
+      ((JavaThread*) THREAD)->set_jvmci_alternate_call_target(nm->verified_entry_point());
       entry_point = method->adapter()->get_i2c_entry();
     } else {
-      THROW(vmSymbols::com_oracle_graal_api_code_InvalidInstalledCodeException());
+      THROW(vmSymbols::jdk_internal_jvmci_code_InvalidInstalledCodeException());
     }
   }
 #endif

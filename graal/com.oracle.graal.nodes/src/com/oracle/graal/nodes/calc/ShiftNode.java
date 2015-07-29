@@ -25,7 +25,9 @@ package com.oracle.graal.nodes.calc;
 import java.io.*;
 import java.util.function.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.ShiftOp;
 import com.oracle.graal.graph.*;
@@ -38,7 +40,7 @@ import com.oracle.graal.nodes.spi.*;
  * The {@code ShiftOp} class represents shift operations.
  */
 @NodeInfo
-public abstract class ShiftNode<OP> extends BinaryNode implements ArithmeticLIRLowerable {
+public abstract class ShiftNode<OP> extends BinaryNode implements ArithmeticLIRLowerable, NarrowableArithmeticNode {
 
     @SuppressWarnings("rawtypes") public static final NodeClass<ShiftNode> TYPE = NodeClass.create(ShiftNode.class);
 
@@ -82,4 +84,18 @@ public abstract class ShiftNode<OP> extends BinaryNode implements ArithmeticLIRL
         return getOp(getX()).getShiftAmountMask(stamp());
     }
 
+    public boolean isNarrowable(int resultBits) {
+        assert CodeUtil.isPowerOf2(resultBits);
+        int narrowMask = resultBits - 1;
+        int wideMask = getShiftAmountMask();
+        assert (wideMask & narrowMask) == narrowMask : String.format("wideMask %x should be wider than narrowMask %x", wideMask, narrowMask);
+
+        /*
+         * Shifts are special because narrowing them also changes the implicit mask of the shift
+         * amount. We can narrow only if (y & wideMask) == (y & narrowMask) for all possible values
+         * of y.
+         */
+        IntegerStamp yStamp = (IntegerStamp) getY().stamp();
+        return (yStamp.upMask() & (wideMask & ~narrowMask)) == 0;
+    }
 }

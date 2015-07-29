@@ -22,33 +22,21 @@
  */
 package com.oracle.graal.replacements;
 
-import com.oracle.graal.api.replacements.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.java.*;
+
+// JaCoCo Exclude
 
 /**
  * Substitutions for {@link java.lang.reflect.Array} methods.
  */
-@ClassSubstitution(java.lang.reflect.Array.class)
 public class ArraySubstitutions {
 
-    @MethodSubstitution
-    public static Object newInstance(Class<?> componentType, int length) throws NegativeArraySizeException {
-        // The error cases must be handled here since DynamicNewArrayNode can only deoptimize the
-        // caller in response to exceptions.
-        if (length < 0) {
-            throw new NegativeArraySizeException();
-        }
-        if (componentType == void.class) {
-            throw new IllegalArgumentException();
-        }
-        return DynamicNewArrayNode.newArray(GuardingPiNode.guardingNonNull(componentType), length);
-    }
-
-    @MethodSubstitution
     public static int getLength(Object array) {
         if (!array.getClass().isArray()) {
-            throw new IllegalArgumentException("Argument is not an array");
+            DeoptimizeNode.deopt(DeoptimizationAction.None, DeoptimizationReason.RuntimeConstraint);
         }
         return ArrayLengthNode.arrayLength(array);
     }

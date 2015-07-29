@@ -22,13 +22,16 @@
  */
 package com.oracle.graal.hotspot;
 
-import static com.oracle.graal.compiler.GraalDebugConfig.*;
+import static com.oracle.graal.debug.JVMCIDebugConfig.*;
 
 import java.io.*;
 import java.util.*;
+import java.util.regex.*;
+import java.util.stream.*;
 
-import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.debug.*;
+
 import com.oracle.graal.debug.internal.*;
 
 /**
@@ -37,7 +40,7 @@ import com.oracle.graal.debug.internal.*;
  */
 public class DebugValuesPrinter {
 
-    public void printDebugValues() throws GraalInternalError {
+    public void printDebugValues() throws JVMCIError {
         TTY.println();
         TTY.println("<DebugValues>");
         List<DebugValueMap> topLevelMaps = DebugValueMap.getTopLevelMaps();
@@ -50,6 +53,12 @@ public class DebugValuesPrinter {
                 String summary = DebugValueSummary.getValue();
                 if (summary == null) {
                     summary = "Complete";
+                }
+                if (DebugValueThreadFilter.getValue() != null && topLevelMaps.size() != 0) {
+                    topLevelMaps = topLevelMaps.stream().filter(map -> Pattern.compile(DebugValueThreadFilter.getValue()).matcher(map.getName()).find()).collect(Collectors.toList());
+                    if (topLevelMaps.size() == 0) {
+                        TTY.println("Warning: DebugValueThreadFilter=%s eliminated all maps so nothing will be printed", DebugValueThreadFilter.getValue());
+                    }
                 }
                 switch (summary) {
                     case "Name":
@@ -83,7 +92,7 @@ public class DebugValuesPrinter {
                         }
                         break;
                     default:
-                        throw new GraalInternalError("Unknown summary type: %s", summary);
+                        throw new JVMCIError("Unknown summary type: %s", summary);
                 }
                 for (DebugValueMap topLevelMap : topLevelMaps) {
                     topLevelMap.reset();

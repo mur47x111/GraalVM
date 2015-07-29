@@ -23,13 +23,12 @@
 package com.oracle.graal.hotspot.sparc;
 
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
-import static com.oracle.graal.sparc.SPARC.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import static jdk.internal.jvmci.sparc.SPARC.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.asm.sparc.*;
-import com.oracle.graal.asm.sparc.SPARCAssembler.Add;
-import com.oracle.graal.asm.sparc.SPARCAssembler.Stx;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.asm.*;
 import com.oracle.graal.lir.sparc.*;
@@ -37,25 +36,29 @@ import com.oracle.graal.lir.sparc.*;
 @Opcode("CRUNTIME_CALL_PROLOGUE")
 final class SPARCHotSpotCRuntimeCallPrologueOp extends SPARCLIRInstruction implements SPARCTailDelayedLIRInstruction {
     public static final LIRInstructionClass<SPARCHotSpotCRuntimeCallPrologueOp> TYPE = LIRInstructionClass.create(SPARCHotSpotCRuntimeCallPrologueOp.class);
+    public static final SizeEstimate SIZE = SizeEstimate.create(10);
 
     private final int threadLastJavaSpOffset;
     private final Register thread;
     private final Register stackPointer;
     @Def({REG, STACK}) protected Value threadTemp;
+    @Temp({REG}) protected AllocatableValue spScratch;
 
-    public SPARCHotSpotCRuntimeCallPrologueOp(int threadLastJavaSpOffset, Register thread, Register stackPointer, Value threadTemp) {
-        super(TYPE);
+    public SPARCHotSpotCRuntimeCallPrologueOp(int threadLastJavaSpOffset, Register thread, Register stackPointer, Value threadTemp, AllocatableValue spScratch) {
+        super(TYPE, SIZE);
         this.threadLastJavaSpOffset = threadLastJavaSpOffset;
         this.thread = thread;
         this.stackPointer = stackPointer;
         this.threadTemp = threadTemp;
+        this.spScratch = spScratch;
     }
 
     @Override
     public void emitCode(CompilationResultBuilder crb, SPARCMacroAssembler masm) {
         // Save last Java frame.
-        new Add(stackPointer, STACK_BIAS, g4).emit(masm);
-        new Stx(g4, new SPARCAddress(thread, threadLastJavaSpOffset)).emit(masm);
+        Register scratchRegister = asRegister(spScratch);
+        masm.add(stackPointer, STACK_BIAS, scratchRegister);
+        masm.stx(scratchRegister, new SPARCAddress(thread, threadLastJavaSpOffset));
 
         // Save the thread register when calling out to the runtime.
         SPARCMove.move(crb, masm, threadTemp, thread.asValue(LIRKind.value(Kind.Long)), delayedControlTransfer);

@@ -22,9 +22,9 @@
  */
 package com.oracle.graal.graph;
 
-import static com.oracle.graal.compiler.common.UnsafeAccess.*;
 import static com.oracle.graal.graph.Graph.*;
 import static com.oracle.graal.graph.Node.*;
+import static jdk.internal.jvmci.common.UnsafeAccess.*;
 
 import java.util.*;
 import java.util.function.*;
@@ -57,7 +57,7 @@ public abstract class Edges extends Fields {
 
     public static void translateInto(Edges edges, ArrayList<EdgeInfo> infos) {
         for (int index = 0; index < edges.getCount(); index++) {
-            infos.add(new EdgeInfo(edges.offsets[index], edges.getName(index), edges.getType(index)));
+            infos.add(new EdgeInfo(edges.offsets[index], edges.getName(index), edges.getType(index), edges.getDeclaringClass(index)));
         }
     }
 
@@ -263,7 +263,7 @@ public abstract class Edges extends Fields {
         update(node, old, value);
     }
 
-    protected abstract void update(Node node, Node oldValue, Node newValue);
+    public abstract void update(Node node, Node oldValue, Node newValue);
 
     public boolean contains(Node node, Node value) {
         final long[] curOffsets = this.offsets;
@@ -528,22 +528,52 @@ public abstract class Edges extends Fields {
             }
             index++;
         }
-        int count = getCount();
+        int count = curOffsets.length;
         while (index < count) {
             NodeList<Node> list = getNodeList(node, curOffsets, index);
-            if (list != null) {
-                for (int i = 0; i < list.size(); ++i) {
-                    Node curNode = list.get(i);
-                    if (curNode != null) {
-                        consumer.accept(node, curNode);
-                    }
-                }
-            }
+            acceptHelper(node, consumer, list);
             index++;
         }
     }
 
-    public long[] getOffsets() {
-        return this.offsets;
+    private static void acceptHelper(Node node, BiConsumer<Node, Node> consumer, NodeList<Node> list) {
+        if (list != null) {
+            for (int i = 0; i < list.size(); ++i) {
+                Node curNode = list.get(i);
+                if (curNode != null) {
+                    consumer.accept(node, curNode);
+                }
+            }
+        }
+    }
+
+    public void pushAll(Node node, NodeStack stack) {
+        int index = 0;
+        int curDirectCount = this.directCount;
+        final long[] curOffsets = this.offsets;
+        while (index < curDirectCount) {
+            Node curNode = getNode(node, curOffsets, index);
+            if (curNode != null) {
+                stack.push(curNode);
+            }
+            index++;
+        }
+        int count = curOffsets.length;
+        while (index < count) {
+            NodeList<Node> list = getNodeList(node, curOffsets, index);
+            pushAllHelper(stack, list);
+            index++;
+        }
+    }
+
+    private static void pushAllHelper(NodeStack stack, NodeList<Node> list) {
+        if (list != null) {
+            for (int i = 0; i < list.size(); ++i) {
+                Node curNode = list.get(i);
+                if (curNode != null) {
+                    stack.push(curNode);
+                }
+            }
+        }
     }
 }

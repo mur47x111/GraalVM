@@ -22,23 +22,17 @@
  */
 package com.oracle.graal.hotspot.sparc;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
-import static com.oracle.graal.sparc.SPARC.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import static jdk.internal.jvmci.sparc.SPARC.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.asm.sparc.*;
-import com.oracle.graal.asm.sparc.SPARCAssembler.CC;
-import com.oracle.graal.asm.sparc.SPARCAssembler.ConditionFlag;
-import com.oracle.graal.asm.sparc.SPARCAssembler.Jmpl;
-import com.oracle.graal.asm.sparc.SPARCAssembler.Lduw;
-import com.oracle.graal.asm.sparc.SPARCAssembler.Movcc;
-import com.oracle.graal.asm.sparc.SPARCMacroAssembler.Cmp;
-import com.oracle.graal.asm.sparc.SPARCMacroAssembler.Nop;
+import com.oracle.graal.asm.sparc.SPARCAssembler.*;
+import com.oracle.graal.asm.sparc.SPARCMacroAssembler.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.asm.*;
-import com.oracle.graal.sparc.*;
 
 /**
  * Sets up the arguments for an exception handler in the callers frame, removes the current frame
@@ -48,6 +42,7 @@ import com.oracle.graal.sparc.*;
 final class SPARCHotSpotJumpToExceptionHandlerInCallerOp extends SPARCHotSpotEpilogueOp {
 
     public static final LIRInstructionClass<SPARCHotSpotJumpToExceptionHandlerInCallerOp> TYPE = LIRInstructionClass.create(SPARCHotSpotJumpToExceptionHandlerInCallerOp.class);
+    public static final SizeEstimate SIZE = SizeEstimate.create(5);
 
     @Use(REG) AllocatableValue handlerInCallerPc;
     @Use(REG) AllocatableValue exception;
@@ -56,7 +51,7 @@ final class SPARCHotSpotJumpToExceptionHandlerInCallerOp extends SPARCHotSpotEpi
     private final int isMethodHandleReturnOffset;
 
     SPARCHotSpotJumpToExceptionHandlerInCallerOp(AllocatableValue handlerInCallerPc, AllocatableValue exception, AllocatableValue exceptionPc, int isMethodHandleReturnOffset, Register thread) {
-        super(TYPE);
+        super(TYPE, SIZE);
         this.handlerInCallerPc = handlerInCallerPc;
         this.exception = exception;
         this.exceptionPc = exceptionPc;
@@ -67,21 +62,21 @@ final class SPARCHotSpotJumpToExceptionHandlerInCallerOp extends SPARCHotSpotEpi
     @Override
     public void emitCode(CompilationResultBuilder crb, SPARCMacroAssembler masm) {
         // Move the values up one level to be the input for the next call.
-        new SPARCMacroAssembler.Mov(asRegister(handlerInCallerPc), i2).emit(masm);
-        new SPARCMacroAssembler.Mov(asRegister(exception), i0).emit(masm);
-        new SPARCMacroAssembler.Mov(asRegister(exceptionPc), i1).emit(masm);
+        masm.mov(asRegister(handlerInCallerPc), i2);
+        masm.mov(asRegister(exception), i0);
+        masm.mov(asRegister(exceptionPc), i1);
         leaveFrame(crb);
 
         // Restore SP from L7 if the exception PC is a method handle call site.
         SPARCAddress dst = new SPARCAddress(thread, isMethodHandleReturnOffset);
-        try (SPARCScratchRegister scratch = SPARCScratchRegister.get()) {
+        try (ScratchRegister scratch = masm.getScratchRegister()) {
             Register scratchReg = scratch.getRegister();
-            new Lduw(dst, scratchReg).emit(masm);
-            new Cmp(scratchReg, scratchReg).emit(masm);
-            new Movcc(ConditionFlag.NotZero, CC.Icc, l7, sp).emit(masm);
+            masm.lduw(dst, scratchReg);
+            masm.cmp(scratchReg, scratchReg);
+            masm.movcc(ConditionFlag.NotZero, CC.Icc, l7, sp);
         }
 
-        new Jmpl(asRegister(handlerInCallerPc), 0, g0).emit(masm);
-        new Nop().emit(masm);
+        masm.jmpl(asRegister(handlerInCallerPc), 0, g0);
+        masm.nop();
     }
 }

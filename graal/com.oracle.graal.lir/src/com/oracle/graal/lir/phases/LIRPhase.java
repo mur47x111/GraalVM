@@ -25,12 +25,12 @@ package com.oracle.graal.lir.phases;
 import java.util.*;
 import java.util.regex.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.compiler.common.cfg.*;
+import jdk.internal.jvmci.code.*;
 import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
-import com.oracle.graal.debug.DebugMemUseTracker.Closeable;
-import com.oracle.graal.debug.internal.*;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.options.*;
+
+import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.gen.*;
 
@@ -39,6 +39,13 @@ import com.oracle.graal.lir.gen.*;
  * one global instance for each phase that is shared for all compilations.
  */
 public abstract class LIRPhase<C> {
+
+    public static class Options {
+        // @formatter:off
+        @Option(help = "Enable LIR level optimiztations.", type = OptionType.Debug)
+        public static final OptionValue<Boolean> LIROptimization = new OptionValue<>(true);
+        // @formatter:on
+    }
 
     private static final int PHASE_DUMP_LEVEL = 2;
 
@@ -54,7 +61,38 @@ public abstract class LIRPhase<C> {
      */
     private final DebugMemUseTracker memUseTracker;
 
-    private static final Pattern NAME_PATTERN = Pattern.compile("[A-Z][A-Za-z0-9]+");
+    private static class LIRPhaseStatistics {
+        /**
+         * Records time spent within {@link #apply}.
+         */
+        private final DebugTimer timer;
+
+        /**
+         * Records memory usage within {@link #apply}.
+         */
+        private final DebugMemUseTracker memUseTracker;
+
+        LIRPhaseStatistics(Class<?> clazz) {
+            timer = Debug.timer("LIRPhaseTime_%s", clazz);
+            memUseTracker = Debug.memUseTracker("LIRPhaseMemUse_%s", clazz);
+        }
+    }
+
+    private static final ClassValue<LIRPhaseStatistics> statisticsClassValue = new ClassValue<LIRPhaseStatistics>() {
+        @Override
+        protected LIRPhaseStatistics computeValue(Class<?> c) {
+            return new LIRPhaseStatistics(c);
+        }
+    };
+
+    @SuppressWarnings("all")
+    private static boolean assertionsEnabled() {
+        boolean enabled = false;
+        assert enabled = true;
+        return enabled;
+    }
+
+    private static final Pattern NAME_PATTERN = assertionsEnabled() ? Pattern.compile("[A-Z][A-Za-z0-9]+") : null;
 
     private static boolean checkName(String name) {
         assert name == null || NAME_PATTERN.matcher(name).matches() : "illegal phase name: " + name;
@@ -62,15 +100,17 @@ public abstract class LIRPhase<C> {
     }
 
     public LIRPhase() {
-        timer = Debug.timer("LIRPhaseTime_%s", getClass());
-        memUseTracker = Debug.memUseTracker("LIRPhaseMemUse_%s", getClass());
+        LIRPhaseStatistics statistics = statisticsClassValue.get(getClass());
+        timer = statistics.timer;
+        memUseTracker = statistics.memUseTracker;
     }
 
     protected LIRPhase(String name) {
         assert checkName(name);
         this.name = name;
-        timer = Debug.timer("LIRPhaseTime_%s", getClass());
-        memUseTracker = Debug.memUseTracker("LIRPhaseMemUse_%s", getClass());
+        LIRPhaseStatistics statistics = statisticsClassValue.get(getClass());
+        timer = statistics.timer;
+        memUseTracker = statistics.memUseTracker;
     }
 
     public final <B extends AbstractBlockBase<B>> void apply(TargetDescription target, LIRGenerationResult lirGenRes, List<B> codeEmittingOrder, List<B> linearScanOrder, C context) {
@@ -79,10 +119,10 @@ public abstract class LIRPhase<C> {
 
     public final <B extends AbstractBlockBase<B>> void apply(TargetDescription target, LIRGenerationResult lirGenRes, List<B> codeEmittingOrder, List<B> linearScanOrder, C context, boolean dumpLIR) {
         try (Scope s = Debug.scope(getName(), this)) {
-            try (TimerCloseable a = timer.start(); Closeable c = memUseTracker.start()) {
+            try (DebugCloseable a = timer.start(); DebugCloseable c = memUseTracker.start()) {
                 run(target, lirGenRes, codeEmittingOrder, linearScanOrder, context);
                 if (dumpLIR && Debug.isDumpEnabled(PHASE_DUMP_LEVEL)) {
-                    Debug.dump(PHASE_DUMP_LEVEL, lirGenRes.getLIR(), "After phase %s", getName());
+                    Debug.dump(PHASE_DUMP_LEVEL, lirGenRes.getLIR(), "%s", getName());
                 }
             }
         } catch (Throwable e) {

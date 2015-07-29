@@ -22,16 +22,17 @@
  */
 package com.oracle.graal.debug;
 
+import static java.util.FormattableFlags.*;
 import static com.oracle.graal.debug.Debug.Initialization.*;
 import static com.oracle.graal.debug.DelegatingDebugConfig.Feature.*;
-import static java.util.FormattableFlags.*;
 
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.*;
 
-import com.oracle.graal.debug.DelegatingDebugConfig.Level;
+import com.oracle.graal.debug.DelegatingDebugConfig.*;
 import com.oracle.graal.debug.internal.*;
+import jdk.internal.jvmci.service.*;
 
 /**
  * Scope based debugging facility. This facility is {@link #isEnabled()} if assertions are enabled
@@ -40,12 +41,18 @@ import com.oracle.graal.debug.internal.*;
  */
 public class Debug {
 
+    static {
+        for (DebugInitializationPropertyProvider p : Services.load(DebugInitializationPropertyProvider.class)) {
+            p.apply();
+        }
+    }
+
     /**
      * Class to assist with initialization of {@link Debug}.
      */
     public static class Initialization {
 
-        public static final String INITIALIZER_PROPERTY_NAME = "graal.debug.enable";
+        public static final String INITIALIZER_PROPERTY_NAME = "jvmci.debug.enable";
 
         private static boolean initialized;
 
@@ -398,6 +405,22 @@ public class Debug {
         }
     }
 
+    public static void log(String format, int arg) {
+        log(DEFAULT_LOG_LEVEL, format, arg);
+    }
+
+    /**
+     * Prints a message to the current debug scope's logging stream if logging is enabled.
+     *
+     * @param format a format string
+     * @param arg the argument referenced by the format specifiers in {@code format}
+     */
+    public static void log(int logLevel, String format, int arg) {
+        if (ENABLED) {
+            DebugScope.getInstance().log(logLevel, format, arg);
+        }
+    }
+
     public static void log(String format, Object arg1, Object arg2) {
         log(DEFAULT_LOG_LEVEL, format, arg1, arg2);
     }
@@ -411,6 +434,45 @@ public class Debug {
         }
     }
 
+    public static void log(String format, int arg1, Object arg2) {
+        log(DEFAULT_LOG_LEVEL, format, arg1, arg2);
+    }
+
+    /**
+     * @see #log(int, String, Object)
+     */
+    public static void log(int logLevel, String format, int arg1, Object arg2) {
+        if (ENABLED) {
+            DebugScope.getInstance().log(logLevel, format, arg1, arg2);
+        }
+    }
+
+    public static void log(String format, Object arg1, int arg2) {
+        log(DEFAULT_LOG_LEVEL, format, arg1, arg2);
+    }
+
+    /**
+     * @see #log(int, String, Object)
+     */
+    public static void log(int logLevel, String format, Object arg1, int arg2) {
+        if (ENABLED) {
+            DebugScope.getInstance().log(logLevel, format, arg1, arg2);
+        }
+    }
+
+    public static void log(String format, int arg1, int arg2) {
+        log(DEFAULT_LOG_LEVEL, format, arg1, arg2);
+    }
+
+    /**
+     * @see #log(int, String, Object)
+     */
+    public static void log(int logLevel, String format, int arg1, int arg2) {
+        if (ENABLED) {
+            DebugScope.getInstance().log(logLevel, format, arg1, arg2);
+        }
+    }
+
     public static void log(String format, Object arg1, Object arg2, Object arg3) {
         log(DEFAULT_LOG_LEVEL, format, arg1, arg2, arg3);
     }
@@ -419,6 +481,19 @@ public class Debug {
      * @see #log(int, String, Object)
      */
     public static void log(int logLevel, String format, Object arg1, Object arg2, Object arg3) {
+        if (ENABLED) {
+            DebugScope.getInstance().log(logLevel, format, arg1, arg2, arg3);
+        }
+    }
+
+    public static void log(String format, int arg1, int arg2, int arg3) {
+        log(DEFAULT_LOG_LEVEL, format, arg1, arg2, arg3);
+    }
+
+    /**
+     * @see #log(int, String, Object)
+     */
+    public static void log(int logLevel, String format, int arg1, int arg2, int arg3) {
         if (ENABLED) {
             DebugScope.getInstance().log(logLevel, format, arg1, arg2, arg3);
         }
@@ -670,8 +745,8 @@ public class Debug {
      *         {@linkplain Indent#close() closed} or null if debugging is disabled
      */
     public static Indent logAndIndent(int logLevel, String msg) {
-        if (ENABLED) {
-            return logvAndIndent(logLevel, msg);
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, msg);
         }
         return null;
     }
@@ -689,8 +764,69 @@ public class Debug {
      *         {@linkplain Indent#close() closed} or null if debugging is disabled
      */
     public static Indent logAndIndent(int logLevel, String format, Object arg) {
-        if (ENABLED) {
-            return logvAndIndent(logLevel, format, arg);
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg);
+        }
+        return null;
+    }
+
+    public static Indent logAndIndent(String format, int arg) {
+        return logAndIndent(DEFAULT_LOG_LEVEL, format, arg);
+    }
+
+    /**
+     * A convenience function which combines {@link #log(String, Object)} and {@link #indent()}.
+     *
+     * @param format a format string
+     * @param arg the argument referenced by the format specifiers in {@code format}
+     * @return an object that reverts to the current indentation level when
+     *         {@linkplain Indent#close() closed} or null if debugging is disabled
+     */
+    public static Indent logAndIndent(int logLevel, String format, int arg) {
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg);
+        }
+        return null;
+    }
+
+    public static Indent logAndIndent(String format, int arg1, Object arg2) {
+        return logAndIndent(DEFAULT_LOG_LEVEL, format, arg1, arg2);
+    }
+
+    /**
+     * @see #logAndIndent(int, String, Object)
+     */
+    public static Indent logAndIndent(int logLevel, String format, int arg1, Object arg2) {
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg1, arg2);
+        }
+        return null;
+    }
+
+    public static Indent logAndIndent(String format, Object arg1, int arg2) {
+        return logAndIndent(DEFAULT_LOG_LEVEL, format, arg1, arg2);
+    }
+
+    /**
+     * @see #logAndIndent(int, String, Object)
+     */
+    public static Indent logAndIndent(int logLevel, String format, Object arg1, int arg2) {
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg1, arg2);
+        }
+        return null;
+    }
+
+    public static Indent logAndIndent(String format, int arg1, int arg2) {
+        return logAndIndent(DEFAULT_LOG_LEVEL, format, arg1, arg2);
+    }
+
+    /**
+     * @see #logAndIndent(int, String, Object)
+     */
+    public static Indent logAndIndent(int logLevel, String format, int arg1, int arg2) {
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg1, arg2);
         }
         return null;
     }
@@ -703,8 +839,8 @@ public class Debug {
      * @see #logAndIndent(int, String, Object)
      */
     public static Indent logAndIndent(int logLevel, String format, Object arg1, Object arg2) {
-        if (ENABLED) {
-            return logvAndIndent(logLevel, format, arg1, arg2);
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg1, arg2);
         }
         return null;
     }
@@ -717,8 +853,36 @@ public class Debug {
      * @see #logAndIndent(int, String, Object)
      */
     public static Indent logAndIndent(int logLevel, String format, Object arg1, Object arg2, Object arg3) {
-        if (ENABLED) {
-            return logvAndIndent(logLevel, format, arg1, arg2, arg3);
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg1, arg2, arg3);
+        }
+        return null;
+    }
+
+    public static Indent logAndIndent(String format, int arg1, int arg2, int arg3) {
+        return logAndIndent(DEFAULT_LOG_LEVEL, format, arg1, arg2, arg3);
+    }
+
+    /**
+     * @see #logAndIndent(int, String, Object)
+     */
+    public static Indent logAndIndent(int logLevel, String format, int arg1, int arg2, int arg3) {
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg1, arg2, arg3);
+        }
+        return null;
+    }
+
+    public static Indent logAndIndent(String format, Object arg1, int arg2, int arg3) {
+        return logAndIndent(DEFAULT_LOG_LEVEL, format, arg1, arg2, arg3);
+    }
+
+    /**
+     * @see #logAndIndent(int, String, Object)
+     */
+    public static Indent logAndIndent(int logLevel, String format, Object arg1, int arg2, int arg3) {
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg1, arg2, arg3);
         }
         return null;
     }
@@ -731,8 +895,8 @@ public class Debug {
      * @see #logAndIndent(int, String, Object)
      */
     public static Indent logAndIndent(int logLevel, String format, Object arg1, Object arg2, Object arg3, Object arg4) {
-        if (ENABLED) {
-            return logvAndIndent(logLevel, format, arg1, arg2, arg3, arg4);
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg1, arg2, arg3, arg4);
         }
         return null;
     }
@@ -745,8 +909,8 @@ public class Debug {
      * @see #logAndIndent(int, String, Object)
      */
     public static Indent logAndIndent(int logLevel, String format, Object arg1, Object arg2, Object arg3, Object arg4, Object arg5) {
-        if (ENABLED) {
-            return logvAndIndent(logLevel, format, arg1, arg2, arg3, arg4, arg5);
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg1, arg2, arg3, arg4, arg5);
         }
         return null;
     }
@@ -759,8 +923,8 @@ public class Debug {
      * @see #logAndIndent(int, String, Object)
      */
     public static Indent logAndIndent(int logLevel, String format, Object arg1, Object arg2, Object arg3, Object arg4, Object arg5, Object arg6) {
-        if (ENABLED) {
-            return logvAndIndent(logLevel, format, arg1, arg2, arg3, arg4, arg5, arg6);
+        if (ENABLED && Debug.isLogEnabled(logLevel)) {
+            return logvAndIndentInternal(logLevel, format, arg1, arg2, arg3, arg4, arg5, arg6);
         }
         return null;
     }
@@ -776,11 +940,19 @@ public class Debug {
      */
     public static Indent logvAndIndent(int logLevel, String format, Object... args) {
         if (ENABLED) {
-            DebugScope scope = DebugScope.getInstance();
-            scope.log(logLevel, format, args);
-            return scope.pushIndentLogger();
+            if (Debug.isLogEnabled(logLevel)) {
+                return logvAndIndentInternal(logLevel, format, args);
+            }
+            return null;
         }
         throw new InternalError("Use of Debug.logvAndIndent() must be guarded by a test of Debug.isEnabled()");
+    }
+
+    private static Indent logvAndIndentInternal(int logLevel, String format, Object... args) {
+        assert ENABLED && Debug.isLogEnabled(logLevel) : "must have checked Debug.isLogEnabled()";
+        DebugScope scope = DebugScope.getInstance();
+        scope.log(logLevel, format, args);
+        return scope.pushIndentLogger();
     }
 
     /**
@@ -853,7 +1025,7 @@ public class Debug {
      * A disabled tracker has virtually no overhead.
      */
     public static DebugMemUseTracker memUseTracker(CharSequence name) {
-        if (!ENABLED) {
+        if (!isUnconditionalMemUseTrackingEnabled && !ENABLED) {
             return VOID_MEM_USE_TRACKER;
         }
         return createMemUseTracker("%s", name, null);
@@ -871,7 +1043,7 @@ public class Debug {
      * @see #metric(String, Object, Object)
      */
     public static DebugMemUseTracker memUseTracker(String format, Object arg) {
-        if (!ENABLED) {
+        if (!isUnconditionalMemUseTrackingEnabled && !ENABLED) {
             return VOID_MEM_USE_TRACKER;
         }
         return createMemUseTracker(format, arg, null);
@@ -898,7 +1070,7 @@ public class Debug {
      * @see #memUseTracker(CharSequence)
      */
     public static DebugMemUseTracker memUseTracker(String format, Object arg1, Object arg2) {
-        if (!ENABLED) {
+        if (!isUnconditionalMemUseTrackingEnabled && !ENABLED) {
             return VOID_MEM_USE_TRACKER;
         }
         return createMemUseTracker(format, arg1, arg2);
@@ -906,7 +1078,7 @@ public class Debug {
 
     private static DebugMemUseTracker createMemUseTracker(String format, Object arg1, Object arg2) {
         String name = formatDebugName(format, arg1, arg2);
-        return new MemUseTrackerImpl(name);
+        return new MemUseTrackerImpl(name, !isUnconditionalMemUseTrackingEnabled);
     }
 
     /**
@@ -920,7 +1092,7 @@ public class Debug {
      * A disabled metric has virtually no overhead.
      */
     public static DebugMetric metric(CharSequence name) {
-        if (enabledMetrics == null && !ENABLED) {
+        if (!areUnconditionalMetricsEnabled() && !ENABLED) {
             return VOID_METRIC;
         }
         return createMetric("%s", name, null);
@@ -963,7 +1135,7 @@ public class Debug {
      * @see #metric(String, Object, Object)
      */
     public static DebugMetric metric(String format, Object arg) {
-        if (enabledMetrics == null && !ENABLED) {
+        if (!areUnconditionalMetricsEnabled() && !ENABLED) {
             return VOID_METRIC;
         }
         return createMetric(format, arg, null);
@@ -990,7 +1162,7 @@ public class Debug {
      * @see #metric(CharSequence)
      */
     public static DebugMetric metric(String format, Object arg1, Object arg2) {
-        if (enabledMetrics == null && !ENABLED) {
+        if (!areUnconditionalMetricsEnabled() && !ENABLED) {
             return VOID_METRIC;
         }
         return createMetric(format, arg1, arg2);
@@ -1131,8 +1303,8 @@ public class Debug {
 
     private static final DebugMemUseTracker VOID_MEM_USE_TRACKER = new DebugMemUseTracker() {
 
-        public Closeable start() {
-            return MemUseTrackerImpl.VOID_CLOSEABLE;
+        public DebugCloseable start() {
+            return DebugCloseable.VOID_CLOSEABLE;
         }
 
         public long getCurrentValue() {
@@ -1140,30 +1312,67 @@ public class Debug {
         }
     };
 
+    public static final String ENABLE_UNSCOPED_TIMERS_PROPERTY_NAME = "jvmci.debug.unscopedTimers";
+    public static final String ENABLE_UNSCOPED_METRICS_PROPERTY_NAME = "jvmci.debug.unscopedMetrics";
+    public static final String ENABLE_UNSCOPED_MEM_USE_TRACKERS_PROPERTY_NAME = "jvmci.debug.unscopedMemUseTrackers";
+
     /**
      * @see #timer(CharSequence)
      */
-    public static final String ENABLE_TIMER_PROPERTY_NAME_PREFIX = "graal.debug.timer.";
+    public static final String ENABLE_TIMER_PROPERTY_NAME_PREFIX = "jvmci.debug.timer.";
 
     /**
      * @see #metric(CharSequence)
      */
-    public static final String ENABLE_METRIC_PROPERTY_NAME_PREFIX = "graal.debug.metric.";
+    public static final String ENABLE_METRIC_PROPERTY_NAME_PREFIX = "jvmci.debug.metric.";
 
+    /**
+     * Set of unconditionally enabled metrics. Possible values and their meanings:
+     * <ul>
+     * <li>{@code null}: no unconditionally enabled metrics</li>
+     * <li>{@code isEmpty()}: all metrics are unconditionally enabled</li>
+     * <li>{@code !isEmpty()}: use {@link #findMatch(Set, Set, String)} on this set and
+     * {@link #enabledMetricsSubstrings} to determine which metrics are unconditionally enabled</li>
+     * </ul>
+     */
     private static final Set<String> enabledMetrics;
+
+    /**
+     * Set of unconditionally enabled timers. Same interpretation of values as for
+     * {@link #enabledMetrics}.
+     */
     private static final Set<String> enabledTimers;
+
     private static final Set<String> enabledMetricsSubstrings = new HashSet<>();
     private static final Set<String> enabledTimersSubstrings = new HashSet<>();
+
+    /**
+     * Specifies if all mem use trackers are unconditionally enabled.
+     */
+    private static final boolean isUnconditionalMemUseTrackingEnabled;
 
     static {
         Set<String> metrics = new HashSet<>();
         Set<String> timers = new HashSet<>();
         parseMetricAndTimerSystemProperties(metrics, timers, enabledMetricsSubstrings, enabledTimersSubstrings);
-        enabledMetrics = metrics.isEmpty() && enabledMetricsSubstrings.isEmpty() ? null : metrics;
-        enabledTimers = timers.isEmpty() && enabledTimersSubstrings.isEmpty() ? null : timers;
+        metrics = metrics.isEmpty() && enabledMetricsSubstrings.isEmpty() ? null : metrics;
+        timers = timers.isEmpty() && enabledTimersSubstrings.isEmpty() ? null : timers;
+        if (metrics == null && Boolean.getBoolean(ENABLE_UNSCOPED_METRICS_PROPERTY_NAME)) {
+            metrics = Collections.emptySet();
+        }
+        if (timers == null && Boolean.getBoolean(ENABLE_UNSCOPED_TIMERS_PROPERTY_NAME)) {
+            timers = Collections.emptySet();
+        }
+        enabledMetrics = metrics;
+        enabledTimers = timers;
+        isUnconditionalMemUseTrackingEnabled = Boolean.getBoolean(ENABLE_UNSCOPED_MEM_USE_TRACKERS_PROPERTY_NAME);
     }
 
     private static boolean findMatch(Set<String> haystack, Set<String> haystackSubstrings, String needle) {
+        if (haystack.isEmpty()) {
+            // Empty haystack means match all
+            return true;
+        }
         if (haystack.contains(needle)) {
             return true;
         }
@@ -1224,7 +1433,7 @@ public class Debug {
      * A disabled timer has virtually no overhead.
      */
     public static DebugTimer timer(CharSequence name) {
-        if (enabledTimers == null && !ENABLED) {
+        if (!areUnconditionalTimersEnabled() && !ENABLED) {
             return VOID_TIMER;
         }
         return createTimer("%s", name, null);
@@ -1242,7 +1451,7 @@ public class Debug {
      * @see #timer(String, Object, Object)
      */
     public static DebugTimer timer(String format, Object arg) {
-        if (enabledTimers == null && !ENABLED) {
+        if (!areUnconditionalTimersEnabled() && !ENABLED) {
             return VOID_TIMER;
         }
         return createTimer(format, arg, null);
@@ -1269,7 +1478,7 @@ public class Debug {
      * @see #timer(CharSequence)
      */
     public static DebugTimer timer(String format, Object arg1, Object arg2) {
-        if (enabledTimers == null && !ENABLED) {
+        if (!areUnconditionalTimersEnabled() && !ENABLED) {
             return VOID_TIMER;
         }
         return createTimer(format, arg1, arg2);
@@ -1319,8 +1528,8 @@ public class Debug {
 
     private static final DebugTimer VOID_TIMER = new DebugTimer() {
 
-        public TimerCloseable start() {
-            return TimerImpl.VOID_CLOSEABLE;
+        public DebugCloseable start() {
+            return DebugCloseable.VOID_CLOSEABLE;
         }
 
         public void setConditional(boolean flag) {

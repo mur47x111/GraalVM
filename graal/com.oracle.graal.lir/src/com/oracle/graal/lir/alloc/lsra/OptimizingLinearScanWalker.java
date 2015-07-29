@@ -22,15 +22,18 @@
  */
 package com.oracle.graal.lir.alloc.lsra;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.options.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.debug.*;
 import com.oracle.graal.debug.Debug.Scope;
-import com.oracle.graal.lir.alloc.lsra.Interval.*;
-import com.oracle.graal.options.*;
+import com.oracle.graal.lir.alloc.lsra.Interval.RegisterBinding;
+import com.oracle.graal.lir.alloc.lsra.Interval.RegisterBindingLists;
+import com.oracle.graal.lir.alloc.lsra.Interval.RegisterPriority;
+import com.oracle.graal.lir.alloc.lsra.Interval.State;
 
 public class OptimizingLinearScanWalker extends LinearScanWalker {
 
@@ -207,7 +210,7 @@ public class OptimizingLinearScanWalker extends LinearScanWalker {
         // spillBlockUnhandledFixed(cur);
         assert unhandledLists.get(RegisterBinding.Fixed) == Interval.EndMarker : "must not have unhandled fixed intervals because all fixed intervals have a use at position 0";
         spillBlockInactiveFixed(interval);
-        spillCollectActiveAny();
+        spillCollectActiveAny(RegisterPriority.LiveAtLoopEnd);
         spillCollectInactiveAny(interval);
 
         if (Debug.isLogEnabled()) {

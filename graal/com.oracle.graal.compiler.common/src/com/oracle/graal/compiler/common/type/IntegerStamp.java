@@ -27,9 +27,10 @@ import static com.oracle.graal.compiler.common.calc.FloatConvert.*;
 import java.nio.*;
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.spi.*;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.BinaryOp;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.FloatConvertOp;
@@ -86,7 +87,7 @@ public class IntegerStamp extends PrimitiveStamp {
     }
 
     @Override
-    public Stamp illegal() {
+    public Stamp empty() {
         return new IntegerStamp(getBits(), CodeUtil.maxValue(getBits()), CodeUtil.minValue(getBits()), CodeUtil.mask(getBits()), 0);
     }
 
@@ -113,12 +114,12 @@ public class IntegerStamp extends PrimitiveStamp {
             case 64:
                 return JavaConstant.forLong(buffer.getLong());
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 
     @Override
-    public boolean isLegal() {
+    public boolean hasValues() {
         return lowerBound <= upperBound;
     }
 
@@ -150,7 +151,7 @@ public class IntegerStamp extends PrimitiveStamp {
             case 64:
                 return metaAccess.lookupJavaType(Long.TYPE);
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 
@@ -238,7 +239,7 @@ public class IntegerStamp extends PrimitiveStamp {
     private Stamp createStamp(IntegerStamp other, long newUpperBound, long newLowerBound, long newDownMask, long newUpMask) {
         assert getBits() == other.getBits();
         if (newLowerBound > newUpperBound || (newDownMask & (~newUpMask)) != 0 || (newUpMask == 0 && (newLowerBound > 0 || newUpperBound < 0))) {
-            return illegal();
+            return empty();
         } else if (newLowerBound == lowerBound && newUpperBound == upperBound && newDownMask == downMask && newUpMask == upMask) {
             return this;
         } else if (newLowerBound == other.lowerBound && newUpperBound == other.upperBound && newDownMask == other.downMask && newUpMask == other.upMask) {
@@ -253,9 +254,6 @@ public class IntegerStamp extends PrimitiveStamp {
         if (otherStamp == this) {
             return this;
         }
-        if (!(otherStamp instanceof IntegerStamp)) {
-            return StampFactory.illegal(Kind.Illegal);
-        }
         IntegerStamp other = (IntegerStamp) otherStamp;
         return createStamp(other, Math.max(upperBound, other.upperBound), Math.min(lowerBound, other.lowerBound), downMask & other.downMask, upMask | other.upMask);
     }
@@ -264,9 +262,6 @@ public class IntegerStamp extends PrimitiveStamp {
     public Stamp join(Stamp otherStamp) {
         if (otherStamp == this) {
             return this;
-        }
-        if (!(otherStamp instanceof IntegerStamp)) {
-            return StampFactory.illegal(Kind.Illegal);
         }
         IntegerStamp other = (IntegerStamp) otherStamp;
         long newDownMask = downMask | other.downMask;
@@ -352,7 +347,7 @@ public class IntegerStamp extends PrimitiveStamp {
         return null;
     }
 
-    private static boolean addOverflowsPositively(long x, long y, int bits) {
+    public static boolean addOverflowsPositively(long x, long y, int bits) {
         long result = x + y;
         if (bits == 64) {
             return (~x & ~y & result) < 0;
@@ -361,7 +356,7 @@ public class IntegerStamp extends PrimitiveStamp {
         }
     }
 
-    private static boolean addOverflowsNegatively(long x, long y, int bits) {
+    public static boolean addOverflowsNegatively(long x, long y, int bits) {
         long result = x + y;
         if (bits == 64) {
             return (x & y & ~result) < 0;
@@ -370,7 +365,7 @@ public class IntegerStamp extends PrimitiveStamp {
         }
     }
 
-    private static long carryBits(long x, long y) {
+    public static long carryBits(long x, long y) {
         return (x + y) ^ x ^ y;
     }
 
@@ -709,7 +704,7 @@ public class IntegerStamp extends PrimitiveStamp {
                 case Long:
                     return JavaConstant.forLong(c.asLong() << amount);
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -769,7 +764,7 @@ public class IntegerStamp extends PrimitiveStamp {
                 case Long:
                     return JavaConstant.forLong(c.asLong() >> amount);
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -813,7 +808,7 @@ public class IntegerStamp extends PrimitiveStamp {
                 case Long:
                     return JavaConstant.forLong(c.asLong() >>> amount);
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -973,7 +968,9 @@ public class IntegerStamp extends PrimitiveStamp {
         public Stamp foldStamp(Stamp input) {
             IntegerStamp stamp = (IntegerStamp) input;
             assert stamp.getBits() == 32;
-            return StampFactory.forKind(Kind.Float);
+            float lowerBound = stamp.lowerBound();
+            float upperBound = stamp.upperBound();
+            return StampFactory.forFloat(Kind.Float, lowerBound, upperBound, true);
         }
     },
 
@@ -989,7 +986,9 @@ public class IntegerStamp extends PrimitiveStamp {
         public Stamp foldStamp(Stamp input) {
             IntegerStamp stamp = (IntegerStamp) input;
             assert stamp.getBits() == 64;
-            return StampFactory.forKind(Kind.Float);
+            float lowerBound = stamp.lowerBound();
+            float upperBound = stamp.upperBound();
+            return StampFactory.forFloat(Kind.Float, lowerBound, upperBound, true);
         }
     },
 
@@ -1005,7 +1004,9 @@ public class IntegerStamp extends PrimitiveStamp {
         public Stamp foldStamp(Stamp input) {
             IntegerStamp stamp = (IntegerStamp) input;
             assert stamp.getBits() == 32;
-            return StampFactory.forKind(Kind.Double);
+            double lowerBound = stamp.lowerBound();
+            double upperBound = stamp.upperBound();
+            return StampFactory.forFloat(Kind.Double, lowerBound, upperBound, true);
         }
     },
 
@@ -1021,7 +1022,9 @@ public class IntegerStamp extends PrimitiveStamp {
         public Stamp foldStamp(Stamp input) {
             IntegerStamp stamp = (IntegerStamp) input;
             assert stamp.getBits() == 64;
-            return StampFactory.forKind(Kind.Double);
+            double lowerBound = stamp.lowerBound();
+            double upperBound = stamp.upperBound();
+            return StampFactory.forFloat(Kind.Double, lowerBound, upperBound, true);
         }
     });
 }

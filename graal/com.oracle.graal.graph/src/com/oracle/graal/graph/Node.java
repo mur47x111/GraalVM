@@ -29,12 +29,14 @@ import java.lang.annotation.*;
 import java.util.*;
 import java.util.function.*;
 
+import jdk.internal.jvmci.common.*;
+import com.oracle.graal.debug.*;
 import sun.misc.*;
 
 import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.Graph.NodeEvent;
 import com.oracle.graal.graph.Graph.NodeEventListener;
+import com.oracle.graal.graph.Graph.Options;
 import com.oracle.graal.graph.iterators.*;
 import com.oracle.graal.graph.spi.*;
 import com.oracle.graal.nodeinfo.*;
@@ -209,12 +211,12 @@ public abstract class Node implements Cloneable, Formattable {
     public static final int NOT_ITERABLE = -1;
 
     public Node(NodeClass<? extends Node> c) {
-        init();
-        assert c.getJavaClass() == this.getClass();
-        this.nodeClass = c;
+        init(c);
     }
 
-    final void init() {
+    final void init(NodeClass<? extends Node> c) {
+        assert c.getJavaClass() == this.getClass();
+        this.nodeClass = c;
         id = INITIAL_ID;
         extraUsages = NO_NODES;
     }
@@ -346,6 +348,24 @@ public abstract class Node implements Cloneable, Formattable {
     }
 
     /**
+     * Checks whether this node has usages.
+     */
+    public final boolean hasUsages() {
+        return this.usage0 != null;
+    }
+
+    void reverseUsageOrder() {
+        List<Node> snapshot = this.usages().snapshot();
+        for (Node n : snapshot) {
+            this.removeUsage(n);
+        }
+        Collections.reverse(snapshot);
+        for (Node n : snapshot) {
+            this.addUsage(n);
+        }
+    }
+
+    /**
      * Adds a given node to this node's {@linkplain #usages() usages}.
      *
      * @param node the node to add
@@ -415,22 +435,13 @@ public abstract class Node implements Cloneable, Formattable {
             this.movUsageFromEndTo(1);
             return true;
         }
-        for (int i = 0; i < this.extraUsagesCount; ++i) {
+        for (int i = this.extraUsagesCount - 1; i >= 0; i--) {
             if (extraUsages[i] == node) {
                 this.movUsageFromEndTo(i + INLINE_USAGE_COUNT);
                 return true;
             }
         }
         return false;
-    }
-
-    private void clearUsages() {
-        incUsageModCount();
-        maybeNotifyZeroUsages(this);
-        usage0 = null;
-        usage1 = null;
-        extraUsages = NO_NODES;
-        extraUsagesCount = 0;
     }
 
     public final Node predecessor() {
@@ -551,17 +562,27 @@ public abstract class Node implements Cloneable, Formattable {
         return true;
     }
 
-    public void replaceAtUsages(Node other) {
+    public final void replaceAtUsages(Node other) {
+        replaceAtUsages(other, null);
+    }
+
+    public final void replaceAtUsages(Node other, Predicate<Node> filter) {
         assert checkReplaceWith(other);
-        for (Node usage : usages()) {
-            boolean result = usage.getNodeClass().getInputEdges().replaceFirst(usage, this, other);
-            assert assertTrue(result, "not found in inputs, usage: %s", usage);
-            if (other != null) {
+        int i = 0;
+        while (i < this.getUsageCount()) {
+            Node usage = this.getUsageAt(i);
+            if (filter == null || filter.test(usage)) {
+                boolean result = usage.getNodeClass().getInputEdges().replaceFirst(usage, this, other);
+                assert assertTrue(result, "not found in inputs, usage: %s", usage);
                 maybeNotifyInputChanged(usage);
-                other.addUsage(usage);
+                if (other != null) {
+                    other.addUsage(usage);
+                }
+                this.movUsageFromEndTo(i);
+            } else {
+                ++i;
             }
         }
-        clearUsages();
     }
 
     public Node getUsageAt(int index) {
@@ -664,12 +685,12 @@ public abstract class Node implements Cloneable, Formattable {
     }
 
     private void unregisterInputs() {
-        for (Node input : inputs()) {
-            removeThisFromUsages(input);
+        acceptInputs((node, input) -> {
+            node.removeThisFromUsages(input);
             if (input.hasNoUsages()) {
-                maybeNotifyZeroUsages(input);
+                node.maybeNotifyZeroUsages(input);
             }
-        }
+        });
     }
 
     public void clearInputs() {
@@ -809,7 +830,7 @@ public abstract class Node implements Cloneable, Formattable {
                 copyOrClearEdgesForClone(newNode, Successors, edgesToCopy);
             }
         } catch (Exception e) {
-            throw new GraalGraphInternalError(e).addContext(this);
+            throw new GraalGraphJVMCIError(e).addContext(this);
         }
         newNode.graph = into;
         newNode.id = INITIAL_ID;
@@ -828,9 +849,30 @@ public abstract class Node implements Cloneable, Formattable {
     protected void afterClone(@SuppressWarnings("unused") Node other) {
     }
 
+    public boolean verifyInputs() {
+        for (Node input : inputs()) {
+            assertFalse(input.isDeleted(), "input was deleted");
+            assertTrue(input.isAlive(), "input is not alive yet, i.e., it was not yet added to the graph");
+        }
+        return true;
+    }
+
     public boolean verify() {
         assertTrue(isAlive(), "cannot verify inactive nodes (id=%d)", id);
         assertTrue(graph() != null, "null graph");
+        if (Options.VerifyGraalGraphEdges.getValue()) {
+            verifyEdges();
+        }
+        return true;
+    }
+
+    /**
+     * Perform expensive verification of inputs, usages, predecessors and successors.
+     *
+     * @return true
+     */
+    public boolean verifyEdges() {
+        verifyInputs();
         for (Node input : inputs()) {
             assertTrue(input.usages().contains(this), "missing usage in input %s", input);
         }
@@ -845,7 +887,7 @@ public abstract class Node implements Cloneable, Formattable {
             while (iterator.hasNext()) {
                 Position pos = iterator.nextPosition();
                 if (pos.get(usage) == this && pos.getInputType() != InputType.Unchecked) {
-                    assert isAllowedUsageType(pos.getInputType()) : "invalid input of type " + pos.getInputType() + " from " + usage + " to " + this + " (" + pos.getName() + ")";
+                    assertTrue(isAllowedUsageType(pos.getInputType()), "invalid input of type " + pos.getInputType() + " from " + usage + " to " + this + " (" + pos.getName() + ")");
                 }
             }
         }
@@ -865,16 +907,20 @@ public abstract class Node implements Cloneable, Formattable {
         if (condition) {
             return true;
         } else {
-            throw new VerificationError(message, args).addContext(this);
+            throw fail(message, args);
         }
     }
 
     public boolean assertFalse(boolean condition, String message, Object... args) {
         if (condition) {
-            throw new VerificationError(message, args).addContext(this);
+            throw fail(message, args);
         } else {
             return true;
         }
+    }
+
+    protected VerificationError fail(String message, Object... args) throws GraalGraphJVMCIError {
+        throw new VerificationError(message, args).addContext(this);
     }
 
     public Iterable<? extends Node> cfgPredecessors() {
@@ -1050,5 +1096,9 @@ public abstract class Node implements Cloneable, Formattable {
      */
     public boolean valueEquals(Node other) {
         return getNodeClass().dataEquals(this, other);
+    }
+
+    public final void pushInputs(NodeStack stack) {
+        getNodeClass().getInputEdges().pushAll(this, stack);
     }
 }

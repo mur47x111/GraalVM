@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.compiler.common.type;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.spi.*;
 
 /**
@@ -40,7 +41,7 @@ public abstract class Stamp {
     public abstract ResolvedJavaType javaType(MetaAccessProvider metaAccess);
 
     public boolean alwaysDistinct(Stamp other) {
-        return !join(other).isLegal();
+        return join(other).isEmpty();
     }
 
     /**
@@ -82,9 +83,9 @@ public abstract class Stamp {
     /**
      * Returns a stamp of the same kind, but with no allowed values.
      *
-     * {@link #illegal()} is the neutral element of the {@link #meet(Stamp)} operation.
+     * {@link #empty()} is the neutral element of the {@link #meet(Stamp)} operation.
      */
-    public abstract Stamp illegal();
+    public abstract Stamp empty();
 
     /**
      * If it is possible to represent single value stamps of this kind, this method returns the
@@ -103,7 +104,14 @@ public abstract class Stamp {
     /**
      * Test whether this stamp has legal values.
      */
-    public abstract boolean isLegal();
+    public abstract boolean hasValues();
+
+    /**
+     * Tests whether this stamp represents an illegal value.
+     */
+    public final boolean isEmpty() {
+        return !hasValues();
+    }
 
     /**
      * If this stamp represents a single value, the methods returns this single value. It returns
@@ -123,16 +131,35 @@ public abstract class Stamp {
 
     /**
      * Tries to improve this stamp with the stamp given as parameter. If successful, returns the new
+     * improved stamp. Otherwise, returns a stamp equal to this.
+     *
+     * @param other the stamp that should be used to improve this stamp
+     * @return the newly improved stamp or a stamp equal to {@code this} if an improvement was not
+     *         possible
+     */
+    public abstract Stamp improveWith(Stamp other);
+
+    /**
+     * Tries to improve this stamp with the stamp given as parameter. If successful, returns the new
      * improved stamp. Otherwise, returns null.
      *
      * @param other the stamp that should be used to improve this stamp
-     * @return the newly improved stamp of null if an improvement was not possible
+     * @return the newly improved stamp or {@code null} if an improvement was not possible
      */
-    public Stamp tryImprove(Stamp other) {
-        Stamp newStamp = this.join(other);
-        if (newStamp.equals(this)) {
+    public final Stamp tryImproveWith(Stamp other) {
+        Stamp improved = improveWith(other);
+        if (improved.equals(this)) {
             return null;
         }
-        return newStamp;
+        return improved;
+    }
+
+    public boolean neverDistinct(Stamp other) {
+        Constant constant = this.asConstant();
+        if (constant != null) {
+            Constant otherConstant = other.asConstant();
+            return otherConstant != null && constant.equals(otherConstant);
+        }
+        return false;
     }
 }

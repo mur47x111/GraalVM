@@ -35,12 +35,27 @@ public class Math_sin extends JTTTest {
     }
 
     public static double test(double arg) throws NaN {
-        double v = Math.sin(arg);
+        double v = Math.sin(arg) * Math.sin(arg * 5);
         if (Double.isNaN(v)) {
             // NaN can't be tested against itself
             throw new NaN();
         }
         return v;
+    }
+
+    @Test
+    public void runFirst() throws Throwable {
+        /*
+         * Execute Double.isNaN enough times to create a profile indicating that the path returning
+         * false is never taken. Then compile and execute the test with a NaN value to test that
+         * deoptimization works in the case of an uncommon trap inlined into an intrinsic. Of
+         * course, this relies on Double.isNaN never having yet been called with NaN. if it has,
+         * this test is equivalent to run0.
+         */
+        for (int i = 0; i < 10000; i++) {
+            Double.isNaN(1D);
+        }
+        executeActual(getResolvedJavaMethod("test"), null, java.lang.Double.NaN);
     }
 
     @Test

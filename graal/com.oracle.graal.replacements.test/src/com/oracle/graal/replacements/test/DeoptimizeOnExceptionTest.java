@@ -24,6 +24,8 @@ package com.oracle.graal.replacements.test;
 
 import java.util.*;
 
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
 import com.oracle.graal.compiler.test.*;
@@ -67,9 +69,13 @@ public class DeoptimizeOnExceptionTest extends GraalCompilerTest {
             Class<Runnable> c = (Class<Runnable>) testCl.loadClass(name);
             Runnable r = c.newInstance();
             ct = Long.MAX_VALUE;
-            for (int i = 0; i < 100000000; i++) {
+            // warmup
+            for (int i = 0; i < 100; i++) {
                 r.run();
             }
+            // compile
+            ResolvedJavaMethod method = getResolvedJavaMethod(c, "run");
+            getCode(method);
             ct = 0;
             r.run();
         } catch (Throwable e) {

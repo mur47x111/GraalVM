@@ -22,13 +22,17 @@
  */
 package com.oracle.graal.nodes.calc;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
+import com.oracle.graal.graph.spi.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo(shortName = "==")
@@ -53,6 +57,18 @@ public final class ObjectEqualsNode extends PointerEqualsNode implements Virtual
             }
             return new ObjectEqualsNode(x, y);
         }
+    }
+
+    @Override
+    protected ValueNode canonicalizeSymmetricConstant(CanonicalizerTool tool, Constant constant, ValueNode nonConstant, boolean mirrored) {
+        ResolvedJavaType type = tool.getConstantReflection().asJavaType(constant);
+        if (type != null && nonConstant instanceof GetClassNode) {
+            if (!type.isPrimitive() && (type.isConcrete() || type.isArray())) {
+                return TypeCheckNode.create(type, ((GetClassNode) nonConstant).getObject());
+            }
+            return LogicConstantNode.forBoolean(false);
+        }
+        return super.canonicalizeSymmetricConstant(tool, constant, nonConstant, mirrored);
     }
 
     private void virtualizeNonVirtualComparison(State state, ValueNode other, VirtualizerTool tool) {
@@ -124,6 +140,6 @@ public final class ObjectEqualsNode extends PointerEqualsNode implements Virtual
         } else if (newX.stamp() instanceof AbstractPointerStamp && newY.stamp() instanceof AbstractPointerStamp) {
             return new PointerEqualsNode(newX, newY);
         }
-        throw GraalInternalError.shouldNotReachHere();
+        throw JVMCIError.shouldNotReachHere();
     }
 }

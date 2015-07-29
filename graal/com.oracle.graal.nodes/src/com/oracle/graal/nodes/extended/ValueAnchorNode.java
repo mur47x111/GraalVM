@@ -28,6 +28,7 @@ import com.oracle.graal.graph.spi.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
+import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.util.*;
 
@@ -67,7 +68,7 @@ public final class ValueAnchorNode extends FixedWithNextNode implements LIRLower
                 break;
             }
         }
-        if (hasNoUsages() && next() instanceof FixedAccessNode) {
+        if (tool.allUsagesAvailable() && hasNoUsages() && next() instanceof FixedAccessNode) {
             FixedAccessNode currentNext = (FixedAccessNode) next();
             if (currentNext.getGuard() == anchored) {
                 GraphUtil.removeFixedWithUnusedInputs(this);

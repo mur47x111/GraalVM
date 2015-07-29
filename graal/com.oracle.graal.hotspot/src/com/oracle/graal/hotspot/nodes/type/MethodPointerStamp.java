@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,9 +22,10 @@
  */
 package com.oracle.graal.hotspot.nodes.type;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
-import com.oracle.graal.hotspot.meta.*;
 
 public final class MethodPointerStamp extends MetaspacePointerStamp {
 
@@ -44,6 +45,18 @@ public final class MethodPointerStamp extends MetaspacePointerStamp {
 
     private MethodPointerStamp(boolean nonNull, boolean alwaysNull) {
         super(nonNull, alwaysNull);
+    }
+
+    @Override
+    protected AbstractPointerStamp copyWith(boolean newNonNull, boolean newAlwaysNull) {
+        if (newNonNull) {
+            assert !newAlwaysNull;
+            return METHOD_NON_NULL;
+        } else if (newAlwaysNull) {
+            return METHOD_ALWAYS_NULL;
+        } else {
+            return METHOD;
+        }
     }
 
     @Override

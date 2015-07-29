@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -77,6 +77,7 @@ public final class EditorTopComponent extends TopComponent implements PropertyCh
     private DiagramViewer scene;
     private InstanceContent content;
     private InstanceContent graphContent;
+    private EnableBlockLayoutAction blockLayoutAction;
     private OverviewAction overviewAction;
     private HideDuplicatesAction hideDuplicatesAction;
     private PredSuccAction predSuccAction;
@@ -178,11 +179,16 @@ public final class EditorTopComponent extends TopComponent implements PropertyCh
             null,
             ZoomInAction.get(ZoomInAction.class),
             ZoomOutAction.get(ZoomOutAction.class),
+        };
+
+        
+        Action[] actionsWithSelection = new Action[]{
+            ExtractAction.get(ExtractAction.class),
+            ShowAllAction.get(HideAction.class),
             null,
             ExpandPredecessorsAction.get(ExpandPredecessorsAction.class),
             ExpandSuccessorsAction.get(ExpandSuccessorsAction.class)
         };
-
 
         initComponents();
 
@@ -201,7 +207,7 @@ public final class EditorTopComponent extends TopComponent implements PropertyCh
         JScrollPane pane = new JScrollPane(rangeSlider, ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         container.add(BorderLayout.CENTER, pane);
 
-        scene = new DiagramScene(actions, rangeSliderModel);
+        scene = new DiagramScene(actions, actionsWithSelection, rangeSliderModel);
         content = new InstanceContent();
         graphContent = new InstanceContent();
         this.associateLookup(new ProxyLookup(new Lookup[]{scene.getLookup(), new AbstractLookup(graphContent), new AbstractLookup(content)}));
@@ -229,6 +235,12 @@ public final class EditorTopComponent extends TopComponent implements PropertyCh
         toolBar.addSeparator();
         toolBar.add(ShowAllAction.get(ZoomInAction.class));
         toolBar.add(ShowAllAction.get(ZoomOutAction.class));
+        
+        blockLayoutAction = new EnableBlockLayoutAction();
+        JToggleButton button = new JToggleButton(blockLayoutAction);
+        button.setSelected(false);
+        toolBar.add(button);
+        blockLayoutAction.addPropertyChangeListener(this);
 
         overviewAction = new OverviewAction();
         overviewButton = new JToggleButton(overviewAction);
@@ -237,7 +249,7 @@ public final class EditorTopComponent extends TopComponent implements PropertyCh
         overviewAction.addPropertyChangeListener(this);
 
         predSuccAction = new PredSuccAction();
-        JToggleButton button = new JToggleButton(predSuccAction);
+        button = new JToggleButton(predSuccAction);
         button.setSelected(true);
         toolBar.add(button);
         predSuccAction.addPropertyChangeListener(this);
@@ -495,6 +507,9 @@ public final class EditorTopComponent extends TopComponent implements PropertyCh
             } else {
                 showScene();
             }
+        } else if (evt.getSource() == this.blockLayoutAction) {
+            boolean b = (Boolean) blockLayoutAction.getValue(EnableBlockLayoutAction.STATE);
+            this.getModel().setShowBlocks(b);
         } else if (evt.getSource() == this.hideDuplicatesAction) {
             boolean b = (Boolean) hideDuplicatesAction.getValue(HideDuplicatesAction.STATE);
             this.getModel().setHideDuplicates(b);

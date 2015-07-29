@@ -22,29 +22,28 @@
  */
 package com.oracle.graal.lir.amd64;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
+import jdk.internal.jvmci.amd64.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.code.CompilationResult.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
 import static com.oracle.graal.lir.LIRInstruction.OperandFlag.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
-import com.oracle.graal.amd64.*;
-import com.oracle.graal.api.code.CompilationResult.JumpTable;
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.asm.*;
 import com.oracle.graal.asm.amd64.*;
-import com.oracle.graal.asm.amd64.AMD64Address.Scale;
-import com.oracle.graal.asm.amd64.AMD64Assembler.ConditionFlag;
-import com.oracle.graal.compiler.common.*;
+import com.oracle.graal.asm.amd64.AMD64Address.*;
+import com.oracle.graal.asm.amd64.AMD64Assembler.*;
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.StandardOp.BlockEndOp;
 import com.oracle.graal.lir.SwitchStrategy.BaseSwitchClosure;
-import com.oracle.graal.lir.amd64.AMD64Call.CallOp;
 import com.oracle.graal.lir.asm.*;
 
 public class AMD64ControlFlow {
 
-    public static final class ReturnOp extends AMD64LIRInstruction implements BlockEndOp {
-        public static final LIRInstructionClass<CallOp> TYPE = LIRInstructionClass.create(CallOp.class);
+    public static final class ReturnOp extends AMD64BlockEndOp implements BlockEndOp {
+        public static final LIRInstructionClass<ReturnOp> TYPE = LIRInstructionClass.create(ReturnOp.class);
         @Use({REG, ILLEGAL}) protected Value x;
 
         public ReturnOp(Value x) {
@@ -59,7 +58,7 @@ public class AMD64ControlFlow {
         }
     }
 
-    public static class BranchOp extends AMD64LIRInstruction implements StandardOp.BranchOp {
+    public static class BranchOp extends AMD64BlockEndOp implements StandardOp.BranchOp {
         public static final LIRInstructionClass<BranchOp> TYPE = LIRInstructionClass.create(BranchOp.class);
         protected final ConditionFlag condition;
         protected final LabelRef trueDestination;
@@ -126,7 +125,7 @@ public class AMD64ControlFlow {
         }
     }
 
-    public static final class StrategySwitchOp extends AMD64LIRInstruction implements BlockEndOp {
+    public static final class StrategySwitchOp extends AMD64BlockEndOp {
         public static final LIRInstructionClass<StrategySwitchOp> TYPE = LIRInstructionClass.create(StrategySwitchOp.class);
         @Use({CONST}) protected JavaConstant[] keyConstants;
         private final LabelRef[] keyTargets;
@@ -173,7 +172,7 @@ public class AMD64ControlFlow {
                             masm.cmpptr(keyRegister, asObjectReg(scratch));
                             break;
                         default:
-                            throw new GraalInternalError("switch only supported for int, long and object");
+                            throw new JVMCIError("switch only supported for int, long and object");
                     }
                     masm.jcc(intCond(condition), target);
                 }
@@ -182,7 +181,7 @@ public class AMD64ControlFlow {
         }
     }
 
-    public static final class TableSwitchOp extends AMD64LIRInstruction implements BlockEndOp {
+    public static final class TableSwitchOp extends AMD64BlockEndOp {
         public static final LIRInstructionClass<TableSwitchOp> TYPE = LIRInstructionClass.create(TableSwitchOp.class);
         private final int lowKey;
         private final LabelRef defaultTarget;
@@ -355,7 +354,7 @@ public class AMD64ControlFlow {
                     masm.cmovq(cond, asRegister(result), asRegister(other));
                     break;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         } else {
             AMD64Address addr = (AMD64Address) crb.asAddress(other);
@@ -371,7 +370,7 @@ public class AMD64ControlFlow {
                     masm.cmovq(cond, asRegister(result), addr);
                     break;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     }
@@ -399,7 +398,7 @@ public class AMD64ControlFlow {
             case BT:
                 return ConditionFlag.Below;
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 
@@ -418,7 +417,7 @@ public class AMD64ControlFlow {
             case GT:
                 return ConditionFlag.Above;
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 
@@ -437,7 +436,7 @@ public class AMD64ControlFlow {
             case NoOverflow:
                 return true;
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 }

@@ -25,11 +25,10 @@ package com.oracle.graal.phases.common.inlining.walker;
 import java.util.*;
 import java.util.function.*;
 
+import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.inlining.*;
-
-import edu.umd.cs.findbugs.annotations.*;
 
 public class ComputeInliningRelevance {
 
@@ -156,7 +155,7 @@ public class ComputeInliningRelevance {
             this.parent = parent;
         }
 
-        @SuppressFBWarnings("FE_FLOATING_POINT_EQUALITY")
+        @SuppressFBWarnings(value = "FE_FLOATING_POINT_EQUALITY", justification = "comparing against -1D is accurate")
         public double getFastPathMinProbability() {
             if (fastPathMinProbability == UNINITIALIZED) {
                 fastPathMinProbability = Math.max(EPSILON, computeFastPathMinProbability(start));
@@ -168,7 +167,7 @@ public class ComputeInliningRelevance {
          * Computes the ratio between the probabilities of the current scope's entry point and the
          * parent scope's fastPathMinProbability.
          */
-        @SuppressFBWarnings("FE_FLOATING_POINT_EQUALITY")
+        @SuppressFBWarnings(value = "FE_FLOATING_POINT_EQUALITY", justification = "comparing against -1D is accurate")
         public double getScopeRelevanceWithinParent() {
             if (scopeRelevanceWithinParent == UNINITIALIZED) {
                 if (start instanceof LoopBeginNode) {

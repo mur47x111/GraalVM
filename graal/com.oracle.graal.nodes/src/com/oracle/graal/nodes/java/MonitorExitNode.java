@@ -22,13 +22,15 @@
  */
 package com.oracle.graal.nodes.java;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.spi.*;
 
 /**
@@ -58,7 +60,7 @@ public final class MonitorExitNode extends AccessMonitorNode implements Virtuali
 
     @Override
     public LocationIdentity getLocationIdentity() {
-        return LocationIdentity.ANY_LOCATION;
+        return LocationIdentity.any();
     }
 
     @Override
@@ -79,7 +81,6 @@ public final class MonitorExitNode extends AccessMonitorNode implements Virtuali
     public void virtualize(VirtualizerTool tool) {
         State state = tool.getObjectState(object());
         // the monitor exit for a synchronized method should never be virtualized
-        assert stateAfter().bci != BytecodeFrame.AFTER_BCI || state == null;
         if (state != null && state.getState() == EscapeState.Virtual && state.getVirtualObject().hasIdentity()) {
             MonitorIdNode removedLock = state.removeLock();
             assert removedLock == getMonitorId() : "mismatch at " + this + ": " + removedLock + " vs. " + getMonitorId();

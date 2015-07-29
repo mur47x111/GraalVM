@@ -265,7 +265,7 @@ void Type::Initialize_shared(Compile* current) {
   // locking.
 
   Arena* save = current->type_arena();
-  Arena* shared_type_arena = new (mtCompiler)Arena();
+  Arena* shared_type_arena = new (mtCompiler)Arena(mtCompiler);
 
   current->set_type_arena(shared_type_arena);
   _shared_type_dict =
@@ -1092,8 +1092,10 @@ const Type *TypeD::xdual() const {
 bool TypeD::eq( const Type *t ) const {
   if( g_isnan(_d) ||
       g_isnan(t->getd()) ) {
-    // One or both are NANs.  If both are NANs return true, else false.
-    return (g_isnan(_d) && g_isnan(t->getd()));
+    // it is important, when two different NaNs are used in one method, the NaNs are treated
+    // as different NaNs (as C1 does)
+    jdouble td = t->getd();
+    return *((jlong*)(&_d)) == *(jlong*)(&td);
   }
   if (_d == t->getd()) {
     // (NaN is impossible at this point, since it is not equal even to itself)
@@ -1180,11 +1182,11 @@ static int normalize_int_widen( jint lo, jint hi, int w ) {
   // Certain normalizations keep us sane when comparing types.
   // The 'SMALLINT' covers constants and also CC and its relatives.
   if (lo <= hi) {
-    if ((juint)(hi - lo) <= SMALLINT)  w = Type::WidenMin;
-    if ((juint)(hi - lo) >= max_juint) w = Type::WidenMax; // TypeInt::INT
+    if (((juint)hi - lo) <= SMALLINT)  w = Type::WidenMin;
+    if (((juint)hi - lo) >= max_juint) w = Type::WidenMax; // TypeInt::INT
   } else {
-    if ((juint)(lo - hi) <= SMALLINT)  w = Type::WidenMin;
-    if ((juint)(lo - hi) >= max_juint) w = Type::WidenMin; // dual TypeInt::INT
+    if (((juint)lo - hi) <= SMALLINT)  w = Type::WidenMin;
+    if (((juint)lo - hi) >= max_juint) w = Type::WidenMin; // dual TypeInt::INT
   }
   return w;
 }
@@ -1438,11 +1440,11 @@ static int normalize_long_widen( jlong lo, jlong hi, int w ) {
   // Certain normalizations keep us sane when comparing types.
   // The 'SMALLINT' covers constants.
   if (lo <= hi) {
-    if ((julong)(hi - lo) <= SMALLINT)   w = Type::WidenMin;
-    if ((julong)(hi - lo) >= max_julong) w = Type::WidenMax; // TypeLong::LONG
+    if (((julong)hi - lo) <= SMALLINT)   w = Type::WidenMin;
+    if (((julong)hi - lo) >= max_julong) w = Type::WidenMax; // TypeLong::LONG
   } else {
-    if ((julong)(lo - hi) <= SMALLINT)   w = Type::WidenMin;
-    if ((julong)(lo - hi) >= max_julong) w = Type::WidenMin; // dual TypeLong::LONG
+    if (((julong)lo - hi) <= SMALLINT)   w = Type::WidenMin;
+    if (((julong)lo - hi) >= max_julong) w = Type::WidenMin; // dual TypeLong::LONG
   }
   return w;
 }

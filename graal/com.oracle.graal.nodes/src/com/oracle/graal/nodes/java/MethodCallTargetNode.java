@@ -22,8 +22,10 @@
  */
 package com.oracle.graal.nodes.java;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.meta.Assumptions.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -36,14 +38,17 @@ import com.oracle.graal.nodes.type.*;
 public class MethodCallTargetNode extends CallTargetNode implements IterableNodeType, Simplifiable {
     public static final NodeClass<MethodCallTargetNode> TYPE = NodeClass.create(MethodCallTargetNode.class);
     protected final JavaType returnType;
+    protected JavaTypeProfile profile;
 
-    public MethodCallTargetNode(InvokeKind invokeKind, ResolvedJavaMethod targetMethod, ValueNode[] arguments, JavaType returnType) {
-        this(TYPE, invokeKind, targetMethod, arguments, returnType);
+    public MethodCallTargetNode(InvokeKind invokeKind, ResolvedJavaMethod targetMethod, ValueNode[] arguments, JavaType returnType, JavaTypeProfile profile) {
+        this(TYPE, invokeKind, targetMethod, arguments, returnType, profile);
     }
 
-    protected MethodCallTargetNode(NodeClass<? extends MethodCallTargetNode> c, InvokeKind invokeKind, ResolvedJavaMethod targetMethod, ValueNode[] arguments, JavaType returnType) {
+    protected MethodCallTargetNode(NodeClass<? extends MethodCallTargetNode> c, InvokeKind invokeKind, ResolvedJavaMethod targetMethod, ValueNode[] arguments, JavaType returnType,
+                    JavaTypeProfile profile) {
         super(c, arguments, targetMethod, invokeKind);
         this.returnType = returnType;
+        this.profile = profile;
     }
 
     /**
@@ -126,19 +131,19 @@ public class MethodCallTargetNode extends CallTargetNode implements IterableNode
             }
             Assumptions assumptions = receiver.graph().getAssumptions();
             if (assumptions != null) {
-                ResolvedJavaType uniqueConcreteType = type.findUniqueConcreteSubtype();
-                if (uniqueConcreteType != null) {
-                    ResolvedJavaMethod methodFromUniqueType = uniqueConcreteType.resolveConcreteMethod(targetMethod, contextType);
+                AssumptionResult<ResolvedJavaType> leafConcreteSubtype = type.findLeafConcreteSubtype();
+                if (leafConcreteSubtype != null) {
+                    ResolvedJavaMethod methodFromUniqueType = leafConcreteSubtype.getResult().resolveConcreteMethod(targetMethod, contextType);
                     if (methodFromUniqueType != null) {
-                        assumptions.recordConcreteSubtype(type, uniqueConcreteType);
+                        assumptions.record(leafConcreteSubtype);
                         return methodFromUniqueType;
                     }
                 }
 
-                ResolvedJavaMethod uniqueConcreteMethod = type.findUniqueConcreteMethod(targetMethod);
+                AssumptionResult<ResolvedJavaMethod> uniqueConcreteMethod = type.findUniqueConcreteMethod(targetMethod);
                 if (uniqueConcreteMethod != null) {
-                    assumptions.recordConcreteMethod(targetMethod, type, uniqueConcreteMethod);
-                    return uniqueConcreteMethod;
+                    assumptions.record(uniqueConcreteMethod);
+                    return uniqueConcreteMethod.getResult();
                 }
             }
         }
@@ -149,6 +154,11 @@ public class MethodCallTargetNode extends CallTargetNode implements IterableNode
     @Override
     public void simplify(SimplifierTool tool) {
         // attempt to devirtualize the call
+        if (invoke().getContextMethod() == null) {
+            // avoid invokes that have placeholder bcis: they do not have a valid contextType
+            assert (invoke().stateAfter() != null && BytecodeFrame.isPlaceholderBci(invoke().stateAfter().bci)) || BytecodeFrame.isPlaceholderBci(invoke().stateDuring().bci);
+            return;
+        }
         ResolvedJavaType contextType = (invoke().stateAfter() == null && invoke().stateDuring() == null) ? null : invoke().getContextType();
         ResolvedJavaMethod specialCallTarget = findSpecialCallTarget(invokeKind, receiver(), targetMethod, contextType);
         if (specialCallTarget != null) {
@@ -169,7 +179,7 @@ public class MethodCallTargetNode extends CallTargetNode implements IterableNode
              * interface methods calls.
              */
             if (declaredReceiverType.isInterface()) {
-                tryCheckCastSingleImplementor(receiver, declaredReceiverType);
+                tryCheckCastSingleImplementor(graph().getAssumptions(), receiver, declaredReceiverType);
             }
 
             if (receiver instanceof UncheckedInterfaceProvider) {
@@ -178,19 +188,26 @@ public class MethodCallTargetNode extends CallTargetNode implements IterableNode
                 if (uncheckedStamp != null) {
                     ResolvedJavaType uncheckedReceiverType = StampTool.typeOrNull(uncheckedStamp);
                     if (uncheckedReceiverType.isInterface()) {
-                        tryCheckCastSingleImplementor(receiver, uncheckedReceiverType);
+                        tryCheckCastSingleImplementor(graph().getAssumptions(), receiver, uncheckedReceiverType);
                     }
                 }
             }
         }
     }
 
-    private void tryCheckCastSingleImplementor(ValueNode receiver, ResolvedJavaType declaredReceiverType) {
+    private void tryCheckCastSingleImplementor(Assumptions assumptions, ValueNode receiver, ResolvedJavaType declaredReceiverType) {
+        if (assumptions == null) {
+            /*
+             * Even though we are not registering an assumption (see comment below), the
+             * optimization is only valid when speculative optimizations are enabled.
+             */
+            return;
+        }
+
         ResolvedJavaType singleImplementor = declaredReceiverType.getSingleImplementor();
         if (singleImplementor != null && !singleImplementor.equals(declaredReceiverType)) {
-            ResolvedJavaMethod singleImplementorMethod = singleImplementor.resolveMethod(targetMethod(), invoke().getContextType(), true);
+            ResolvedJavaMethod singleImplementorMethod = singleImplementor.resolveMethod(targetMethod(), invoke().getContextType());
             if (singleImplementorMethod != null) {
-                assert graph().getGuardsStage().allowsFloatingGuards() : "Graph already fixed!";
                 /**
                  * We have an invoke on an interface with a single implementor. We can replace this
                  * with an invoke virtual.
@@ -202,10 +219,9 @@ public class MethodCallTargetNode extends CallTargetNode implements IterableNode
                  * an assumption but as we need an instanceof check anyway we can verify both
                  * properties by checking of the receiver is an instance of the single implementor.
                  */
-                LogicNode condition = graph().unique(new InstanceOfNode(singleImplementor, receiver, getProfile()));
-                GuardNode guard = graph().unique(
-                                new GuardNode(condition, AbstractBeginNode.prevBegin(invoke().asNode()), DeoptimizationReason.OptimizedTypeCheckViolated, DeoptimizationAction.InvalidateRecompile,
-                                                false, JavaConstant.NULL_POINTER));
+                LogicNode condition = graph().unique(InstanceOfNode.create(singleImplementor, receiver, getProfile()));
+                FixedGuardNode guard = graph().add(new FixedGuardNode(condition, DeoptimizationReason.OptimizedTypeCheckViolated, DeoptimizationAction.InvalidateRecompile, false));
+                graph().addBeforeFixed(invoke().asNode(), guard);
                 PiNode piNode = graph().unique(new PiNode(receiver, StampFactory.declaredNonNull(singleImplementor), guard));
                 arguments().set(0, piNode);
                 setInvokeKind(InvokeKind.Virtual);
@@ -214,15 +230,8 @@ public class MethodCallTargetNode extends CallTargetNode implements IterableNode
         }
     }
 
-    private JavaTypeProfile getProfile() {
-        assert !isStatic();
-        if (receiver() instanceof TypeProfileProxyNode) {
-            // get profile from TypeProfileProxy
-            return ((TypeProfileProxyNode) receiver()).getProfile();
-        }
-        // get profile from invoke()
-        ProfilingInfo profilingInfo = invoke().getContextMethod().getProfilingInfo();
-        return profilingInfo.getTypeProfile(invoke().bci());
+    public JavaTypeProfile getProfile() {
+        return profile;
     }
 
     @Override

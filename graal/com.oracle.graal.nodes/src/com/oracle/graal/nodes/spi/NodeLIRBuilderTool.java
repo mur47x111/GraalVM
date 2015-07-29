@@ -24,10 +24,12 @@ package com.oracle.graal.nodes.spi;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.compiler.common.type.*;
+import com.oracle.graal.graph.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.gen.*;
 import com.oracle.graal.nodes.*;
@@ -35,7 +37,7 @@ import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.cfg.*;
 import com.oracle.graal.nodes.extended.*;
 
-public interface NodeLIRBuilderTool extends NodeMappableLIRBuilder {
+public interface NodeLIRBuilderTool extends NodeValueMap {
 
     // TODO (je) remove and move into the Node
     LIRFrameState state(DeoptimizingNode deopt);
@@ -71,5 +73,5 @@ public interface NodeLIRBuilderTool extends NodeMappableLIRBuilder {
 
     Value[] visitInvokeArguments(CallingConvention cc, Collection<ValueNode> arguments);
 
-    void doBlock(Block block, StructuredGraph graph, BlockMap<List<ValueNode>> blockMap);
+    void doBlock(Block block, StructuredGraph graph, BlockMap<List<Node>> blockMap);
 }

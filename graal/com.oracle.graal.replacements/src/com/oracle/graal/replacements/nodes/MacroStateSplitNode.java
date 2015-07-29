@@ -22,14 +22,16 @@
  */
 package com.oracle.graal.replacements.nodes;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
+import com.oracle.graal.nodes.CallTargetNode.InvokeKind;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.java.*;
+import com.oracle.graal.nodes.memory.*;
 
 /**
  * This is an extension of {@link MacroNode} that is a {@link StateSplit} and a
@@ -41,9 +43,8 @@ public abstract class MacroStateSplitNode extends MacroNode implements StateSpli
     public static final NodeClass<MacroStateSplitNode> TYPE = NodeClass.create(MacroStateSplitNode.class);
     @OptionalInput(InputType.State) protected FrameState stateAfter;
 
-    public MacroStateSplitNode(NodeClass<? extends MacroStateSplitNode> c, Invoke invoke) {
-        super(c, invoke);
-        this.stateAfter = invoke.stateAfter();
+    protected MacroStateSplitNode(NodeClass<? extends MacroNode> c, InvokeKind invokeKind, ResolvedJavaMethod targetMethod, int bci, JavaType returnType, ValueNode... arguments) {
+        super(c, invokeKind, targetMethod, bci, returnType, arguments);
     }
 
     @Override
@@ -62,14 +63,14 @@ public abstract class MacroStateSplitNode extends MacroNode implements StateSpli
     }
 
     public LocationIdentity getLocationIdentity() {
-        return LocationIdentity.ANY_LOCATION;
+        return LocationIdentity.any();
     }
 
     protected void replaceSnippetInvokes(StructuredGraph snippetGraph) {
         for (MethodCallTargetNode call : snippetGraph.getNodes(MethodCallTargetNode.TYPE)) {
             Invoke invoke = call.invoke();
             if (!call.targetMethod().equals(getTargetMethod())) {
-                throw new GraalInternalError("unexpected invoke %s in snippet", getClass().getSimpleName());
+                throw new JVMCIError("unexpected invoke %s in snippet", getClass().getSimpleName());
             }
             assert invoke.stateAfter().bci == BytecodeFrame.AFTER_BCI;
             // Here we need to fix the bci of the invoke

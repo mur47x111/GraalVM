@@ -22,8 +22,9 @@
  */
 package com.oracle.graal.jtt.except;
 
+import jdk.internal.org.objectweb.asm.*;
+
 import org.junit.*;
-import org.objectweb.asm.*;
 
 import com.oracle.graal.jtt.*;
 

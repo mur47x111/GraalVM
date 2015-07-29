@@ -24,7 +24,8 @@ package com.oracle.graal.nodes.extended;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.spi.*;
@@ -98,27 +99,26 @@ public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable,
         gen.emitSwitch(this);
     }
 
+    public AbstractBeginNode successorAtKey(int key) {
+        return blockSuccessor(successorIndexAtKey(key));
+    }
+
+    public int successorIndexAtKey(int key) {
+        for (int i = 0; i < keyCount(); i++) {
+            if (keys[i] == key) {
+                return keySuccessorIndex(i);
+            }
+        }
+        return keySuccessorIndex(keyCount());
+    }
+
     @Override
     public void simplify(SimplifierTool tool) {
         if (blockSuccessorCount() == 1) {
             tool.addToWorkList(defaultSuccessor());
             graph().removeSplitPropagate(this, defaultSuccessor());
         } else if (value() instanceof ConstantNode) {
-            int constant = value().asJavaConstant().asInt();
-
-            int survivingEdge = keySuccessorIndex(keyCount());
-            for (int i = 0; i < keyCount(); i++) {
-                if (keys[i] == constant) {
-                    survivingEdge = keySuccessorIndex(i);
-                }
-            }
-            for (int i = 0; i < blockSuccessorCount(); i++) {
-                if (i != survivingEdge) {
-                    tool.deleteBranch(blockSuccessor(i));
-                }
-            }
-            tool.addToWorkList(blockSuccessor(survivingEdge));
-            graph().removeSplit(this, blockSuccessor(survivingEdge));
+            killOtherSuccessors(tool, successorIndexAtKey(value().asJavaConstant().asInt()));
         } else if (value().stamp() instanceof IntegerStamp) {
             IntegerStamp integerStamp = (IntegerStamp) value().stamp();
             if (!integerStamp.isUnrestricted()) {
@@ -173,7 +173,7 @@ public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable,
                     }
 
                     AbstractBeginNode[] successorsArray = newSuccessors.toArray(new AbstractBeginNode[newSuccessors.size()]);
-                    IntegerSwitchNode newSwitch = graph().add(new IntegerSwitchNode(value(), successorsArray, newKeys, newKeyProbabilities, newKeySuccessors));
+                    SwitchNode newSwitch = graph().add(new IntegerSwitchNode(value(), successorsArray, newKeys, newKeyProbabilities, newKeySuccessors));
                     ((FixedWithNextNode) predecessor()).setNext(newSwitch);
                     GraphUtil.killWithUnusedFloatingInputs(this);
                 }

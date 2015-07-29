@@ -55,17 +55,7 @@ public final class AbsNode extends UnaryArithmeticNode<Abs> implements Arithmeti
     }
 
     @Override
-    public void generate(NodeMappableLIRBuilder builder, ArithmeticLIRGenerator gen) {
-        builder.setResult(this, gen.emitMathAbs(builder.operand(getValue())));
-    }
-
-    @NodeIntrinsic
-    public static float abs(float n) {
-        return Math.abs(n);
-    }
-
-    @NodeIntrinsic
-    public static double abs(double n) {
-        return Math.abs(n);
+    public void generate(NodeValueMap nodeValueMap, ArithmeticLIRGenerator gen) {
+        nodeValueMap.setResult(this, gen.emitMathAbs(nodeValueMap.operand(getValue())));
     }
 }

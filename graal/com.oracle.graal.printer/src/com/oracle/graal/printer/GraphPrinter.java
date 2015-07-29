@@ -24,7 +24,8 @@ package com.oracle.graal.printer;
 
 import java.io.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.phases.schedule.*;
 

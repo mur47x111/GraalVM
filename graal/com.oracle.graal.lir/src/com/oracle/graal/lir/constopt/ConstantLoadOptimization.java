@@ -22,16 +22,19 @@
  */
 package com.oracle.graal.lir.constopt;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
 import static com.oracle.graal.lir.LIRValueUtil.*;
+import static com.oracle.graal.lir.phases.LIRPhase.Options.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.cfg.*;
+import jdk.internal.jvmci.code.*;
 import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
+import com.oracle.graal.debug.Debug.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.options.*;
+
+import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.LIRInstruction.OperandFlag;
 import com.oracle.graal.lir.LIRInstruction.OperandMode;
@@ -40,7 +43,6 @@ import com.oracle.graal.lir.constopt.ConstantTree.Flags;
 import com.oracle.graal.lir.constopt.ConstantTree.NodeCost;
 import com.oracle.graal.lir.gen.*;
 import com.oracle.graal.lir.phases.*;
-import com.oracle.graal.options.*;
 
 /**
  * This optimization tries to improve the handling of constants by replacing a single definition of
@@ -52,7 +54,7 @@ public final class ConstantLoadOptimization extends PreAllocationOptimizationPha
     public static class Options {
         // @formatter:off
         @Option(help = "Enable constant load optimization.", type = OptionType.Debug)
-        public static final OptionValue<Boolean> LIROptConstantLoadOptimization = new OptionValue<>(true);
+        public static final NestedBooleanOptionValue LIROptConstantLoadOptimization = new NestedBooleanOptionValue(LIROptimization, true);
         // @formatter:on
     }
 
@@ -213,8 +215,8 @@ public final class ConstantLoadOptimization extends PreAllocationOptimizationPha
                     // set instruction id to the index in the lir instruction list
                     inst.setId(opId++);
                     inst.visitEachOutput(loadConsumer);
-                    inst.forEachInput(useConsumer);
-                    inst.forEachAlive(useConsumer);
+                    inst.visitEachInput(useConsumer);
+                    inst.visitEachAlive(useConsumer);
 
                 }
             }

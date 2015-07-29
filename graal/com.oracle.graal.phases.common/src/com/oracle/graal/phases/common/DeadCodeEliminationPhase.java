@@ -27,9 +27,10 @@ import static com.oracle.graal.phases.common.DeadCodeEliminationPhase.Options.*;
 import java.util.function.*;
 
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.options.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.options.*;
 import com.oracle.graal.phases.*;
 
 public class DeadCodeEliminationPhase extends Phase {
@@ -91,7 +92,7 @@ public class DeadCodeEliminationPhase extends Phase {
 
     private static void iterateSuccessorsAndInputs(NodeFlood flood) {
         BiConsumer<Node, Node> consumer = (n, succOrInput) -> {
-            assert succOrInput.isAlive() : succOrInput;
+            assert succOrInput.isAlive() : "dead successor or input " + succOrInput + " in " + n;
             flood.add(succOrInput);
         };
         for (Node current : flood) {

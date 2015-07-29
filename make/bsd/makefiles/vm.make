@@ -111,10 +111,6 @@ ifdef DEFAULT_LIBPATH
 CXXFLAGS += -DDEFAULT_LIBPATH="\"$(DEFAULT_LIBPATH)\""
 endif
 
-ifeq ($(INCLUDE_GRAAL), true)
-  CXXFLAGS += -DGRAAL_VERSION="\"$(GRAAL_VERSION)\""
-endif
-
 # CFLAGS_WARN holds compiler options to suppress/enable warnings.
 CFLAGS += $(CFLAGS_WARN/BYFILE)
 
@@ -171,7 +167,7 @@ else
   LIBJVM_DIZ         = lib$(JVM).diz
 endif
 
-SPECIAL_PATHS:=adlc c1 gc_implementation opto shark libadt graal
+SPECIAL_PATHS:=adlc c1 gc_implementation opto shark libadt jvmci
 
 SOURCE_PATHS=\
   $(shell find $(HS_COMMON_SRC)/share/vm/* -type d \! \
@@ -201,17 +197,17 @@ COMPILER2_PATHS += $(GENERATED)/adfiles
 
 SHARK_PATHS := $(GAMMADIR)/src/share/vm/shark
 
-GRAAL_PATHS += $(call altsrc,$(HS_COMMON_SRC)/share/vm/graal)
-GRAAL_PATHS += $(HS_COMMON_SRC)/share/vm/graal
+JVMCI_PATHS += $(call altsrc,$(HS_COMMON_SRC)/share/vm/jvmci)
+JVMCI_PATHS += $(HS_COMMON_SRC)/share/vm/jvmci
 
 # Include dirs per type.
 Src_Dirs/CORE      := $(CORE_PATHS)
-Src_Dirs/COMPILER1 := $(CORE_PATHS) $(COMPILER1_PATHS) $(GRAAL_PATHS)
-Src_Dirs/COMPILER2 := $(CORE_PATHS) $(COMPILER2_PATHS) $(GRAAL_PATHS)
-Src_Dirs/TIERED    := $(CORE_PATHS) $(COMPILER1_PATHS) $(COMPILER2_PATHS) $(GRAAL_PATHS)
+Src_Dirs/COMPILER1 := $(CORE_PATHS) $(COMPILER1_PATHS) $(JVMCI_PATHS)
+Src_Dirs/COMPILER2 := $(CORE_PATHS) $(COMPILER2_PATHS) $(JVMCI_PATHS)
+Src_Dirs/TIERED    := $(CORE_PATHS) $(COMPILER1_PATHS) $(COMPILER2_PATHS) $(JVMCI_PATHS)
 Src_Dirs/ZERO      := $(CORE_PATHS)
 Src_Dirs/SHARK     := $(CORE_PATHS) $(SHARK_PATHS)
-Src_Dirs/GRAAL     := $(CORE_PATHS) $(COMPILER1_PATHS) $(GRAAL_PATHS)
+Src_Dirs/JVMCI     := $(CORE_PATHS) $(COMPILER1_PATHS) $(JVMCI_PATHS)
 Src_Dirs := $(Src_Dirs/$(TYPE))
 
 COMPILER2_SPECIFIC_FILES := opto libadt bcEscapeAnalyzer.cpp c2_\* runtime_\*
@@ -219,24 +215,24 @@ COMPILER1_SPECIFIC_FILES := c1_\*
 SHARK_SPECIFIC_FILES     := shark
 ZERO_SPECIFIC_FILES      := zero
 
-ifneq ($(INCLUDE_GRAAL), true)
-  GRAAL_SPECIFIC_FILES   := graal\*
+ifneq ($(INCLUDE_JVMCI), true)
+  JVMCI_SPECIFIC_FILES   := jvmci\*
 else
-  GRAAL_SPECIFIC_FILES   :=
-  Src_Dirs_I += $(HS_COMMON_SRC)/../graal/com.oracle.graal.hotspot/src_gen/hotspot
+  JVMCI_SPECIFIC_FILES   :=
+  Src_Dirs_I += $(HS_COMMON_SRC)/../jvmci/jdk.internal.jvmci.hotspot/src_gen/hotspot
 endif
 
 # Always exclude these.
 Src_Files_EXCLUDE += jsig.c jvmtiEnvRecommended.cpp jvmtiEnvStub.cpp
 
 # Exclude per type.
-Src_Files_EXCLUDE/CORE      := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES) ciTypeFlow.cpp
-Src_Files_EXCLUDE/COMPILER1 := $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES) ciTypeFlow.cpp
-Src_Files_EXCLUDE/COMPILER2 := $(COMPILER1_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES)
-Src_Files_EXCLUDE/TIERED    := $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES)
-Src_Files_EXCLUDE/ZERO      := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES) ciTypeFlow.cpp
-Src_Files_EXCLUDE/SHARK     := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(GRAAL_SPECIFIC_FILES)
-Src_Files_EXCLUDE/GRAAL     := $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) ciTypeFlow.cpp
+Src_Files_EXCLUDE/CORE      := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES) ciTypeFlow.cpp
+Src_Files_EXCLUDE/COMPILER1 := $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES) ciTypeFlow.cpp
+Src_Files_EXCLUDE/COMPILER2 := $(COMPILER1_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES)
+Src_Files_EXCLUDE/TIERED    := $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES)
+Src_Files_EXCLUDE/ZERO      := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES) ciTypeFlow.cpp
+Src_Files_EXCLUDE/SHARK     := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(JVMCI_SPECIFIC_FILES)
+Src_Files_EXCLUDE/JVMCI     := $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) ciTypeFlow.cpp
 
 Src_Files_EXCLUDE +=  $(Src_Files_EXCLUDE/$(TYPE))
 
@@ -263,10 +259,10 @@ JVM_OBJ_FILES = $(Obj_Files)
 
 vm_version.o: $(filter-out vm_version.o,$(JVM_OBJ_FILES))
 
-mapfile : $(MAPFILE) vm.def
+mapfile : $(MAPFILE) vm.def mapfile_ext
 	rm -f $@
 	awk '{ if ($$0 ~ "INSERT VTABLE SYMBOLS HERE")	\
-                 { system ("cat vm.def"); }		\
+                 { system ("cat mapfile_ext"); system ("cat vm.def"); } \
                else					\
                  { print $$0 }				\
              }' > $@ < $(MAPFILE)
@@ -277,6 +273,13 @@ mapfile_reorder : mapfile $(REORDERFILE)
 
 vm.def: $(Res_Files) $(Obj_Files)
 	sh $(GAMMADIR)/make/bsd/makefiles/build_vm_def.sh *.o > $@
+
+mapfile_ext:
+	rm -f $@
+	touch $@
+	if [ -f $(HS_ALT_MAKE)/bsd/makefiles/mapfile-ext ]; then \
+	  cat $(HS_ALT_MAKE)/bsd/makefiles/mapfile-ext > $@; \
+	fi
 
 STATIC_CXX = false
 
@@ -384,7 +387,10 @@ DEST_JVM           = $(DEST_SUBDIR)/$(LIBJVM)
 DEST_JVM_DEBUGINFO = $(DEST_SUBDIR)/$(LIBJVM_DEBUGINFO)
 DEST_JVM_DIZ       = $(DEST_SUBDIR)/$(LIBJVM_DIZ)
 
-install_jvm: $(LIBJVM)
+$(DEST_SUBDIR):
+	mkdir $(DEST_SUBDIR)
+
+install_jvm: $(LIBJVM) $(DEST_SUBDIR)
 	@echo "Copying $(LIBJVM) to $(DEST_JVM)"
 ifeq ($(OS_VENDOR), Darwin)
 	$(QUIETLY) test ! -d $(LIBJVM_DEBUGINFO) || \

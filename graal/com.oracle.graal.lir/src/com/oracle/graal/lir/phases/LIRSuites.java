@@ -22,12 +22,13 @@
  */
 package com.oracle.graal.lir.phases;
 
-import com.oracle.graal.api.code.*;
+import jdk.internal.jvmci.code.*;
+
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.gen.*;
-import com.oracle.graal.lir.phases.PreAllocationOptimizationPhase.PreAllocationOptimizationContext;
-import com.oracle.graal.lir.phases.PostAllocationOptimizationPhase.PostAllocationOptimizationContext;
 import com.oracle.graal.lir.phases.AllocationPhase.AllocationContext;
+import com.oracle.graal.lir.phases.PostAllocationOptimizationPhase.PostAllocationOptimizationContext;
+import com.oracle.graal.lir.phases.PreAllocationOptimizationPhase.PreAllocationOptimizationContext;
 
 public class LIRSuites {
 
@@ -39,6 +40,10 @@ public class LIRSuites {
         this.preAllocOptStage = preAllocOptStage;
         this.allocStage = allocStage;
         this.postAllocStage = postAllocStage;
+    }
+
+    public LIRSuites(LIRSuites other) {
+        this(other.getPreAllocationOptimizationStage().copy(), other.getAllocationStage().copy(), other.getPostAllocationOptimizationStage().copy());
     }
 
     /**

@@ -49,10 +49,10 @@
 #ifdef COMPILER1
 #include "c1/c1_Compiler.hpp"
 #endif
-#ifdef GRAAL
-#include "graal/graalCompiler.hpp"
-#ifdef COMPILERGRAAL
-#include "graal/graalRuntime.hpp"
+#if INCLUDE_JVMCI
+#include "jvmci/jvmciCompiler.hpp"
+#ifdef COMPILERJVMCI
+#include "jvmci/jvmciRuntime.hpp"
 #include "runtime/vframe.hpp"
 #endif
 #endif
@@ -190,9 +190,8 @@ int CompileBroker::_sum_nmethod_code_size        = 0;
 
 long CompileBroker::_peak_compilation_time       = 0;
 
-CompileQueue* CompileBroker::_c2_method_queue    = NULL;
-CompileQueue* CompileBroker::_c1_method_queue    = NULL;
-CompileTask*  CompileBroker::_task_free_list     = NULL;
+CompileQueue* CompileBroker::_c2_compile_queue   = NULL;
+CompileQueue* CompileBroker::_c1_compile_queue   = NULL;
 
 GrowableArray<CompilerThread*>* CompileBroker::_compiler_threads = NULL;
 
@@ -260,13 +259,56 @@ CompileTaskWrapper::~CompileTaskWrapper() {
 
     // By convention, the compiling thread is responsible for
     // recycling a non-blocking CompileTask.
-    CompileBroker::free_task(task);
+    CompileTask::free(task);
   }
 }
 
 
-// ------------------------------------------------------------------
-// CompileTask::initialize
+CompileTask*  CompileTask::_task_free_list = NULL;
+#ifdef ASSERT
+int CompileTask::_num_allocated_tasks = 0;
+#endif
+/**
+ * Allocate a CompileTask, from the free list if possible.
+ */
+CompileTask* CompileTask::allocate() {
+  MutexLocker locker(CompileTaskAlloc_lock);
+  CompileTask* task = NULL;
+
+  if (_task_free_list != NULL) {
+    task = _task_free_list;
+    _task_free_list = task->next();
+    task->set_next(NULL);
+  } else {
+    task = new CompileTask();
+    DEBUG_ONLY(_num_allocated_tasks++;)
+    assert (_num_allocated_tasks < 10000, "Leaking compilation tasks?");
+    task->set_next(NULL);
+    task->set_is_free(true);
+  }
+  assert(task->is_free(), "Task must be free.");
+  task->set_is_free(false);
+  return task;
+}
+
+
+/**
+ * Add a task to the free list.
+ */
+void CompileTask::free(CompileTask* task) {
+  MutexLocker locker(CompileTaskAlloc_lock);
+  if (!task->is_free()) {
+    task->set_code(NULL);
+    assert(!task->lock()->is_locked(), "Should not be locked when freed");
+    JNIHandles::destroy_global(task->_method_holder);
+    JNIHandles::destroy_global(task->_hot_method_holder);
+
+    task->set_is_free(true);
+    task->set_next(_task_free_list);
+    _task_free_list = task;
+  }
+}
+
 void CompileTask::initialize(int compile_id,
                              methodHandle method,
                              int osr_bci,
@@ -294,6 +336,7 @@ void CompileTask::initialize(int compile_id,
   _hot_count = hot_count;
   _time_queued = 0;  // tidy
   _comment = comment;
+  _failure_reason = NULL;
 
   if (LogCompilation) {
     _time_queued = os::elapsed_counter();
@@ -322,15 +365,6 @@ void CompileTask::set_code(nmethod* nm) {
   guarantee(_code_handle != NULL, "");
   _code_handle->set_code(nm);
   if (nm == NULL)  _code_handle = NULL;  // drop the handle also
-}
-
-// ------------------------------------------------------------------
-// CompileTask::free
-void CompileTask::free() {
-  set_code(NULL);
-  assert(!_lock->is_locked(), "Should not be locked when freed");
-  JNIHandles::destroy_global(_method_holder);
-  JNIHandles::destroy_global(_hot_method_holder);
 }
 
 
@@ -558,6 +592,24 @@ void CompileTask::log_task_queued() {
 
 
 // ------------------------------------------------------------------
+// CompileTask::log_task_dequeued
+void CompileTask::log_task_dequeued(const char* comment) {
+  if (LogCompilation && xtty != NULL) {
+    Thread* thread = Thread::current();
+    ttyLocker ttyl;
+    ResourceMark rm(thread);
+
+    xtty->begin_elem("task_dequeued");
+    log_task(xtty);
+    if (comment != NULL) {
+      xtty->print(" comment='%s'", comment);
+    }
+    xtty->end_elem();
+  }
+}
+
+
+// ------------------------------------------------------------------
 // CompileTask::log_task_start
 void CompileTask::log_task_start(CompileLog* log)   {
   log->begin_head("task");
@@ -572,6 +624,11 @@ void CompileTask::log_task_done(CompileLog* log) {
   Thread* thread = Thread::current();
   methodHandle method(thread, this->method());
   ResourceMark rm(thread);
+
+  if (!_is_success) {
+    const char* reason = _failure_reason != NULL ? _failure_reason : "unknown";
+    log->elem("failure reason='%s'", reason);
+  }
 
   // <task_done ... stamp='1.234'>  </task>
   nmethod* nm = code();
@@ -596,9 +653,12 @@ void CompileTask::log_task_done(CompileLog* log) {
 
 
 
-// Add a CompileTask to a CompileQueue
+/**
+ * Add a CompileTask to a CompileQueue
+ */
 void CompileQueue::add(CompileTask* task) {
   assert(lock()->owned_by_self(), "must own lock");
+  assert(!CompileBroker::is_compilation_disabled_forever(), "Do not add task if compilation is turned off forever");
 
   task->set_next(NULL);
   task->set_prev(NULL);
@@ -620,9 +680,7 @@ void CompileQueue::add(CompileTask* task) {
   // Mark the method as being in the compile queue.
   task->method()->set_queued_for_compilation();
 
-  if (CIPrintCompileQueue) {
-    print();
-  }
+  NOT_PRODUCT(print();)
 
   if (LogCompilation && xtty != NULL) {
     task->log_task_queued();
@@ -632,14 +690,32 @@ void CompileQueue::add(CompileTask* task) {
   lock()->notify_all();
 }
 
-void CompileQueue::delete_all() {
-  assert(lock()->owned_by_self(), "must own lock");
-  if (_first != NULL) {
-    for (CompileTask* task = _first; task != NULL; task = task->next()) {
-      delete task;
+/**
+ * Empties compilation queue by putting all compilation tasks onto
+ * a freelist. Furthermore, the method wakes up all threads that are
+ * waiting on a compilation task to finish. This can happen if background
+ * compilation is disabled.
+ */
+void CompileQueue::free_all() {
+  MutexLocker mu(lock());
+  CompileTask* next = _first;
+
+  // Iterate over all tasks in the compile queue
+  while (next != NULL) {
+    CompileTask* current = next;
+    next = current->next();
+    {
+      // Wake up thread that blocks on the compile task.
+      MutexLocker ct_lock(current->lock());
+      current->lock()->notify();
     }
-    _first = NULL;
+    // Put the task back on the freelist.
+    CompileTask::free(current);
   }
+  _first = NULL;
+
+  // Wake up all threads that block on the queue.
+  lock()->notify_all();
 }
 
 // ------------------------------------------------------------------
@@ -696,13 +772,40 @@ CompileTask* CompileQueue::get() {
     return NULL;
   }
 
-  CompileTask* task = CompilationPolicy::policy()->select_task(this);
+  CompileTask* task;
+  {
+    No_Safepoint_Verifier nsv;
+    task = CompilationPolicy::policy()->select_task(this);
+  }
   remove(task);
+  purge_stale_tasks(); // may temporarily release MCQ lock
   return task;
 }
 
-void CompileQueue::remove(CompileTask* task)
-{
+// Clean & deallocate stale compile tasks.
+// Temporarily releases MethodCompileQueue lock.
+void CompileQueue::purge_stale_tasks() {
+  assert(lock()->owned_by_self(), "must own lock");
+  if (_first_stale != NULL) {
+    // Stale tasks are purged when MCQ lock is released,
+    // but _first_stale updates are protected by MCQ lock.
+    // Once task processing starts and MCQ lock is released,
+    // other compiler threads can reuse _first_stale.
+    CompileTask* head = _first_stale;
+    _first_stale = NULL;
+    {
+      MutexUnlocker ul(lock());
+      for (CompileTask* task = head; task != NULL; ) {
+        CompileTask* next_task = task->next();
+        CompileTaskWrapper ctw(task); // Frees the task
+        task->set_failure_reason("stale task");
+        task = next_task;
+      }
+    }
+  }
+}
+
+void CompileQueue::remove(CompileTask* task) {
    assert(lock()->owned_by_self(), "must own lock");
   if (task->prev() != NULL) {
     task->prev()->set_next(task->next());
@@ -722,6 +825,16 @@ void CompileQueue::remove(CompileTask* task)
   --_size;
 }
 
+void CompileQueue::remove_and_mark_stale(CompileTask* task) {
+  assert(lock()->owned_by_self(), "must own lock");
+  remove(task);
+
+  // Enqueue the task for reclamation (should be done outside MCQ lock)
+  task->set_next(_first_stale);
+  task->set_prev(NULL);
+  _first_stale = task;
+}
+
 // methods in the compile queue need to be marked as used on the stack
 // so that they don't get reclaimed by Redefine Classes
 void CompileQueue::mark_on_stack() {
@@ -732,18 +845,24 @@ void CompileQueue::mark_on_stack() {
   }
 }
 
-// ------------------------------------------------------------------
-// CompileQueue::print
+#ifndef PRODUCT
+/**
+ * Print entire compilation queue.
+ */
 void CompileQueue::print() {
-  tty->print_cr("Contents of %s", name());
-  tty->print_cr("----------------------");
-  CompileTask* task = _first;
-  while (task != NULL) {
-    task->print_line();
-    task = task->next();
+  if (CIPrintCompileQueue) {
+    ttyLocker ttyl;
+    tty->print_cr("Contents of %s", name());
+    tty->print_cr("----------------------");
+    CompileTask* task = _first;
+    while (task != NULL) {
+      task->print_line();
+      task = task->next();
+    }
+    tty->print_cr("----------------------");
   }
-  tty->print_cr("----------------------");
 }
+#endif // PRODUCT
 
 CompilerCounters::CompilerCounters(const char* thread_name, int instance, TRAPS) {
 
@@ -797,27 +916,31 @@ void CompileBroker::compilation_init() {
   // Set the interface to the current compiler(s).
   int c1_count = CompilationPolicy::policy()->compiler_count(CompLevel_simple);
   int c2_count = CompilationPolicy::policy()->compiler_count(CompLevel_full_optimization);
-#ifdef GRAAL
-  GraalCompiler* graal = new GraalCompiler();
+#if INCLUDE_JVMCI
+  JVMCICompiler* jvmci = new JVMCICompiler();
 #endif
+
+#if defined(COMPILERJVMCI)
+  _compilers[1] = jvmci;
+  if (FLAG_IS_DEFAULT(JVMCIThreads)) {
+    if (!TieredCompilation && FLAG_IS_DEFAULT(BootstrapJVMCI) || BootstrapJVMCI) {
+      // JVMCI will bootstrap so give it more threads
+      c2_count = MIN2(32, os::active_processor_count());
+    }
+  } else {
+    c2_count = JVMCIThreads;
+  }
+  if (FLAG_IS_DEFAULT(JVMCIHostThreads)) {
+  } else {
+    c1_count = JVMCIHostThreads;
+  }
+#endif // COMPILERJVMCI
 
 #ifdef COMPILER1
   if (c1_count > 0) {
     _compilers[0] = new Compiler();
   }
 #endif // COMPILER1
-
-#if defined(COMPILERGRAAL)
-  _compilers[1] = graal;
-  if (FLAG_IS_DEFAULT(GraalThreads)) {
-    if (!TieredCompilation && FLAG_IS_DEFAULT(BootstrapGraal) || BootstrapGraal) {
-      // Graal will bootstrap so give it more threads
-      c2_count = MIN2(32, os::active_processor_count());
-    }
-  } else {
-    c2_count = GraalThreads;
-  }
-#endif // COMPILERGRAAL
 
 #ifdef COMPILER2
   if (c2_count > 0) {
@@ -831,9 +954,6 @@ void CompileBroker::compilation_init() {
 
   _compilers[1] = new SharkCompiler();
 #endif // SHARK
-
-  // Initialize the CompileTask free list
-  _task_free_list = NULL;
 
   // Start the CompilerThreads
   init_compiler_threads(c1_count, c2_count);
@@ -1022,16 +1142,16 @@ CompilerThread* CompileBroker::make_compiler_thread(const char* name, CompileQue
 
 void CompileBroker::init_compiler_threads(int c1_compiler_count, int c2_compiler_count) {
   EXCEPTION_MARK;
-#if !defined(ZERO) && !defined(SHARK) && !defined(COMPILERGRAAL)
+#if !defined(ZERO) && !defined(SHARK) && !defined(COMPILERJVMCI)
   assert(c2_compiler_count > 0 || c1_compiler_count > 0, "No compilers?");
-#endif // !ZERO && !SHARK && !COMPILERGRAAL
+#endif // !ZERO && !SHARK && !COMPILERJVMCI
   // Initialize the compilation queue
   if (c2_compiler_count > 0) {
-    _c2_method_queue  = new CompileQueue("C2MethodQueue",  MethodCompileQueue_lock);
+    _c2_compile_queue  = new CompileQueue("C2 CompileQueue",  MethodCompileQueue_lock);
     _compilers[1]->set_num_compiler_threads(c2_compiler_count);
   }
   if (c1_compiler_count > 0) {
-    _c1_method_queue  = new CompileQueue("C1MethodQueue",  MethodCompileQueue_lock);
+    _c1_compile_queue  = new CompileQueue("C1 CompileQueue",  MethodCompileQueue_lock);
     _compilers[0]->set_num_compiler_threads(c1_compiler_count);
   }
 
@@ -1046,7 +1166,7 @@ void CompileBroker::init_compiler_threads(int c1_compiler_count, int c2_compiler
     sprintf(name_buffer, "%s CompilerThread%d", _compilers[1]->name(), i);
     CompilerCounters* counters = new CompilerCounters("compilerThread", i, CHECK);
     // Shark and C2
-    CompilerThread* new_thread = make_compiler_thread(name_buffer, _c2_method_queue, counters, _compilers[1], CHECK);
+    CompilerThread* new_thread = make_compiler_thread(name_buffer, _c2_compile_queue, counters, _compilers[1], CHECK);
     _compiler_threads->append(new_thread);
   }
 
@@ -1055,7 +1175,7 @@ void CompileBroker::init_compiler_threads(int c1_compiler_count, int c2_compiler
     sprintf(name_buffer, "C1 CompilerThread%d", i);
     CompilerCounters* counters = new CompilerCounters("compilerThread", i, CHECK);
     // C1
-    CompilerThread* new_thread = make_compiler_thread(name_buffer, _c1_method_queue, counters, _compilers[0], CHECK);
+    CompilerThread* new_thread = make_compiler_thread(name_buffer, _c1_compile_queue, counters, _compilers[0], CHECK);
     _compiler_threads->append(new_thread);
   }
 
@@ -1065,14 +1185,19 @@ void CompileBroker::init_compiler_threads(int c1_compiler_count, int c2_compiler
 }
 
 
-// Set the methods on the stack as on_stack so that redefine classes doesn't
-// reclaim them
+/**
+ * Set the methods on the stack as on_stack so that redefine classes doesn't
+ * reclaim them. This method is executed at a safepoint.
+ */
 void CompileBroker::mark_on_stack() {
-  if (_c2_method_queue != NULL) {
-    _c2_method_queue->mark_on_stack();
+  assert(SafepointSynchronize::is_at_safepoint(), "sanity check");
+  // Since we are at a safepoint, we do not need a lock to access
+  // the compile queues.
+  if (_c2_compile_queue != NULL) {
+    _c2_compile_queue->mark_on_stack();
   }
-  if (_c1_method_queue != NULL) {
-    _c1_method_queue->mark_on_stack();
+  if (_c1_compile_queue != NULL) {
+    _c1_compile_queue->mark_on_stack();
   }
 }
 
@@ -1088,7 +1213,7 @@ void CompileBroker::compile_method_base(methodHandle method,
                                         const char* comment,
                                         Thread* thread) {
   // do nothing if compiler thread(s) is not available
-  if (!_initialized ) {
+  if (!_initialized) {
     return;
   }
 
@@ -1135,7 +1260,7 @@ void CompileBroker::compile_method_base(methodHandle method,
 
   // If this method is already in the compile queue, then
   // we do not block the current thread.
-  if (compilation_is_in_queue(method, osr_bci)) {
+  if (compilation_is_in_queue(method)) {
     // We may want to decay our counter a bit here to prevent
     // multiple denied requests for compilation.  This is an
     // open compilation policy issue. Note: The other possibility,
@@ -1156,6 +1281,12 @@ void CompileBroker::compile_method_base(methodHandle method,
     return;
   }
 
+  if (TieredCompilation) {
+    // Tiered policy requires MethodCounters to exist before adding a method to
+    // the queue. Create if we don't have them yet.
+    method->get_method_counters(thread);
+  }
+
   // Outputs from the following MutexLocker block:
   CompileTask* task     = NULL;
   bool         blocking = false;
@@ -1168,7 +1299,7 @@ void CompileBroker::compile_method_base(methodHandle method,
     // Make sure the method has not slipped into the queues since
     // last we checked; note that those checks were "fast bail-outs".
     // Here we need to be more careful, see 14012000 below.
-    if (compilation_is_in_queue(method, osr_bci)) {
+    if (compilation_is_in_queue(method)) {
       return;
     }
 
@@ -1189,34 +1320,36 @@ void CompileBroker::compile_method_base(methodHandle method,
     }
 
     // Should this thread wait for completion of the compile?
-    blocking = is_compile_blocking(method, osr_bci);
+    blocking = is_compile_blocking();
 
-#ifdef COMPILERGRAAL
+#ifdef COMPILERJVMCI
     if (blocking) {
-      // Don't allow blocking compiles for requests triggered by Graal.
+      // Don't allow blocking compiles for requests triggered by JVMCI.
       if (thread->is_Compiler_thread()) {
         blocking = false;
       }
 
-      // Don't allow blocking compiles if inside a class initializer
+      // Don't allow blocking compiles if inside a class initializer or while performing class loading
       vframeStream vfst((JavaThread*) thread);
       for (; !vfst.at_end(); vfst.next()) {
-        if (vfst.method()->is_static_initializer()) {
+        if (vfst.method()->is_static_initializer() ||
+            (vfst.method()->method_holder()->is_subclass_of(SystemDictionary::ClassLoader_klass()) &&
+             vfst.method()->name() == vmSymbols::loadClass_name())) {
           blocking = false;
           break;
         }
       }
 
-      // Don't allow blocking compilation requests to Graal
-      // if Graal itself is not yet initialized
-      if (!GraalRuntime::is_HotSpotGraalRuntime_initialized() && compiler(comp_level)->is_graal()) {
+      // Don't allow blocking compilation requests to JVMCI
+      // if JVMCI itself is not yet initialized
+      if (!JVMCIRuntime::is_HotSpotJVMCIRuntime_initialized() && compiler(comp_level)->is_jvmci()) {
         blocking = false;
       }
 
-      // Don't allow blocking compilation requests if we are in GraalRuntime::shutdown
+      // Don't allow blocking compilation requests if we are in JVMCIRuntime::shutdown
       // to avoid deadlock between compiler thread(s) and threads run at shutdown
       // such as the DestroyJavaVM thread.
-      if (GraalRuntime::shutdown_called()) {
+      if (JVMCIRuntime::shutdown_called()) {
         blocking = false;
       }
     }
@@ -1413,19 +1546,17 @@ bool CompileBroker::compilation_is_complete(methodHandle method,
 }
 
 
-// ------------------------------------------------------------------
-// CompileBroker::compilation_is_in_queue
-//
-// See if this compilation is already requested.
-//
-// Implementation note: there is only a single "is in queue" bit
-// for each method.  This means that the check below is overly
-// conservative in the sense that an osr compilation in the queue
-// will block a normal compilation from entering the queue (and vice
-// versa).  This can be remedied by a full queue search to disambiguate
-// cases.  If it is deemed profitible, this may be done.
-bool CompileBroker::compilation_is_in_queue(methodHandle method,
-                                            int          osr_bci) {
+/**
+ * See if this compilation is already requested.
+ *
+ * Implementation note: there is only a single "is in queue" bit
+ * for each method.  This means that the check below is overly
+ * conservative in the sense that an osr compilation in the queue
+ * will block a normal compilation from entering the queue (and vice
+ * versa).  This can be remedied by a full queue search to disambiguate
+ * cases.  If it is deemed profitable, this may be done.
+ */
+bool CompileBroker::compilation_is_in_queue(methodHandle method) {
   return method->queued_for_compilation();
 }
 
@@ -1515,13 +1646,11 @@ uint CompileBroker::assign_compile_id_unlocked(Thread* thread, methodHandle meth
   return assign_compile_id(method, osr_bci);
 }
 
-
-// ------------------------------------------------------------------
-// CompileBroker::is_compile_blocking
-//
-// Should the current thread be blocked until this compilation request
-// has been fulfilled?
-bool CompileBroker::is_compile_blocking(methodHandle method, int osr_bci) {
+/**
+ * Should the current thread block until this compilation request
+ * has been fulfilled?
+ */
+bool CompileBroker::is_compile_blocking() {
   assert(!InstanceRefKlass::owns_pending_list_lock(JavaThread::current()), "possible deadlock");
   return !BackgroundCompilation;
 }
@@ -1549,7 +1678,7 @@ CompileTask* CompileBroker::create_compile_task(CompileQueue* queue,
                                               int           hot_count,
                                               const char*   comment,
                                               bool          blocking) {
-  CompileTask* new_task = allocate_task();
+  CompileTask* new_task = CompileTask::allocate();
   new_task->initialize(compile_id, method, osr_bci, comp_level,
                        hot_method, hot_count, comment,
                        blocking);
@@ -1558,75 +1687,52 @@ CompileTask* CompileBroker::create_compile_task(CompileQueue* queue,
 }
 
 
-// ------------------------------------------------------------------
-// CompileBroker::allocate_task
-//
-// Allocate a CompileTask, from the free list if possible.
-CompileTask* CompileBroker::allocate_task() {
-  MutexLocker locker(CompileTaskAlloc_lock);
-  CompileTask* task = NULL;
-  if (_task_free_list != NULL) {
-    task = _task_free_list;
-    _task_free_list = task->next();
-    task->set_next(NULL);
-  } else {
-    task = new CompileTask();
-    task->set_next(NULL);
-  }
-  return task;
-}
-
-
-// ------------------------------------------------------------------
-// CompileBroker::free_task
-//
-// Add a task to the free list.
-void CompileBroker::free_task(CompileTask* task) {
-  MutexLocker locker(CompileTaskAlloc_lock);
-  task->free();
-  task->set_next(_task_free_list);
-  _task_free_list = task;
-}
-
-
-// ------------------------------------------------------------------
-// CompileBroker::wait_for_completion
-//
-// Wait for the given method CompileTask to complete.
+/**
+ *  Wait for the compilation task to complete.
+ */
 void CompileBroker::wait_for_completion(CompileTask* task) {
   if (CIPrintCompileQueue) {
+    ttyLocker ttyl;
     tty->print_cr("BLOCKING FOR COMPILE");
   }
 
   assert(task->is_blocking(), "can only wait on blocking task");
 
-  JavaThread *thread = JavaThread::current();
+  JavaThread* thread = JavaThread::current();
   thread->set_blocked_on_compilation(true);
 
   methodHandle method(thread, task->method());
   {
     MutexLocker waiter(task->lock(), thread);
 
-    while (!task->is_complete())
+    while (!task->is_complete() && !is_compilation_disabled_forever()) {
       task->lock()->wait();
+    }
   }
+
+  thread->set_blocked_on_compilation(false);
+  if (is_compilation_disabled_forever()) {
+    CompileTask::free(task);
+    return;
+  }
+
   // It is harmless to check this status without the lock, because
   // completion is a stable property (until the task object is recycled).
   assert(task->is_complete(), "Compilation should have completed");
   assert(task->code_handle() == NULL, "must be reset");
 
-  thread->set_blocked_on_compilation(false);
-
   // By convention, the waiter is responsible for recycling a
   // blocking CompileTask. Since there is only one waiter ever
   // waiting on a CompileTask, we know that no one else will
   // be using this CompileTask; we can free it.
-  free_task(task);
+  CompileTask::free(task);
 }
 
-// Initialize compiler thread(s) + compiler object(s). The postcondition
-// of this function is that the compiler runtimes are initialized and that
-//compiler threads can start compiling.
+/**
+ * Initialize compiler thread(s) + compiler object(s). The postcondition
+ * of this function is that the compiler runtimes are initialized and that
+ * compiler threads can start compiling.
+ */
 bool CompileBroker::init_compiler_runtime() {
   CompilerThread* thread = CompilerThread::current();
   AbstractCompiler* comp = thread->compiler();
@@ -1663,7 +1769,6 @@ bool CompileBroker::init_compiler_runtime() {
     disable_compilation_forever();
     // If compiler initialization failed, no compiler thread that is specific to a
     // particular compiler runtime will ever start to compile methods.
-
     shutdown_compiler_runtime(comp, thread);
     return false;
   }
@@ -1677,9 +1782,11 @@ bool CompileBroker::init_compiler_runtime() {
   return true;
 }
 
-// If C1 and/or C2 initialization failed, we shut down all compilation.
-// We do this to keep things simple. This can be changed if it ever turns out to be
-// a problem.
+/**
+ * If C1 and/or C2 initialization failed, we shut down all compilation.
+ * We do this to keep things simple. This can be changed if it ever turns
+ * out to be a problem.
+ */
 void CompileBroker::shutdown_compiler_runtime(AbstractCompiler* comp, CompilerThread* thread) {
   // Free buffer blob, if allocated
   if (thread->get_buffer_blob() != NULL) {
@@ -1691,27 +1798,24 @@ void CompileBroker::shutdown_compiler_runtime(AbstractCompiler* comp, CompilerTh
     // There are two reasons for shutting down the compiler
     // 1) compiler runtime initialization failed
     // 2) The code cache is full and the following flag is set: -XX:-UseCodeCacheFlushing
-    warning("Shutting down compiler %s (no space to run compilers)", comp->name());
+    warning("%s initialization failed. Shutting down all compilers", comp->name());
 
     // Only one thread per compiler runtime object enters here
     // Set state to shut down
     comp->set_shut_down();
 
-    MutexLocker mu(MethodCompileQueue_lock, thread);
-    CompileQueue* queue;
-    if (_c1_method_queue != NULL) {
-      _c1_method_queue->delete_all();
-      queue = _c1_method_queue;
-      _c1_method_queue = NULL;
-      delete _c1_method_queue;
+    // Delete all queued compilation tasks to make compiler threads exit faster.
+    if (_c1_compile_queue != NULL) {
+      _c1_compile_queue->free_all();
     }
 
-    if (_c2_method_queue != NULL) {
-      _c2_method_queue->delete_all();
-      queue = _c2_method_queue;
-      _c2_method_queue = NULL;
-      delete _c2_method_queue;
+    if (_c2_compile_queue != NULL) {
+      _c2_compile_queue->free_all();
     }
+
+    // Set flags so that we continue execution with using interpreter only.
+    UseCompiler    = false;
+    UseInterpreter = true;
 
     // We could delete compiler runtimes also. However, there are references to
     // the compiler runtime(s) (e.g.,  nmethod::is_compiled_by_c1()) which then
@@ -1798,26 +1902,11 @@ void CompileBroker::compiler_thread_loop() {
     if (method()->number_of_breakpoints() == 0) {
       // Compile the method.
       if ((UseCompiler || AlwaysCompileLoopMethods) && CompileBroker::should_compile_new_jobs()) {
-#ifdef COMPILER1
-        // Allow repeating compilations for the purpose of benchmarking
-        // compile speed. This is not useful for customers.
-        if (CompilationRepeat != 0) {
-          int compile_count = CompilationRepeat;
-          while (compile_count > 0) {
-            invoke_compiler_on_method(task);
-            nmethod* nm = method->code();
-            if (nm != NULL) {
-              nm->make_zombie();
-              method->clear_code();
-            }
-            compile_count--;
-          }
-        }
-#endif /* COMPILER1 */
         invoke_compiler_on_method(task);
       } else {
         // After compilation is disabled, remove remaining methods from queue
         method->clear_queued_for_compilation();
+        task->set_failure_reason("compilation is disabled");
       }
     }
   }
@@ -1846,7 +1935,7 @@ void CompileBroker::init_compiler_thread_log() {
                      os::file_separator(), thread_id, os::current_process_id());
       }
 
-      fp = fopen(file_name, "at");
+      fp = fopen(file_name, "wt");
       if (fp != NULL) {
         if (LogCompilation && Verbose) {
           tty->print_cr("Opening compilation log %s", file_name);
@@ -1992,19 +2081,19 @@ void CompileBroker::invoke_compiler_on_method(CompileTask* task) {
     MutexLocker locker(Compile_lock, thread);
     system_dictionary_modification_counter = SystemDictionary::number_of_modifications();
   }
-#ifdef COMPILERGRAAL
-  if (comp != NULL && comp->is_graal()) {
-    GraalCompiler* graal = (GraalCompiler*) comp;
+#ifdef COMPILERJVMCI
+  if (comp != NULL && comp->is_jvmci()) {
+    JVMCICompiler* jvmci = (JVMCICompiler*) comp;
 
     TraceTime t1("compilation", &time);
     EventCompilation event;
 
-    GraalEnv env(task, system_dictionary_modification_counter);
-    graal->compile_method(target_handle, osr_bci, &env);
+    JVMCIEnv env(task, system_dictionary_modification_counter);
+    jvmci->compile_method(target_handle, osr_bci, &env);
 
     post_compile(thread, task, event, task->code() != NULL, NULL);
   } else
-#endif // COMPILERGRAAL
+#endif // COMPILERJVMCI
   {
 
     NoHandleMark  nhm;
@@ -2048,6 +2137,7 @@ void CompileBroker::invoke_compiler_on_method(CompileTask* task) {
     compilable = ci_env.compilable();
 
     if (ci_env.failing()) {
+      task->set_failure_reason(ci_env.failure_reason());
       const char* retry_message = ci_env.retry_message();
       if (_compilation_log != NULL) {
         _compilation_log->log_failure(thread, task, ci_env.failure_reason(), retry_message);
@@ -2101,7 +2191,7 @@ void CompileBroker::invoke_compiler_on_method(CompileTask* task) {
 
   // Note that the queued_for_compilation bits are cleared without
   // protection of a mutex. [They were set by the requester thread,
-  // when adding the task to the complie queue -- at which time the
+  // when adding the task to the compile queue -- at which time the
   // compile queue lock was held. Subsequently, we acquired the compile
   // queue lock to get this task off the compile queue; thus (to belabour
   // the point somewhat) our clearing of the bits must be occurring
@@ -2316,18 +2406,18 @@ void CompileBroker::collect_statistics(CompilerThread* thread, elapsedTimer time
 
     if (CITime) {
       int bytes_compiled = method->code_size() + task->num_inlined_bytecodes();
-      GRAAL_ONLY(CompilerStatistics* stats = compiler(task->comp_level())->stats();)
+      JVMCI_ONLY(CompilerStatistics* stats = compiler(task->comp_level())->stats();)
       if (is_osr) {
         _t_osr_compilation.add(time);
         _sum_osr_bytes_compiled += bytes_compiled;
-        GRAAL_ONLY(stats->_osr.update(time, bytes_compiled);)
+        JVMCI_ONLY(stats->_osr.update(time, bytes_compiled);)
       } else {
         _t_standard_compilation.add(time);
         _sum_standard_bytes_compiled += method->code_size() + task->num_inlined_bytecodes();
-        GRAAL_ONLY(stats->_standard.update(time, bytes_compiled);)
+        JVMCI_ONLY(stats->_standard.update(time, bytes_compiled);)
       }
-      GRAAL_ONLY(stats->_nmethods_size += code->total_size();)
-      GRAAL_ONLY(stats->_nmethods_code_size += code->insts_size();)
+      JVMCI_ONLY(stats->_nmethods_size += code->total_size();)
+      JVMCI_ONLY(stats->_nmethods_code_size += code->insts_size();)
     }
 
     if (UsePerfData) {
@@ -2383,7 +2473,7 @@ const char* CompileBroker::compiler_name(int comp_level) {
   }
 }
 
-#ifdef GRAAL
+#if INCLUDE_JVMCI
 void CompileBroker::print_times(AbstractCompiler* comp) {
   CompilerStatistics* stats = comp->stats();
   tty->print_cr("  %s {speed: %d bytes/s; standard: %6.3f s, %d bytes, %d methods; osr: %6.3f s, %d bytes, %d methods; nmethods_size: %d bytes; nmethods_code_size: %d bytes}",
@@ -2396,7 +2486,7 @@ void CompileBroker::print_times(AbstractCompiler* comp) {
 #endif
 
 void CompileBroker::print_times(bool per_compiler, bool aggregate) {
-#ifdef GRAAL
+#if INCLUDE_JVMCI
   elapsedTimer standard_compilation;
   elapsedTimer total_compilation;
   elapsedTimer osr_compilation;
@@ -2445,9 +2535,9 @@ void CompileBroker::print_times(bool per_compiler, bool aggregate) {
   total_compilation.add(osr_compilation);
   total_compilation.add(standard_compilation);
 
-#ifndef COMPILERGRAAL
-  // In hosted mode, print the Graal compiler specific counters manually.
-  GraalCompiler::print_compilation_timers();
+#ifndef COMPILERJVMCI
+  // In hosted mode, print the JVMCI compiler specific counters manually.
+  JVMCICompiler::print_compilation_timers();
 #endif
 #else
   elapsedTimer standard_compilation = CompileBroker::_t_standard_compilation;

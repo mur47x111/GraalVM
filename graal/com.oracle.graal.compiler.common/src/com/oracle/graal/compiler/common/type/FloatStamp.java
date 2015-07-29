@@ -27,8 +27,9 @@ import static com.oracle.graal.compiler.common.calc.FloatConvert.*;
 import java.nio.*;
 import java.util.function.*;
 
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.spi.*;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.BinaryOp;
 import com.oracle.graal.compiler.common.type.ArithmeticOpTable.FloatConvertOp;
@@ -47,6 +48,7 @@ public class FloatStamp extends PrimitiveStamp {
     public FloatStamp(int bits, double lowerBound, double upperBound, boolean nonNaN) {
         super(bits, OPS);
         assert bits == 64 || (bits == 32 && (Double.isNaN(lowerBound) || (float) lowerBound == lowerBound) && (Double.isNaN(upperBound) || (float) upperBound == upperBound));
+        assert Double.isNaN(lowerBound) == Double.isNaN(upperBound);
         this.lowerBound = lowerBound;
         this.upperBound = upperBound;
         this.nonNaN = nonNaN;
@@ -58,7 +60,7 @@ public class FloatStamp extends PrimitiveStamp {
     }
 
     @Override
-    public Stamp illegal() {
+    public Stamp empty() {
         return new FloatStamp(getBits(), Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, true);
     }
 
@@ -77,12 +79,12 @@ public class FloatStamp extends PrimitiveStamp {
             case 64:
                 return JavaConstant.forDouble(buffer.getDouble());
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 
     @Override
-    public boolean isLegal() {
+    public boolean hasValues() {
         return lowerBound <= upperBound || !nonNaN;
     }
 
@@ -108,7 +110,7 @@ public class FloatStamp extends PrimitiveStamp {
             case 64:
                 return metaAccess.lookupJavaType(Double.TYPE);
             default:
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
         }
     }
 
@@ -128,6 +130,10 @@ public class FloatStamp extends PrimitiveStamp {
 
     public boolean isNonNaN() {
         return nonNaN;
+    }
+
+    public boolean isNaN() {
+        return Double.isNaN(lowerBound);
     }
 
     public boolean isUnrestricted() {
@@ -171,9 +177,6 @@ public class FloatStamp extends PrimitiveStamp {
         if (otherStamp == this) {
             return this;
         }
-        if (!(otherStamp instanceof FloatStamp)) {
-            return StampFactory.illegal(Kind.Illegal);
-        }
         FloatStamp other = (FloatStamp) otherStamp;
         assert getBits() == other.getBits();
         double meetUpperBound = meetBounds(upperBound, other.upperBound, Math::max);
@@ -192,9 +195,6 @@ public class FloatStamp extends PrimitiveStamp {
     public Stamp join(Stamp otherStamp) {
         if (otherStamp == this) {
             return this;
-        }
-        if (!(otherStamp instanceof FloatStamp)) {
-            return StampFactory.illegal(Kind.Illegal);
         }
         FloatStamp other = (FloatStamp) otherStamp;
         assert getBits() == other.getBits();
@@ -283,7 +283,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return JavaConstant.forDouble(-value.asDouble());
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -307,7 +307,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return JavaConstant.forDouble(a.asDouble() + b.asDouble());
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -326,7 +326,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return Double.compare(n.asDouble(), -0.0) == 0;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     },
@@ -344,7 +344,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return JavaConstant.forDouble(a.asDouble() - b.asDouble());
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -363,7 +363,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return Double.compare(n.asDouble(), 0.0) == 0;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     },
@@ -381,7 +381,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return JavaConstant.forDouble(a.asDouble() * b.asDouble());
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -400,7 +400,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return Double.compare(n.asDouble(), 1.0) == 0;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     },
@@ -418,7 +418,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return JavaConstant.forDouble(a.asDouble() / b.asDouble());
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -437,7 +437,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return Double.compare(n.asDouble(), 1.0) == 0;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     },
@@ -455,7 +455,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return JavaConstant.forDouble(a.asDouble() % b.asDouble());
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -479,7 +479,7 @@ public class FloatStamp extends PrimitiveStamp {
                     long d = Double.doubleToRawLongBits(value.asDouble());
                     return JavaConstant.forDouble(Double.longBitsToDouble(~d));
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -506,7 +506,7 @@ public class FloatStamp extends PrimitiveStamp {
                     long db = Double.doubleToRawLongBits(b.asDouble());
                     return JavaConstant.forDouble(Double.longBitsToDouble(da & db));
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -524,7 +524,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return Double.doubleToRawLongBits(value.asDouble()) == 0xFFFFFFFFFFFFFFFFL;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     },
@@ -546,7 +546,7 @@ public class FloatStamp extends PrimitiveStamp {
                     long db = Double.doubleToRawLongBits(b.asDouble());
                     return JavaConstant.forDouble(Double.longBitsToDouble(da | db));
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -564,7 +564,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return Double.doubleToRawLongBits(value.asDouble()) == 0L;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     },
@@ -586,7 +586,7 @@ public class FloatStamp extends PrimitiveStamp {
                     long db = Double.doubleToRawLongBits(b.asDouble());
                     return JavaConstant.forDouble(Double.longBitsToDouble(da ^ db));
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -604,7 +604,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return Double.doubleToRawLongBits(value.asDouble()) == 0L;
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
     },
@@ -622,13 +622,16 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return JavaConstant.forDouble(Math.abs(value.asDouble()));
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
         @Override
         public Stamp foldStamp(Stamp s) {
             FloatStamp stamp = (FloatStamp) s;
+            if (stamp.isNaN()) {
+                return stamp;
+            }
             return new FloatStamp(stamp.getBits(), 0, Math.max(-stamp.lowerBound(), stamp.upperBound()), stamp.isNonNaN());
         }
     },
@@ -644,7 +647,7 @@ public class FloatStamp extends PrimitiveStamp {
                 case Double:
                     return JavaConstant.forDouble(Math.sqrt(value.asDouble()));
                 default:
-                    throw GraalInternalError.shouldNotReachHere();
+                    throw JVMCIError.shouldNotReachHere();
             }
         }
 
@@ -666,8 +669,19 @@ public class FloatStamp extends PrimitiveStamp {
 
         @Override
         public Stamp foldStamp(Stamp stamp) {
-            assert stamp instanceof FloatStamp && ((FloatStamp) stamp).getBits() == 32;
-            return StampFactory.forKind(Kind.Int);
+            FloatStamp floatStamp = (FloatStamp) stamp;
+            assert floatStamp.getBits() == 32;
+            boolean mustHaveZero = !floatStamp.isNonNaN();
+            int lowerBound = (int) floatStamp.lowerBound();
+            int upperBound = (int) floatStamp.upperBound();
+            if (mustHaveZero) {
+                if (lowerBound > 0) {
+                    lowerBound = 0;
+                } else if (upperBound < 0) {
+                    upperBound = 0;
+                }
+            }
+            return StampFactory.forInteger(Kind.Int, lowerBound, upperBound);
         }
     },
 
@@ -681,8 +695,19 @@ public class FloatStamp extends PrimitiveStamp {
 
         @Override
         public Stamp foldStamp(Stamp stamp) {
-            assert stamp instanceof FloatStamp && ((FloatStamp) stamp).getBits() == 32;
-            return StampFactory.forKind(Kind.Long);
+            FloatStamp floatStamp = (FloatStamp) stamp;
+            assert floatStamp.getBits() == 32;
+            boolean mustHaveZero = !floatStamp.isNonNaN();
+            long lowerBound = (long) floatStamp.lowerBound();
+            long upperBound = (long) floatStamp.upperBound();
+            if (mustHaveZero) {
+                if (lowerBound > 0) {
+                    lowerBound = 0;
+                } else if (upperBound < 0) {
+                    upperBound = 0;
+                }
+            }
+            return StampFactory.forInteger(Kind.Long, lowerBound, upperBound);
         }
     },
 
@@ -696,8 +721,19 @@ public class FloatStamp extends PrimitiveStamp {
 
         @Override
         public Stamp foldStamp(Stamp stamp) {
-            assert stamp instanceof FloatStamp && ((FloatStamp) stamp).getBits() == 64;
-            return StampFactory.forKind(Kind.Int);
+            FloatStamp floatStamp = (FloatStamp) stamp;
+            assert floatStamp.getBits() == 64;
+            boolean mustHaveZero = !floatStamp.isNonNaN();
+            int lowerBound = (int) floatStamp.lowerBound();
+            int upperBound = (int) floatStamp.upperBound();
+            if (mustHaveZero) {
+                if (lowerBound > 0) {
+                    lowerBound = 0;
+                } else if (upperBound < 0) {
+                    upperBound = 0;
+                }
+            }
+            return StampFactory.forInteger(Kind.Int, lowerBound, upperBound);
         }
     },
 
@@ -711,8 +747,19 @@ public class FloatStamp extends PrimitiveStamp {
 
         @Override
         public Stamp foldStamp(Stamp stamp) {
-            assert stamp instanceof FloatStamp && ((FloatStamp) stamp).getBits() == 64;
-            return StampFactory.forKind(Kind.Long);
+            FloatStamp floatStamp = (FloatStamp) stamp;
+            assert floatStamp.getBits() == 64;
+            boolean mustHaveZero = !floatStamp.isNonNaN();
+            long lowerBound = (long) floatStamp.lowerBound();
+            long upperBound = (long) floatStamp.upperBound();
+            if (mustHaveZero) {
+                if (lowerBound > 0) {
+                    lowerBound = 0;
+                } else if (upperBound < 0) {
+                    upperBound = 0;
+                }
+            }
+            return StampFactory.forInteger(Kind.Long, lowerBound, upperBound);
         }
     },
 
@@ -726,8 +773,9 @@ public class FloatStamp extends PrimitiveStamp {
 
         @Override
         public Stamp foldStamp(Stamp stamp) {
-            assert stamp instanceof FloatStamp && ((FloatStamp) stamp).getBits() == 32;
-            return StampFactory.forKind(Kind.Double);
+            FloatStamp floatStamp = (FloatStamp) stamp;
+            assert floatStamp.getBits() == 32;
+            return StampFactory.forFloat(Kind.Double, floatStamp.lowerBound(), floatStamp.upperBound(), floatStamp.isNonNaN());
         }
     },
 
@@ -741,8 +789,9 @@ public class FloatStamp extends PrimitiveStamp {
 
         @Override
         public Stamp foldStamp(Stamp stamp) {
-            assert stamp instanceof FloatStamp && ((FloatStamp) stamp).getBits() == 64;
-            return StampFactory.forKind(Kind.Float);
+            FloatStamp floatStamp = (FloatStamp) stamp;
+            assert floatStamp.getBits() == 64;
+            return StampFactory.forFloat(Kind.Float, (float) floatStamp.lowerBound(), (float) floatStamp.upperBound(), floatStamp.isNonNaN());
         }
     });
 }

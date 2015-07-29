@@ -26,7 +26,8 @@ import java.io.*;
 import java.util.*;
 import java.util.Map.Entry;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.java.*;

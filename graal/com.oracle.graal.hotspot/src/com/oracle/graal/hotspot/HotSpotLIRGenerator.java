@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,10 +22,11 @@
  */
 package com.oracle.graal.hotspot;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
-import com.oracle.graal.hotspot.HotSpotVMConfig.CompressEncoding;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.hotspot.HotSpotVMConfig.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.hotspot.meta.*;
 import com.oracle.graal.hotspot.nodes.*;
 import com.oracle.graal.lir.StandardOp.SaveRegistersOp;
@@ -60,7 +61,7 @@ public interface HotSpotLIRGenerator extends LIRGeneratorTool {
      * @param saveRegisterOp saved registers
      */
     default void emitLeaveCurrentStackFrame(SaveRegistersOp saveRegisterOp) {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     /**
@@ -70,7 +71,7 @@ public interface HotSpotLIRGenerator extends LIRGeneratorTool {
      * @param initialInfo
      */
     default void emitLeaveDeoptimizedStackFrame(Value frameSize, Value initialInfo) {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     /**
@@ -82,7 +83,7 @@ public interface HotSpotLIRGenerator extends LIRGeneratorTool {
      * @param saveRegisterOp
      */
     default void emitEnterUnpackFramesStackFrame(Value framePc, Value senderSp, Value senderFp, SaveRegistersOp saveRegisterOp) {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     /**
@@ -91,7 +92,7 @@ public interface HotSpotLIRGenerator extends LIRGeneratorTool {
      * @param saveRegisterOp
      */
     default void emitLeaveUnpackFramesStackFrame(SaveRegistersOp saveRegisterOp) {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     /**
@@ -103,7 +104,7 @@ public interface HotSpotLIRGenerator extends LIRGeneratorTool {
      * @param initialInfo
      */
     default void emitPushInterpreterFrame(Value frameSize, Value framePc, Value senderSp, Value initialInfo) {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     /**
@@ -114,7 +115,7 @@ public interface HotSpotLIRGenerator extends LIRGeneratorTool {
      * @return a {@code Deoptimization::UnrollBlock} pointer
      */
     default Value emitUncommonTrapCall(Value trapRequest, SaveRegistersOp saveRegisterOp) {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     /**
@@ -124,15 +125,15 @@ public interface HotSpotLIRGenerator extends LIRGeneratorTool {
      * @return a {@code Deoptimization::UnrollBlock} pointer
      */
     default Value emitDeoptimizationFetchUnrollInfoCall(SaveRegistersOp saveRegisterOp) {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     default Value emitCardTableShift() {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     default Value emitCardTableAddress() {
-        throw GraalInternalError.unimplemented();
+        throw JVMCIError.unimplemented();
     }
 
     /**
@@ -145,4 +146,6 @@ public interface HotSpotLIRGenerator extends LIRGeneratorTool {
     Value emitCompress(Value pointer, CompressEncoding encoding, boolean nonNull);
 
     Value emitUncompress(Value pointer, CompressEncoding encoding, boolean nonNull);
+
+    void emitPrefetchAllocate(Value address);
 }

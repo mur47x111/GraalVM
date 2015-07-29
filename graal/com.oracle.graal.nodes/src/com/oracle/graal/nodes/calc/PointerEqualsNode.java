@@ -22,6 +22,8 @@
  */
 package com.oracle.graal.nodes.calc;
 
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
@@ -38,6 +40,14 @@ public class PointerEqualsNode extends CompareNode implements BinaryCommutative<
 
     public PointerEqualsNode(ValueNode x, ValueNode y) {
         this(TYPE, x, y);
+    }
+
+    public static LogicNode create(ValueNode x, ValueNode y) {
+        LogicNode result = findSynonym(x, y);
+        if (result != null) {
+            return result;
+        }
+        return new PointerEqualsNode(x, y);
     }
 
     protected PointerEqualsNode(NodeClass<? extends PointerEqualsNode> c, ValueNode x, ValueNode y) {
@@ -72,5 +82,43 @@ public class PointerEqualsNode extends CompareNode implements BinaryCommutative<
     @Override
     protected CompareNode duplicateModified(ValueNode newX, ValueNode newY) {
         return new PointerEqualsNode(newX, newY);
+    }
+
+    @Override
+    public Stamp getSucceedingStampForX(boolean negated) {
+        if (!negated) {
+            Stamp xStamp = getX().stamp();
+            Stamp newStamp = xStamp.join(getY().stamp());
+            if (!newStamp.equals(xStamp)) {
+                return newStamp;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public Stamp getSucceedingStampForY(boolean negated) {
+        if (!negated) {
+            Stamp yStamp = getY().stamp();
+            Stamp newStamp = yStamp.join(getX().stamp());
+            if (!newStamp.equals(yStamp)) {
+                return newStamp;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public TriState tryFold(Stamp xStampGeneric, Stamp yStampGeneric) {
+        if (xStampGeneric instanceof ObjectStamp && yStampGeneric instanceof ObjectStamp) {
+            ObjectStamp xStamp = (ObjectStamp) xStampGeneric;
+            ObjectStamp yStamp = (ObjectStamp) yStampGeneric;
+            if (xStamp.alwaysDistinct(yStamp)) {
+                return TriState.FALSE;
+            } else if (xStamp.neverDistinct(yStamp)) {
+                return TriState.TRUE;
+            }
+        }
+        return TriState.UNKNOWN;
     }
 }

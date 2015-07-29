@@ -22,12 +22,12 @@
  */
 package com.oracle.graal.replacements.amd64;
 
+import jdk.internal.jvmci.code.*;
+import com.oracle.graal.debug.*;
 import static com.oracle.graal.nodes.extended.BranchProbabilityNode.*;
 import static com.oracle.graal.replacements.SnippetTemplate.*;
 
-import com.oracle.graal.api.code.*;
 import com.oracle.graal.api.replacements.*;
-import com.oracle.graal.debug.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.spi.*;

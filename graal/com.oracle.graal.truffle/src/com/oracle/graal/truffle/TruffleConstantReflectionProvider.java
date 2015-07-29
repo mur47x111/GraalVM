@@ -22,7 +22,8 @@
  */
 package com.oracle.graal.truffle;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.nodes.Node.Child;
 import com.oracle.truffle.api.nodes.Node.Children;
@@ -52,20 +53,25 @@ public class TruffleConstantReflectionProvider implements ConstantReflectionProv
         return graalConstantReflection.readConstantArrayElement(array, index);
     }
 
+    public JavaConstant readConstantArrayElementForOffset(JavaConstant array, long offset) {
+        return graalConstantReflection.readConstantArrayElementForOffset(array, offset);
+    }
+
     public JavaConstant readConstantFieldValue(JavaField field0, JavaConstant receiver) {
         ResolvedJavaField field = (ResolvedJavaField) field0;
         if (!field.isStatic() && receiver.isNonNull()) {
             JavaType fieldType = field.getType();
             if (field.isFinal() || field.getAnnotation(CompilationFinal.class) != null ||
                             (fieldType.getKind() == Kind.Object && (field.getAnnotation(Child.class) != null || field.getAnnotation(Children.class) != null))) {
-                JavaConstant constant = graalConstantReflection.readFieldValue(field, receiver);
-                assert verifyFieldValue(field, constant);
-                if (constant.isNonNull() && fieldType.getKind() == Kind.Object && fieldType instanceof ResolvedJavaType && ((ResolvedJavaType) fieldType).isArray() &&
+                final JavaConstant constant;
+                if (fieldType.getKind() == Kind.Object && fieldType instanceof ResolvedJavaType && ((ResolvedJavaType) fieldType).isArray() &&
                                 (field.getAnnotation(CompilationFinal.class) != null || field.getAnnotation(Children.class) != null)) {
-                    return graalConstantReflection.readStableFieldValue(field, receiver, true);
+                    constant = graalConstantReflection.readStableFieldValue(field, receiver, true);
                 } else {
-                    return graalConstantReflection.readFieldValue(field, receiver);
+                    constant = graalConstantReflection.readFieldValue(field, receiver);
                 }
+                assert verifyFieldValue(field, constant);
+                return constant;
             }
         } else if (field.isStatic()) {
             if (field.getAnnotation(CompilationFinal.class) != null) {

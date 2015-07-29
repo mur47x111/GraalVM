@@ -22,10 +22,10 @@
  */
 package com.oracle.graal.replacements.test;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.api.meta.JavaTypeProfile.ProfiledType;
-import com.oracle.graal.api.meta.ProfilingInfo.TriState;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.meta.JavaTypeProfile.*;
+
 import com.oracle.graal.compiler.test.*;
 import com.oracle.graal.nodes.*;
 

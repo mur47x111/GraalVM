@@ -22,49 +22,29 @@
  */
 package com.oracle.graal.hotspot.replacements;
 
-import java.lang.reflect.*;
-import java.util.zip.*;
-
-import sun.misc.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.service.*;
 import sun.reflect.*;
+import sun.reflect.ConstantPool;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.api.runtime.*;
 import com.oracle.graal.debug.external.*;
 import com.oracle.graal.hotspot.bridge.*;
 import com.oracle.graal.nodes.spi.*;
-import com.oracle.graal.replacements.*;
 
 @ServiceProvider(ReplacementsProvider.class)
 public class HotSpotSubstitutions implements ReplacementsProvider {
 
-    static class NamedType implements Type {
-        private final String name;
-
-        public NamedType(String name) {
-            this.name = name;
-        }
-
-        @Override
-        public String toString() {
-            return name;
-        }
-    }
-
     @Override
     public void registerReplacements(MetaAccessProvider metaAccess, LoweringProvider loweringProvider, SnippetReflectionProvider snippetReflection, Replacements replacements, TargetDescription target) {
-        replacements.registerSubstitutions(Object.class, ObjectSubstitutions.class);
         replacements.registerSubstitutions(System.class, SystemSubstitutions.class);
         replacements.registerSubstitutions(Thread.class, ThreadSubstitutions.class);
-        replacements.registerSubstitutions(Unsafe.class, UnsafeSubstitutions.class);
-        replacements.registerSubstitutions(Class.class, HotSpotClassSubstitutions.class);
-        replacements.registerSubstitutions(CRC32.class, CRC32Substitutions.class);
         replacements.registerSubstitutions(Reflection.class, ReflectionSubstitutions.class);
+        replacements.registerSubstitutions(ConstantPool.class, ConstantPoolSubstitutions.class);
         replacements.registerSubstitutions(CompilerToVMImpl.class, CompilerToVMImplSubstitutions.class);
-        replacements.registerSubstitutions(new NamedType("com.sun.crypto.provider.AESCrypt"), AESCryptSubstitutions.class);
-        replacements.registerSubstitutions(new NamedType("com.sun.crypto.provider.CipherBlockChaining"), CipherBlockChainingSubstitutions.class);
         replacements.registerSubstitutions(CompilerDecision.class, CompilerDecisionSubstitutions.class);
     }
 }

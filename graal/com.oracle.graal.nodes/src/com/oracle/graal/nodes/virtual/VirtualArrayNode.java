@@ -24,23 +24,27 @@ package com.oracle.graal.nodes.virtual;
 
 import java.nio.*;
 
+import jdk.internal.jvmci.meta.*;
 import sun.misc.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo(nameTemplate = "VirtualArray {p#componentType/s}[{p#length}]")
-public final class VirtualArrayNode extends VirtualObjectNode implements ArrayLengthProvider {
+public class VirtualArrayNode extends VirtualObjectNode implements ArrayLengthProvider {
 
     public static final NodeClass<VirtualArrayNode> TYPE = NodeClass.create(VirtualArrayNode.class);
     protected final ResolvedJavaType componentType;
     protected final int length;
 
     public VirtualArrayNode(ResolvedJavaType componentType, int length) {
-        super(TYPE, componentType.getArrayClass(), true);
+        this(TYPE, componentType, length);
+    }
+
+    protected VirtualArrayNode(NodeClass<? extends VirtualObjectNode> c, ResolvedJavaType componentType, int length) {
+        super(c, componentType.getArrayClass(), true);
         this.componentType = componentType;
         this.length = length;
     }
@@ -80,6 +84,10 @@ public final class VirtualArrayNode extends VirtualObjectNode implements ArrayLe
 
     @Override
     public int entryIndexForOffset(long constantOffset, Kind expectedEntryKind) {
+        return entryIndexForOffset(constantOffset, expectedEntryKind, componentType, length);
+    }
+
+    public static int entryIndexForOffset(long constantOffset, Kind expectedEntryKind, ResolvedJavaType componentType, int length) {
         int baseOffset;
         int indexScale;
         switch (componentType.getKind()) {

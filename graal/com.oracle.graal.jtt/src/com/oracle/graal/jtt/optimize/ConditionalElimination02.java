@@ -24,9 +24,10 @@ package com.oracle.graal.jtt.optimize;
 
 import java.util.*;
 
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.jtt.*;
 
 public class ConditionalElimination02 extends JTTTest {

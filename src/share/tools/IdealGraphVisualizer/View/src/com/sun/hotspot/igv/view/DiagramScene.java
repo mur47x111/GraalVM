@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,13 @@ package com.sun.hotspot.igv.view;
 
 import com.sun.hotspot.igv.data.ChangedListener;
 import com.sun.hotspot.igv.data.ControllableChangedListener;
+import com.sun.hotspot.igv.data.InputBlock;
+import com.sun.hotspot.igv.data.InputNode;
 import com.sun.hotspot.igv.data.Pair;
 import com.sun.hotspot.igv.data.Properties;
+import com.sun.hotspot.igv.data.services.Scheduler;
 import com.sun.hotspot.igv.graph.*;
+import com.sun.hotspot.igv.hierarchicallayout.HierarchicalClusterLayoutManager;
 import com.sun.hotspot.igv.hierarchicallayout.HierarchicalLayoutManager;
 import com.sun.hotspot.igv.layout.LayoutGraph;
 import com.sun.hotspot.igv.selectioncoordinator.SelectionCoordinator;
@@ -71,6 +75,7 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
     private Lookup lookup;
     private InstanceContent content;
     private Action[] actions;
+    private Action[] actionsWithSelection;
     private LayerWidget connectionLayer;
     private JScrollPane scrollPane;
     private UndoRedo.Manager undoRedoManager;
@@ -100,7 +105,7 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
     public static final float ZOOM_MAX_FACTOR = 3.0f;
     public static final float ZOOM_MIN_FACTOR = 0.0f;//0.15f;
     public static final float ZOOM_INCREMENT = 1.5f;
-    public static final int SLOT_OFFSET = 6;
+    public static final int SLOT_OFFSET = 8;
     public static final int ANIMATION_LIMIT = 40;
     
     private PopupMenuProvider popupMenuProvider = new PopupMenuProvider() {
@@ -110,6 +115,7 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
             return DiagramScene.this.createPopupMenu();
         }
     };
+
     private RectangularSelectDecorator rectangularSelectDecorator = new RectangularSelectDecorator() {
 
         @Override
@@ -374,9 +380,10 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
         }
     };
 
-    public DiagramScene(Action[] actions, DiagramViewModel model) {
+    public DiagramScene(Action[] actions, Action[] actionsWithSelection, DiagramViewModel model) {
 
         this.actions = actions;
+        this.actionsWithSelection = actionsWithSelection;
 
         content = new InstanceContent();
         lookup = new AbstractLookup(content);
@@ -399,6 +406,9 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
         blockLayer = new LayerWidget(this);
         this.addChild(blockLayer);
 
+        connectionLayer = new LayerWidget(this);
+        this.addChild(connectionLayer);
+
         mainLayer = new LayerWidget(this);
         this.addChild(mainLayer);
 
@@ -409,9 +419,6 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
         bottomRight = new Widget(this);
         bottomRight.setPreferredLocation(new Point(-BORDER_SIZE, -BORDER_SIZE));
         this.addChild(bottomRight);
-
-        connectionLayer = new LayerWidget(this);
-        this.addChild(connectionLayer);
 
         LayerWidget selectionLayer = new LayerWidget(this);
         this.addChild(selectionLayer);
@@ -451,12 +458,27 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
     }
     
     public boolean isAllVisible() {
-        return getModel().getHiddenNodes().size() == 0;
+        return getModel().getHiddenNodes().isEmpty();
     }
 
     public Action createGotoAction(final Figure f) {
         final DiagramScene diagramScene = this;
-        Action a = new AbstractAction() {
+        String name = f.getLines()[0];
+
+        name += " (";
+
+        if (f.getCluster() != null) {
+            name += "B" + f.getCluster().toString();
+        }
+        final boolean hidden = !this.getWidget(f, FigureWidget.class).isVisible();
+        if (hidden) {
+            if (f.getCluster() != null) {
+                name += ", ";
+            }
+            name += "hidden";
+        }
+        name += ")";
+        Action a = new AbstractAction(name, new ColorIcon(f.getColor())) {
 
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -465,16 +487,6 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
         };
 
         a.setEnabled(true);
-        a.putValue(Action.SMALL_ICON, new ColorIcon(f.getColor()));
-        String name = f.getLines()[0];
-
-        name += " (";
-
-        if (!this.getWidget(f, FigureWidget.class).isVisible()) {
-            name += "hidden";
-        }
-        name += ")";
-        a.putValue(Action.NAME, name);
         return a;
     }
 
@@ -502,6 +514,14 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
         }
 
         Diagram d = getModel().getDiagramToView();
+        
+        if (d.getGraph().getBlocks().isEmpty()) {
+            Scheduler s = Lookup.getDefault().lookup(Scheduler.class);
+            d.getGraph().clearBlocks();
+            s.schedule(d.getGraph());
+            d.getGraph().ensureNodesInBlocks();
+            d.updateBlocks();
+        }
 
         for (Figure f : d.getFigures()) {
             FigureWidget w = new FigureWidget(f, hoverAction, selectAction, this, mainLayer);
@@ -529,6 +549,15 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
             }
         }
         
+        if (getModel().getShowBlocks()) {
+            for (InputBlock bn : d.getGraph().getBlocks()) {
+                BlockWidget w = new BlockWidget(this, d, bn);
+                w.setVisible(false);
+                this.addObject(bn, w);
+                blockLayer.addChild(w);
+            }
+        }
+        
         rebuilding = false;
         this.smallUpdate(true);
     }
@@ -538,8 +567,6 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
     }
 
     private void smallUpdate(boolean relayout) {
-
-        System.out.println("smallUpdate " + relayout);
         this.updateHiddenNodes(model.getHiddenNodes(), relayout);
         boolean b = this.getUndoRedoEnabled();
         this.setUndoRedoEnabled(false);
@@ -559,8 +586,6 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
     }
 
     private void relayout(Set<Widget> oldVisibleWidgets) {
-        System.out.println("relayout called with old visible widgets: " + oldVisibleWidgets);
-
         Diagram diagram = getModel().getDiagramToView();
 
         HashSet<Figure> figures = new HashSet<>();
@@ -580,16 +605,25 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
             }
         }
 
-        HierarchicalLayoutManager manager = new HierarchicalLayoutManager(HierarchicalLayoutManager.Combine.SAME_OUTPUTS);
-        manager.setMaxLayerLength(10);
-        manager.doLayout(new LayoutGraph(edges, figures));
+        if (getModel().getShowBlocks()) {
+            HierarchicalClusterLayoutManager m = new HierarchicalClusterLayoutManager(HierarchicalLayoutManager.Combine.SAME_OUTPUTS);
+            HierarchicalLayoutManager manager = new HierarchicalLayoutManager(HierarchicalLayoutManager.Combine.SAME_OUTPUTS);
+            manager.setMaxLayerLength(9);
+            manager.setMinLayerDifference(3);
+            m.setManager(manager);
+            m.setSubManager(new HierarchicalLayoutManager(HierarchicalLayoutManager.Combine.SAME_OUTPUTS));
+            m.doLayout(new LayoutGraph(edges, figures));
+        } else {
+            HierarchicalLayoutManager manager = new HierarchicalLayoutManager(HierarchicalLayoutManager.Combine.SAME_OUTPUTS);
+            manager.setMaxLayerLength(10);
+            manager.doLayout(new LayoutGraph(edges, figures));
+        }
+        
         relayoutWithoutLayout(oldVisibleWidgets);
     }
     private Set<Pair<Point, Point>> lineCache = new HashSet<>();
 
     private void relayoutWithoutLayout(Set<Widget> oldVisibleWidgets) {
-
-        System.out.println("relayout without layout with visible widgets: " + oldVisibleWidgets);
 
         Diagram diagram = getModel().getDiagramToView();
 
@@ -615,6 +649,17 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
                         maxX = Math.max(maxX, p.x);
                         maxY = Math.max(maxY, p.y);
                     }
+                }
+            }
+        }
+        
+        if (getModel().getShowBlocks()) {
+            for (Block b : diagram.getBlocks()) {
+                BlockWidget w = getWidget(b.getInputBlock());
+                if (w != null && w.isVisible()) {
+                    Rectangle r = b.getBounds();
+                    maxX = Math.max(maxX, r.x + r.width);
+                    maxY = Math.max(maxY, r.y + r.height);
                 }
             }
         }
@@ -671,6 +716,23 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
                 } else {
                     w.setPreferredLocation(p2);
                     animator.animatePreferredLocation(w, p2);
+                }
+            }
+        }
+        
+        if (getModel().getShowBlocks()) {
+            for (Block b : diagram.getBlocks()) {
+                BlockWidget w = getWidget(b.getInputBlock());
+                if (w != null && w.isVisible()) {
+                    Point location = new Point(b.getBounds().x + offx2, b.getBounds().y + offy2);
+                    Rectangle r = new Rectangle(location.x, location.y, b.getBounds().width, b.getBounds().height);
+                    
+                    if ((visibleFigureCount <= ANIMATION_LIMIT && oldVisibleWidgets != null && oldVisibleWidgets.contains(w))) {
+                        animator.animatePreferredBounds(w, r);
+                    } else {
+                        w.setPreferredBounds(r);
+                        animator.animatePreferredBounds(w, r);
+                    }
                 }
             }
         }
@@ -958,17 +1020,25 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
 
     private void updateHiddenNodes(Set<Integer> newHiddenNodes, boolean doRelayout) {
 
-        System.out.println("newHiddenNodes: " + newHiddenNodes);
-
         Diagram diagram = getModel().getDiagramToView();
         assert diagram != null;
 
+        Set<InputBlock> visibleBlocks = new HashSet<InputBlock>();
         Set<Widget> oldVisibleWidgets = new HashSet<>();
 
         for (Figure f : diagram.getFigures()) {
             FigureWidget w = getWidget(f);
             if (w != null && w.isVisible()) {
                 oldVisibleWidgets.add(w);
+            }
+        }
+        
+        if (getModel().getShowBlocks()) {
+            for (InputBlock b : diagram.getGraph().getBlocks()) {
+                BlockWidget w = getWidget(b);
+                if (w.isVisible()) {
+                    oldVisibleWidgets.add(w);
+                }
             }
         }
 
@@ -980,6 +1050,9 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
             if (!hiddenAfter) {
                 // Figure is shown
                 w.setVisible(true);
+                for (InputNode n : f.getSource().getSourceNodes()) {
+                    visibleBlocks.add(diagram.getGraph().getBlock(n));
+                }
             } else {
                 // Figure is hidden
                 w.setVisible(false);
@@ -1005,6 +1078,9 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
 
                     if (b) {
                         w.setBoundary(true);
+                        for (InputNode n : f.getSource().getSourceNodes()) {
+                            visibleBlocks.add(diagram.getGraph().getBlock(n));
+                        }
                         boundaries.add(w);
                     }
                 }
@@ -1013,6 +1089,22 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
             for (FigureWidget w : boundaries) {
                 if (w.isBoundary()) {
                     w.setVisible(true);
+                }
+            }
+        }
+        
+        if (getModel().getShowBlocks()) {
+            for (InputBlock b : diagram.getGraph().getBlocks()) {
+
+                boolean visibleAfter = visibleBlocks.contains(b);
+
+                BlockWidget w = getWidget(b);
+                if (visibleAfter) {
+                    // Block must be shown
+                    w.setVisible(true);
+                } else {
+                    // Block must be hidden
+                    w.setVisible(false);
                 }
             }
         }
@@ -1027,7 +1119,7 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
     private void showFigure(Figure f) {
         HashSet<Integer> newHiddenNodes = new HashSet<>(getModel().getHiddenNodes());
         newHiddenNodes.removeAll(f.getSource().getSourceNodesAsSet());
-        updateHiddenNodes(newHiddenNodes, true);
+        this.model.setHiddenNodes(newHiddenNodes);
     }
 
     public void show(final Figure f) {
@@ -1062,7 +1154,12 @@ public class DiagramScene extends ObjectScene implements DiagramViewer {
 
     public JPopupMenu createPopupMenu() {
         JPopupMenu menu = new JPopupMenu();
-        for (Action a : actions) {
+        
+        Action[] currentActions = actionsWithSelection;
+        if (this.getSelectedObjects().isEmpty()) {
+            currentActions = actions;
+        }
+        for (Action a : currentActions) {
             if (a == null) {
                 menu.addSeparator();
             } else {

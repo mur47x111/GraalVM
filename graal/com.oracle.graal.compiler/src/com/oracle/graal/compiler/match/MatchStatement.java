@@ -22,22 +22,22 @@
  */
 package com.oracle.graal.compiler.match;
 
-import static com.oracle.graal.compiler.GraalDebugConfig.*;
+import static com.oracle.graal.debug.JVMCIDebugConfig.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.gen.*;
 import com.oracle.graal.compiler.match.MatchPattern.MatchResultCode;
 import com.oracle.graal.compiler.match.MatchPattern.Result;
-import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
-import com.oracle.graal.nodes.*;
 
 /**
  * A named {@link MatchPattern} along with a {@link MatchGenerator} that can be evaluated to replace
- * one or more {@link ValueNode}s with a single {@link Value}.
+ * one or more {@link Node}s with a single {@link Value}.
  */
 
 public class MatchStatement {
@@ -80,7 +80,7 @@ public class MatchStatement {
      * @return true if the statement matched something and set a {@link ComplexMatchResult} to be
      *         evaluated by the NodeLIRBuilder.
      */
-    public boolean generate(NodeLIRBuilder builder, int index, ValueNode node, List<ValueNode> nodes) {
+    public boolean generate(NodeLIRBuilder builder, int index, Node node, List<Node> nodes) {
         assert index == nodes.indexOf(node);
         // Check that the basic shape matches
         Result result = pattern.matchShape(node, this);
@@ -115,8 +115,7 @@ public class MatchStatement {
 
     /**
      * @param context
-     * @return the ValueNodes captured by the match rule in the order expected by the
-     *         generatorMethod
+     * @return the Nodes captured by the match rule in the order expected by the generatorMethod
      */
     private Object[] buildArgList(MatchContext context) {
         Object[] result = new Object[arguments.length];
@@ -126,14 +125,14 @@ public class MatchStatement {
             } else {
                 result[i] = context.namedNode(arguments[i]);
                 if (result[i] == null) {
-                    throw new GraalGraphInternalError("Can't find named node %s", arguments[i]);
+                    throw new GraalGraphJVMCIError("Can't find named node %s", arguments[i]);
                 }
             }
         }
         return result;
     }
 
-    public String formatMatch(ValueNode root) {
+    public String formatMatch(Node root) {
         return pattern.formatMatch(root);
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,12 +22,12 @@
  */
 package com.oracle.graal.hotspot.meta;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
-import com.oracle.graal.graph.*;
-import com.oracle.graal.hotspot.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.address.*;
 import com.oracle.graal.nodes.spi.*;
 
 /**
@@ -39,7 +39,7 @@ public interface HotSpotLoweringProvider extends LoweringProvider {
 
     int arrayScalingFactor(Kind kind);
 
-    IndexedLocationNode createArrayLocation(Graph graph, Kind elementKind, ValueNode index, boolean initialization);
+    AddressNode createArrayAddress(StructuredGraph graph, ValueNode array, Kind elementKind, ValueNode index);
 
     Stamp loadStamp(Stamp stamp, Kind kind);
 

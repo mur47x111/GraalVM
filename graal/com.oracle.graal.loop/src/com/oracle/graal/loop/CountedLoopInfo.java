@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,9 +23,9 @@
 package com.oracle.graal.loop;
 
 import static com.oracle.graal.loop.MathUtil.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.loop.InductionVariable.Direction;
 import com.oracle.graal.nodes.*;
@@ -56,14 +56,21 @@ public class CountedLoopInfo {
         StructuredGraph graph = iv.valueNode().graph();
         Stamp stamp = iv.valueNode().stamp();
         ValueNode range = sub(graph, end, iv.initNode());
-        if (oneOff) {
-            if (iv.direction() == Direction.Up) {
-                range = add(graph, range, ConstantNode.forIntegerStamp(stamp, 1, graph));
-            } else {
-                range = sub(graph, range, ConstantNode.forIntegerStamp(stamp, 1, graph));
-            }
+
+        ValueNode oneDirection;
+        if (iv.direction() == Direction.Up) {
+            oneDirection = ConstantNode.forIntegerStamp(stamp, 1, graph);
+        } else {
+            assert iv.direction() == Direction.Down;
+            oneDirection = ConstantNode.forIntegerStamp(stamp, -1, graph);
         }
-        ValueNode div = divBefore(graph, loop.entryPoint(), range, iv.strideNode());
+        if (oneOff) {
+            range = add(graph, range, oneDirection);
+        }
+        // round-away-from-zero divison: (range + stride -/+ 1) / stride
+        ValueNode denominator = add(graph, sub(graph, range, oneDirection), iv.strideNode());
+        ValueNode div = divBefore(graph, loop.entryPoint(), denominator, iv.strideNode());
+
         if (assumePositive) {
             return div;
         }
@@ -76,6 +83,7 @@ public class CountedLoopInfo {
     }
 
     public long constantMaxTripCount() {
+        assert iv.direction() != null;
         long off = oneOff ? iv.direction() == Direction.Up ? 1 : -1 : 0;
         long max = (((ConstantNode) end).asJavaConstant().asLong() + off - iv.constantInit()) / iv.constantStride();
         return Math.max(0, max);

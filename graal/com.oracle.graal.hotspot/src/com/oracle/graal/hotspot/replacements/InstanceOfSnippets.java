@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,28 +22,27 @@
  */
 package com.oracle.graal.hotspot.replacements;
 
-import static com.oracle.graal.api.meta.DeoptimizationAction.*;
-import static com.oracle.graal.api.meta.DeoptimizationReason.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.hotspot.*;
+import jdk.internal.jvmci.meta.*;
+import jdk.internal.jvmci.options.*;
 import static com.oracle.graal.hotspot.replacements.HotSpotReplacementsUtil.*;
 import static com.oracle.graal.hotspot.replacements.InstanceOfSnippets.Options.*;
 import static com.oracle.graal.hotspot.replacements.TypeCheckSnippetUtils.*;
 import static com.oracle.graal.nodes.extended.BranchProbabilityNode.*;
+import static jdk.internal.jvmci.meta.DeoptimizationAction.*;
+import static jdk.internal.jvmci.meta.DeoptimizationReason.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.api.meta.ProfilingInfo.TriState;
-import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.hotspot.meta.*;
 import com.oracle.graal.hotspot.nodes.*;
-import com.oracle.graal.hotspot.nodes.type.*;
 import com.oracle.graal.hotspot.replacements.TypeCheckSnippetUtils.Hints;
 import com.oracle.graal.hotspot.word.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
-import com.oracle.graal.options.*;
 import com.oracle.graal.replacements.*;
 import com.oracle.graal.replacements.Snippet.ConstantParameter;
 import com.oracle.graal.replacements.Snippet.VarargsParameter;
@@ -61,33 +60,9 @@ import com.oracle.graal.replacements.nodes.*;
  */
 public class InstanceOfSnippets implements Snippets {
 
-    private static final double COMPILED_VS_INTERPRETER_SPEEDUP = 50;
-    private static final double INSTANCEOF_DEOPT_SPEEDUP = 1.01; // generous 1% speedup
-
-    private static final int DEOPT_THRESHOLD_FACTOR = (int) (COMPILED_VS_INTERPRETER_SPEEDUP / (INSTANCEOF_DEOPT_SPEEDUP - 1.0));
-
     /**
-     * Gets the minimum required probability of a profiled instanceof hitting one the profiled types
-     * for use of the {@linkplain #instanceofWithProfile deoptimizing} snippet. The value is
-     * computed to be an order of greater than the configured compilation threshold by a
-     * {@linkplain #DEOPT_THRESHOLD_FACTOR factor}.
-     *
-     * <p>
-     * This factor is such that the additional executions we get from using the deoptimizing snippet
-     * (({@linkplain #INSTANCEOF_DEOPT_SPEEDUP speedup} - 1) / probability threshold) is greater
-     * than the time lost during re-interpretation ({@linkplain #COMPILED_VS_INTERPRETER_SPEEDUP
-     * compiled code speedup} &times compilation threshold).
-     * </p>
-     */
-    public static double hintHitProbabilityThresholdForDeoptimizingSnippet(long compilationThreshold) {
-        return 1.0D - (1.0D / (compilationThreshold * DEOPT_THRESHOLD_FACTOR));
-    }
-
-    /**
-     * A test against a set of hints derived from a profile with very close to 100% precise coverage
-     * of seen types. This snippet deoptimizes on hint miss paths.
-     *
-     * @see #hintHitProbabilityThresholdForDeoptimizingSnippet(long)
+     * A test against a set of hints derived from a profile with 100% precise coverage of seen
+     * types. This snippet deoptimizes on hint miss paths.
      */
     @Snippet
     public static Object instanceofWithProfile(Object object, @VarargsParameter KlassPointer[] hints, @VarargsParameter boolean[] hintIsPositive, Object trueValue, Object falseValue,
@@ -112,6 +87,7 @@ public class InstanceOfSnippets implements Snippets {
                 hintsHit.inc();
                 return positive ? trueValue : falseValue;
             }
+            hintsMiss.inc();
         }
         // This maybe just be a rare event but it might also indicate a phase change
         // in the application. Ideally we want to use DeoptimizationAction.None for
@@ -180,6 +156,7 @@ public class InstanceOfSnippets implements Snippets {
                 return positive ? trueValue : falseValue;
             }
         }
+        hintsMiss.inc();
         if (!checkSecondarySubType(hub, objectHub)) {
             return falseValue;
         }
@@ -241,59 +218,67 @@ public class InstanceOfSnippets implements Snippets {
         private final SnippetInfo instanceofWithProfile = snippet(InstanceOfSnippets.class, "instanceofWithProfile");
         private final SnippetInfo instanceofExact = snippet(InstanceOfSnippets.class, "instanceofExact");
         private final SnippetInfo instanceofPrimary = snippet(InstanceOfSnippets.class, "instanceofPrimary");
-        private final SnippetInfo instanceofSecondary = snippet(InstanceOfSnippets.class, "instanceofSecondary");
-        private final SnippetInfo instanceofDynamic = snippet(InstanceOfSnippets.class, "instanceofDynamic");
-        private final SnippetInfo isAssignableFrom = snippet(InstanceOfSnippets.class, "isAssignableFrom");
-        private final long compilationThreshold;
+        private final SnippetInfo instanceofSecondary = snippet(InstanceOfSnippets.class, "instanceofSecondary", SECONDARY_SUPER_CACHE_LOCATION);
+        private final SnippetInfo instanceofDynamic = snippet(InstanceOfSnippets.class, "instanceofDynamic", SECONDARY_SUPER_CACHE_LOCATION);
+        private final SnippetInfo isAssignableFrom = snippet(InstanceOfSnippets.class, "isAssignableFrom", SECONDARY_SUPER_CACHE_LOCATION);
 
-        public Templates(HotSpotProviders providers, TargetDescription target, long compilationThreshold) {
+        public Templates(HotSpotProviders providers, TargetDescription target) {
             super(providers, providers.getSnippetReflection(), target);
-            this.compilationThreshold = compilationThreshold;
         }
 
         @Override
         protected Arguments makeArguments(InstanceOfUsageReplacer replacer, LoweringTool tool) {
+            Stamp hubStamp = tool.getStampProvider().createHubStamp(true);
             if (replacer.instanceOf instanceof InstanceOfNode) {
                 InstanceOfNode instanceOf = (InstanceOfNode) replacer.instanceOf;
                 ValueNode object = instanceOf.getValue();
                 Assumptions assumptions = instanceOf.graph().getAssumptions();
                 TypeCheckHints hintInfo = new TypeCheckHints(instanceOf.type(), instanceOf.profile(), assumptions, TypeCheckMinProfileHitProbability.getValue(), TypeCheckMaxHints.getValue());
                 final HotSpotResolvedObjectType type = (HotSpotResolvedObjectType) instanceOf.type();
-                ConstantNode hub = ConstantNode.forConstant(KlassPointerStamp.klassNonNull(), type.klass(), providers.getMetaAccess(), instanceOf.graph());
+                ConstantNode hub = ConstantNode.forConstant(hubStamp, type.klass(), providers.getMetaAccess(), instanceOf.graph());
 
                 Arguments args;
 
                 StructuredGraph graph = instanceOf.graph();
-                if (hintInfo.hintHitProbability >= hintHitProbabilityThresholdForDeoptimizingSnippet(compilationThreshold) && hintInfo.exact == null) {
-                    Hints hints = createHints(hintInfo, providers.getMetaAccess(), false, graph);
+                if (hintInfo.hintHitProbability >= 1.0 && hintInfo.exact == null) {
+                    Hints hints = createHints(hintInfo, providers.getMetaAccess(), false, graph, tool);
                     args = new Arguments(instanceofWithProfile, graph.getGuardsStage(), tool.getLoweringStage());
                     args.add("object", object);
-                    args.addVarargs("hints", KlassPointer.class, KlassPointerStamp.klassNonNull(), hints.hubs);
+                    args.addVarargs("hints", KlassPointer.class, hubStamp, hints.hubs);
                     args.addVarargs("hintIsPositive", boolean.class, StampFactory.forKind(Kind.Boolean), hints.isPositive);
                 } else if (hintInfo.exact != null) {
                     args = new Arguments(instanceofExact, graph.getGuardsStage(), tool.getLoweringStage());
                     args.add("object", object);
-                    args.add("exactHub", ConstantNode.forConstant(KlassPointerStamp.klassNonNull(), ((HotSpotResolvedObjectType) hintInfo.exact).klass(), providers.getMetaAccess(), graph));
+                    args.add("exactHub", ConstantNode.forConstant(hubStamp, ((HotSpotResolvedObjectType) hintInfo.exact).klass(), providers.getMetaAccess(), graph));
                 } else if (type.isPrimaryType()) {
                     args = new Arguments(instanceofPrimary, graph.getGuardsStage(), tool.getLoweringStage());
                     args.add("hub", hub);
                     args.add("object", object);
                     args.addConst("superCheckOffset", type.superCheckOffset());
                 } else {
-                    Hints hints = createHints(hintInfo, providers.getMetaAccess(), false, graph);
+                    Hints hints = createHints(hintInfo, providers.getMetaAccess(), false, graph, tool);
                     args = new Arguments(instanceofSecondary, graph.getGuardsStage(), tool.getLoweringStage());
                     args.add("hub", hub);
                     args.add("object", object);
-                    args.addVarargs("hints", KlassPointer.class, KlassPointerStamp.klassNonNull(), hints.hubs);
+                    args.addVarargs("hints", KlassPointer.class, hubStamp, hints.hubs);
                     args.addVarargs("hintIsPositive", boolean.class, StampFactory.forKind(Kind.Boolean), hints.isPositive);
                 }
                 args.add("trueValue", replacer.trueValue);
                 args.add("falseValue", replacer.falseValue);
-                if (hintInfo.hintHitProbability >= hintHitProbabilityThresholdForDeoptimizingSnippet(compilationThreshold) && hintInfo.exact == null) {
+                if (hintInfo.hintHitProbability >= 1.0 && hintInfo.exact == null) {
                     args.addConst("nullSeen", hintInfo.profile.getNullSeen() != TriState.FALSE);
                 }
                 return args;
 
+            } else if (replacer.instanceOf instanceof TypeCheckNode) {
+                TypeCheckNode typeCheck = (TypeCheckNode) replacer.instanceOf;
+                ValueNode object = typeCheck.getValue();
+                Arguments args = new Arguments(instanceofExact, typeCheck.graph().getGuardsStage(), tool.getLoweringStage());
+                args.add("object", object);
+                args.add("exactHub", ConstantNode.forConstant(hubStamp, ((HotSpotResolvedObjectType) typeCheck.type()).klass(), providers.getMetaAccess(), typeCheck.graph()));
+                args.add("trueValue", replacer.trueValue);
+                args.add("falseValue", replacer.falseValue);
+                return args;
             } else if (replacer.instanceOf instanceof InstanceOfDynamicNode) {
                 InstanceOfDynamicNode instanceOf = (InstanceOfDynamicNode) replacer.instanceOf;
                 ValueNode object = instanceOf.object();
@@ -313,7 +298,7 @@ public class InstanceOfSnippets implements Snippets {
                 args.add("falseValue", replacer.falseValue);
                 return args;
             } else {
-                throw GraalInternalError.shouldNotReachHere();
+                throw JVMCIError.shouldNotReachHere();
             }
         }
     }

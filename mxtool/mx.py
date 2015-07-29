@@ -33,7 +33,12 @@ Version 1.x supports a single suite of projects.
 Full documentation can be found at https://wiki.openjdk.java.net/display/Graal/The+mx+Tool
 """
 
-import sys, os, errno, time, subprocess, shlex, types, StringIO, zipfile, signal, xml.sax.saxutils, tempfile, fnmatch, platform
+import sys
+if __name__ == '__main__':
+    # Rename this module as 'mx' so it is not re-executed when imported by other modules.
+    sys.modules['mx'] = sys.modules.pop('__main__')
+
+import os, errno, time, subprocess, shlex, types, StringIO, zipfile, signal, xml.sax.saxutils, tempfile, platform
 import textwrap
 import socket
 import tarfile
@@ -46,6 +51,17 @@ from collections import Callable
 from threading import Thread
 from argparse import ArgumentParser, REMAINDER
 from os.path import join, basename, dirname, exists, getmtime, isabs, expandvars, isdir, isfile
+
+import mx_unittest
+import mx_findbugs
+
+try:
+    # needed to work around https://bugs.python.org/issue1927
+    import readline
+    #then make pylint happy..
+    readline.get_line_buffer()
+except ImportError:
+    pass
 
 # Support for Python 2.6
 def check_output(*popenargs, **kwargs):
@@ -91,17 +107,19 @@ _jreLibs = dict()
 _dists = dict()
 _suites = dict()
 _annotationProcessors = None
+_mx_suite = None
 _primary_suite_path = None
 _primary_suite = None
 _opts = None
-_java_homes = None
+_extra_java_homes = []
+_default_java_home = None
 _warn = False
 
 """
 A distribution is a jar or zip file containing the output from one or more Java projects.
 """
 class Distribution:
-    def __init__(self, suite, name, path, sourcesPath, deps, mainClass, excludedDependencies, distDependencies, javaCompliance):
+    def __init__(self, suite, name, path, sourcesPath, deps, mainClass, excludedDependencies, distDependencies, javaCompliance, isProcessorDistribution=False):
         self.suite = suite
         self.name = name
         self.path = path.replace('/', os.sep)
@@ -109,12 +127,14 @@ class Distribution:
         self.sourcesPath = _make_absolute(sourcesPath.replace('/', os.sep), suite.dir) if sourcesPath else None
         self.deps = deps
         self.update_listeners = set()
+        self.archiveparticipant = None
         self.mainClass = mainClass
         self.excludedDependencies = excludedDependencies
         self.distDependencies = distDependencies
         self.javaCompliance = JavaCompliance(javaCompliance) if javaCompliance else None
+        self.isProcessorDistribution = isProcessorDistribution
 
-    def sorted_deps(self, includeLibs=False, transitive=False):
+    def sorted_deps(self, includeLibs=False, transitive=False, includeAnnotationProcessors=False):
         deps = []
         if transitive:
             for depDist in [distribution(name) for name in self.distDependencies]:
@@ -125,13 +145,49 @@ class Distribution:
             excl = [dependency(d) for d in self.excludedDependencies]
         except SystemExit as e:
             abort('invalid excluded dependency for {0} distribution: {1}'.format(self.name, e))
-        return deps + [d for d in sorted_deps(self.deps, includeLibs=includeLibs) if d not in excl]
+        return deps + [d for d in sorted_deps(self.deps, includeLibs=includeLibs, includeAnnotationProcessors=includeAnnotationProcessors) if d not in excl]
 
     def __str__(self):
         return self.name
 
     def add_update_listener(self, listener):
         self.update_listeners.add(listener)
+
+    def set_archiveparticipant(self, archiveparticipant):
+        """
+        Adds an object that participates in the make_archive method of this distribution by defining the following methods:
+
+        __opened__(arc, srcArc, services)
+            Called when archiving starts. The 'arc' and 'srcArc' Archiver objects are for writing to the
+            binary and source jars for the distribution. The 'services' dict is for collating the files
+            that will be written to META-INF/services in the binary jar. It's a map from service names
+            to a list of providers for the named service.
+        __add__(arcname, contents)
+            Submits an entry for addition to the binary archive (via the 'zf' ZipFile field of the 'arc' object).
+            Returns True if this object writes to the archive or wants to exclude the entry from the archive,
+            False if the caller should add the entry.
+        __addsrc__(arcname, contents)
+            Same as __add__ except if targets the source archive.
+        __closing__()
+            Called just before the 'services' are written to the binary archive and both archives are
+            written to their underlying files.
+        """
+        self.archiveparticipant = archiveparticipant
+
+    def get_dist_deps(self, includeSelf=True, transitive=False):
+        deps = []
+        if includeSelf:
+            deps.append(self)
+        for name in self.distDependencies:
+            dist = distribution(name)
+            if dist not in deps:
+                deps.append(dist)
+        if transitive:
+            for depName in self.distDependencies:
+                for recDep in distribution(depName).get_dist_deps(False, True):
+                    if recDep not in deps:
+                        deps.append(recDep)
+        return list(deps)
 
     """
     Gets the directory in which the IDE project configuration
@@ -156,7 +212,14 @@ class Distribution:
             with Archiver(None if unified else self.sourcesPath) as srcArcRaw:
                 srcArc = arc if unified else srcArcRaw
                 services = {}
+
+                if self.archiveparticipant:
+                    self.archiveparticipant.__opened__(arc, srcArc, services)
+
                 def overwriteCheck(zf, arcname, source):
+                    if os.path.basename(arcname).startswith('.'):
+                        logv('Excluding dotfile: ' + source)
+                        return True
                     if not hasattr(zf, '_provenance'):
                         zf._provenance = {}
                     existingSource = zf._provenance.get(arcname, None)
@@ -192,29 +255,30 @@ class Distribution:
                         libSourcePath = l.get_source_path(resolve=True)
                         if lpath:
                             with zipfile.ZipFile(lpath, 'r') as lp:
-                                for arcname in lp.namelist():
+                                entries = lp.namelist()
+                                for arcname in entries:
                                     if arcname.startswith('META-INF/services/') and not arcname == 'META-INF/services/':
                                         service = arcname[len('META-INF/services/'):]
                                         assert '/' not in service
                                         services.setdefault(service, []).extend(lp.read(arcname).splitlines())
                                     else:
                                         if not overwriteCheck(arc.zf, arcname, lpath + '!' + arcname):
-                                            arc.zf.writestr(arcname, lp.read(arcname))
+                                            contents = lp.read(arcname)
+                                            if not self.archiveparticipant or not self.archiveparticipant.__add__(arcname, contents):
+                                                arc.zf.writestr(arcname, contents)
                         if srcArc.zf and libSourcePath:
                             with zipfile.ZipFile(libSourcePath, 'r') as lp:
                                 for arcname in lp.namelist():
                                     if not overwriteCheck(srcArc.zf, arcname, lpath + '!' + arcname):
-                                        srcArc.zf.writestr(arcname, lp.read(arcname))
+                                        contents = lp.read(arcname)
+                                        if not self.archiveparticipant or not self.archiveparticipant.__addsrc__(arcname, contents):
+                                            srcArc.zf.writestr(arcname, contents)
                     elif dep.isProject():
                         p = dep
 
                         if self.javaCompliance:
                             if p.javaCompliance > self.javaCompliance:
                                 abort("Compliance level doesn't match: Distribution {0} requires {1}, but {2} is {3}.".format(self.name, self.javaCompliance, p.name, p.javaCompliance))
-
-                        # skip a  Java project if its Java compliance level is "higher" than the configured JDK
-                        jdk = java(p.javaCompliance)
-                        assert jdk
 
                         logv('[' + self.path + ': adding project ' + p.name + ']')
                         outputDir = p.output_dir()
@@ -224,16 +288,13 @@ class Distribution:
                                 for service in files:
                                     with open(join(root, service), 'r') as fp:
                                         services.setdefault(service, []).extend([provider.strip() for provider in fp.readlines()])
-                            elif relpath == join('META-INF', 'providers'):
-                                for provider in files:
-                                    with open(join(root, provider), 'r') as fp:
-                                        for service in fp:
-                                            services.setdefault(service.strip(), []).append(provider)
                             else:
                                 for f in files:
                                     arcname = join(relpath, f).replace(os.sep, '/')
-                                    if not overwriteCheck(arc.zf, arcname, join(root, f)):
-                                        arc.zf.write(join(root, f), arcname)
+                                    with open(join(root, f), 'rb') as fp:
+                                        contents = fp.read()
+                                    if not self.archiveparticipant or not self.archiveparticipant.__add__(arcname, contents):
+                                        arc.zf.writestr(arcname, contents)
                         if srcArc.zf:
                             sourceDirs = p.source_dirs()
                             if p.source_gen_dir():
@@ -245,14 +306,20 @@ class Distribution:
                                         if f.endswith('.java'):
                                             arcname = join(relpath, f).replace(os.sep, '/')
                                             if not overwriteCheck(srcArc.zf, arcname, join(root, f)):
-                                                srcArc.zf.write(join(root, f), arcname)
+                                                with open(join(root, f), 'r') as fp:
+                                                    contents = fp.read()
+                                                if not self.archiveparticipant or not self.archiveparticipant.__addsrc__(arcname, contents):
+                                                    srcArc.zf.writestr(arcname, contents)
+
+                if self.archiveparticipant:
+                    self.archiveparticipant.__closing__()
 
                 for service, providers in services.iteritems():
                     arcname = 'META-INF/services/' + service
-                    arc.zf.writestr(arcname, '\n'.join(providers))
+                    # Convert providers to a set before printing to remove duplicates
+                    arc.zf.writestr(arcname, '\n'.join(frozenset(providers)))
 
         self.notify_updated()
-
 
     def notify_updated(self):
         for l in self.update_listeners:
@@ -304,14 +371,6 @@ class Project(Dependency):
         # The annotation processors defined by this project
         self.definedAnnotationProcessors = None
         self.definedAnnotationProcessorsDist = None
-
-
-        # Verify that a JDK exists for this project if its compliance level is
-        # less than the compliance level of the default JDK
-        jdk = java(self.javaCompliance)
-        if jdk is None and self.javaCompliance < java().javaCompliance:
-            abort('Cannot find ' + str(self.javaCompliance) + ' JDK required by ' + name + '. ' +
-                  'Specify it with --extra-java-homes option or EXTRA_JAVA_HOMES environment variable.')
 
         # Create directories for projects that don't yet exist
         if not exists(d):
@@ -416,6 +475,39 @@ class Project(Dependency):
     def append_to_classpath(self, cp, resolve):
         if not self.native:
             cp.append(self.output_dir())
+
+    def eclipse_settings_sources(self):
+        """
+        Gets a dictionary from the name of an Eclipse settings file to
+        the list of files providing its generated content, in overriding order
+        (i.e., settings from files later in the list override settings from
+        files earlier in the list).
+        """
+        if not hasattr(self, '_eclipse_settings'):
+            esdict = {}
+            hasAps = self.annotation_processors_path() is not None
+            # start with the mxtool defaults
+            defaultEclipseSettingsDir = join(_mx_suite.dir, 'eclipse-settings')
+            if exists(defaultEclipseSettingsDir):
+                for name in os.listdir(defaultEclipseSettingsDir):
+                    if isfile(join(defaultEclipseSettingsDir, name)) and name != "org.eclipse.jdt.apt.core.prefs" or hasAps:
+                        esdict[name] = [os.path.abspath(join(defaultEclipseSettingsDir, name))]
+
+            # append suite overrides
+            eclipseSettingsDir = join(self.suite.mxDir, 'eclipse-settings')
+            if exists(eclipseSettingsDir):
+                for name in os.listdir(eclipseSettingsDir):
+                    if isfile(join(eclipseSettingsDir, name)) and name != "org.eclipse.jdt.apt.core.prefs" or hasAps:
+                        esdict.setdefault(name, []).append(os.path.abspath(join(eclipseSettingsDir, name)))
+
+            # check for project overrides
+            projectSettingsDir = join(self.dir, 'eclipse-settings')
+            if exists(projectSettingsDir):
+                for name in os.listdir(projectSettingsDir):
+                    if isfile(join(projectSettingsDir, name)) and name != "org.eclipse.jdt.apt.core.prefs" or hasAps:
+                        esdict.setdefault(name, []).append(os.path.abspath(join(projectSettingsDir, name)))
+            self._eclipse_settings = esdict
+        return self._eclipse_settings
 
     def find_classes_with_matching_source_line(self, pkgRoot, function, includeInnerClasses=False):
         """
@@ -529,12 +621,18 @@ class Project(Dependency):
             if hasattr(self, '_declaredAnnotationProcessors'):
                 aps = set(self._declaredAnnotationProcessors)
                 for ap in aps:
-                    if project(ap).definedAnnotationProcessorsDist is None:
-                        config = join(project(ap).source_dirs()[0], 'META-INF', 'services', 'javax.annotation.processing.Processor')
-                        if not exists(config):
-                            TimeStampFile(config).touch()
-                        abort('Project ' + ap + ' declared in annotationProcessors property of ' + self.name + ' does not define any annotation processors.\n' +
-                              'Please specify the annotation processors in ' + config)
+                    # ap may be a Project or a Distribution
+                    apd = dependency(ap)
+                    if apd.isLibrary():
+                        # trust it, we could look inside I suppose
+                        pass
+                    elif apd.isProject():
+                        if apd.definedAnnotationProcessorsDist is None:
+                            config = join(project(ap).source_dirs()[0], 'META-INF', 'services', 'javax.annotation.processing.Processor')
+                            if not exists(config):
+                                TimeStampFile(config).touch()
+                            abort('Project ' + ap + ' declared in annotationProcessors property of ' + self.name + ' does not define any annotation processors.\n' +
+                                  'Please specify the annotation processors in ' + config)
 
             allDeps = self.all_deps([], includeLibs=False, includeSelf=False, includeAnnotationProcessors=False)
             for p in allDeps:
@@ -549,14 +647,24 @@ class Project(Dependency):
         return self._annotationProcessors
 
     """
-    Gets the class path composed of the distribution jars containing the 
+    Gets the class path composed of the distribution jars containing the
     annotation processors that will be applied when compiling this project.
     """
     def annotation_processors_path(self):
-        aps = [project(ap) for ap in self.annotation_processors()]
-        libAps = [dep for dep in self.all_deps([], includeLibs=True, includeSelf=False) if dep.isLibrary() and hasattr(dep, 'annotationProcessor') and getattr(dep, 'annotationProcessor').lower() == 'true']
+        aps = [dependency(ap) for ap in self.annotation_processors()]
+        libAps = set()
+        for dep in self.all_deps([], includeLibs=True, includeSelf=False):
+            if dep.isLibrary() and hasattr(dep, 'annotationProcessor') and getattr(dep, 'annotationProcessor').lower() == 'true':
+                libAps = libAps.union(dep.all_deps([], includeLibs=True, includeSelf=True))
         if len(aps) + len(libAps):
-            return os.pathsep.join([ap.definedAnnotationProcessorsDist.path for ap in aps if ap.definedAnnotationProcessorsDist] + [lib.get_path(False) for lib in libAps])
+            apPaths = []
+            for ap in aps:
+                if ap.isLibrary():
+                    for dep in ap.all_deps([], includeLibs=True):
+                        dep.append_to_classpath(apPaths, True)
+                elif ap.definedAnnotationProcessorsDist:
+                    apPaths.append(ap.definedAnnotationProcessorsDist.path)
+            return os.pathsep.join(apPaths + [lib.get_path(False) for lib in libAps])
         return None
 
     def uses_annotation_processor_library(self):
@@ -624,7 +732,7 @@ def download_file_with_sha1(name, path, urls, sha1, sha1path, resolve, mustExist
 
         if not exists(cachePath) or sha1OfFile(cachePath) != sha1:
             if exists(cachePath):
-                log('SHA1 of ' + cachePath + ' does not match expected value (' + sha1 + ') - re-downloading')
+                log('SHA1 of ' + cachePath + ' does not match expected value (' + sha1 + ') - found ' + sha1OfFile(cachePath) + ' - re-downloading')
             print 'Downloading ' + ("sources " if sources else "") + name + ' from ' + str(urls)
             download(cachePath, urls)
 
@@ -635,7 +743,15 @@ def download_file_with_sha1(name, path, urls, sha1, sha1path, resolve, mustExist
         if canSymlink and 'symlink' in dir(os):
             if exists(path):
                 os.unlink(path)
-            os.symlink(cachePath, path)
+            try:
+                os.symlink(cachePath, path)
+            except OSError as e:
+                # When doing parallel building, the symlink can fail
+                # if another thread wins the race to create the symlink
+                if not exists(path):
+                    # It was some other error
+                    raise e
+
         else:
             shutil.copy(cachePath, path)
 
@@ -684,7 +800,7 @@ This mechanism exists primarily to be able to support code
 that may use functionality in one JRE (e.g., Oracle JRE)
 that is not present in another JRE (e.g., OpenJDK). A
 motivating example is the Java Flight Recorder library
-found in the Oracle JRE. 
+found in the Oracle JRE.
 """
 class JreLibrary(BaseLibrary):
     def __init__(self, suite, name, jar, optional):
@@ -754,6 +870,7 @@ class Library(BaseLibrary):
         sha1path = path + '.sha1'
 
         includedInJDK = getattr(self, 'includedInJDK', None)
+        # TODO since we don't know which JDK will be used, this check is dubious
         if includedInJDK and java().javaCompliance >= JavaCompliance(includedInJDK):
             return None
 
@@ -834,6 +951,24 @@ class HgConfig:
         except subprocess.CalledProcessError:
             if abortOnError:
                 abort('failed to get status')
+            else:
+                return None
+
+    def locate(self, sDir, patterns=None, abortOnError=True):
+        try:
+            if patterns is None:
+                patterns = []
+            elif not isinstance(patterns, list):
+                patterns = [patterns]
+            return subprocess.check_output(['hg', 'locate', '-R', sDir] + patterns).split('\n')
+        except OSError:
+            warn(self.missing)
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 1:
+                # hg locate returns 1 if no matches were found
+                return []
+            if abortOnError:
+                abort('failed to locate')
             else:
                 return None
 
@@ -948,12 +1083,12 @@ class Suite:
         self.primary = primary
         self.requiredMxVersion = None
         self.name = _suitename(mxDir)  # validated in _load_projects
+        _suites[self.name] = self
         if load:
             # just check that there are no imports
             self._load_imports()
             self._load_env()
             self._load_commands()
-        _suites[self.name] = self
 
     def __str__(self):
         return self.name
@@ -974,10 +1109,10 @@ class Suite:
             except AssertionError as ae:
                 abort('Exception while parsing "mxversion" in project file: ' + str(ae))
 
-        libsMap = suiteDict['libraries']
-        jreLibsMap = suiteDict['jrelibraries']
-        projsMap = suiteDict['projects']
-        distsMap = suiteDict['distributions']
+        libsMap = suiteDict.get('libraries', {})
+        jreLibsMap = suiteDict.get('jrelibraries', {})
+        projsMap = suiteDict.get('projects', {})
+        distsMap = suiteDict.get('distributions', {})
 
         def pop_list(attrs, name, context):
             v = attrs.pop(name, None)
@@ -1002,6 +1137,7 @@ class Suite:
             p = Project(self, name, srcDirs, deps, javaCompliance, workingSets, d)
             p.checkstyleProj = attrs.pop('checkstyle', name)
             p.native = attrs.pop('native', '') == 'true'
+            p.checkPackagePrefix = attrs.pop('checkPackagePrefix', 'true') == 'true'
             if not p.native and p.javaCompliance is None:
                 abort('javaCompliance property required for non-native project ' + name)
             if len(ap) > 0:
@@ -1072,7 +1208,7 @@ class Suite:
                 exclDeps = []
                 distDeps = []
                 javaCompliance = None
-                d = Distribution(self, dname, path, sourcesPath, deps, mainClass, exclDeps, distDeps, javaCompliance)
+                d = Distribution(self, dname, path, sourcesPath, deps, mainClass, exclDeps, distDeps, javaCompliance, True)
                 d.subDir = os.path.relpath(os.path.dirname(p.dir), self.dir)
                 self.dists.append(d)
                 p.definedAnnotationProcessors = annotationProcessors
@@ -1113,9 +1249,6 @@ class Suite:
 
     def _load_commands(self):
         commandsName = self._find_commands(self._commands_name())
-        if commandsName is None:
-            # backwards compatibility
-            commandsName = self._find_commands('commands')
         if commandsName is not None:
             if commandsName in sys.modules:
                 abort(commandsName + '.py in suite ' + self.name + ' duplicates ' + sys.modules[commandsName].__file__)
@@ -1196,6 +1329,7 @@ class Suite:
         #
         # Removed projects and libraries are also removed from
         # distributions in they are listed as dependencies.
+        ommittedDeps = set()
         for d in sorted_deps(includeLibs=True):
             if d.isLibrary():
                 if d.optional:
@@ -1208,11 +1342,13 @@ class Suite:
                         d.optional = True
                     if not path:
                         logv('[omitting optional library {0} as {1} does not exist]'.format(d, d.path))
+                        ommittedDeps.add(d.name)
                         del _libs[d.name]
                         self.libs.remove(d)
             elif d.isProject():
-                if java(d.javaCompliance) is None:
+                if java(d.javaCompliance, cancel='some projects will be omitted which may result in errors', purpose="building projects with compliance " + str(d.javaCompliance)) is None:
                     logv('[omitting project {0} as Java compliance {1} cannot be satisfied by configured JDKs]'.format(d, d.javaCompliance))
+                    ommittedDeps.add(d.name)
                     del _projects[d.name]
                     self.projects.remove(d)
                 else:
@@ -1222,17 +1358,19 @@ class Suite:
                             if not jreLib.is_present_in_jdk(java(d.javaCompliance)):
                                 if jreLib.optional:
                                     logv('[omitting project {0} as dependency {1} is missing]'.format(d, name))
+                                    ommittedDeps.add(d.name)
                                     del _projects[d.name]
                                     self.projects.remove(d)
                                 else:
                                     abort('JRE library {0} required by {1} not found'.format(jreLib, d))
                         elif not dependency(name, fatalIfMissing=False):
                             logv('[omitting project {0} as dependency {1} is missing]'.format(d, name))
+                            ommittedDeps.add(d.name)
                             del _projects[d.name]
                             self.projects.remove(d)
         for dist in _dists.itervalues():
             for name in list(dist.deps):
-                if not dependency(name, fatalIfMissing=False):
+                if name in ommittedDeps:
                     logv('[omitting {0} from distribution {1}]'.format(name, dist))
                     dist.deps.remove(name)
 
@@ -1637,60 +1775,30 @@ def sorted_project_deps(projects, includeLibs=False, includeJreLibs=False, inclu
         p.all_deps(deps, includeLibs=includeLibs, includeJreLibs=includeJreLibs, includeAnnotationProcessors=includeAnnotationProcessors)
     return deps
 
-def _handle_lookup_java_home(jdk):
-    return _handle_lookup_jdk(jdk, 'JAVA_HOME', '--java-home', False)
+def extract_VM_args(args, useDoubleDash=False, allowClasspath=False):
+    """
+    Partitions 'args' into a leading sequence of HotSpot VM options and the rest. If
+    'useDoubleDash' then 'args' is partititioned by the first instance of "--". If
+    not 'allowClasspath' then mx aborts if "-cp" or "-classpath" is in 'args'.
 
-def _handle_lookup_extra_java_homes(jdk):
-    return _handle_lookup_jdk(jdk, 'EXTRA_JAVA_HOMES', '--extra-java-homes', True)
-
-def _handle_lookup_jdk(jdk, varName, flagName, allowMultiple):
-    if jdk != None and jdk != '':
-        return jdk
-    jdk = os.environ.get(varName)
-    if jdk != None and jdk != '':
-        return jdk
-
-    if not sys.stdout.isatty():
-        abort('Could not find bootstrap {0}. Use {1} option or ensure {2} environment variable is set.'.format(varName, flagName, varName))
-
-    candidateJdks = []
-    if get_os() == 'darwin':
-        base = '/Library/Java/JavaVirtualMachines'
-        candidateJdks = [join(base, n, 'Contents/Home') for n in os.listdir(base) if exists(join(base, n, 'Contents/Home'))]
-    elif get_os() == 'linux':
-        base = '/usr/lib/jvm'
-        candidateJdks = [join(base, n) for n in os.listdir(base) if exists(join(base, n, 'jre/lib/rt.jar'))]
-    elif get_os() == 'solaris':
-        base = '/usr/jdk/instances'
-        candidateJdks = [join(base, n) for n in os.listdir(base) if exists(join(base, n, 'jre/lib/rt.jar'))]
-    elif get_os() == 'windows':
-        base = r'C:\Program Files\Java'
-        candidateJdks = [join(base, n) for n in os.listdir(base) if exists(join(base, n, r'jre\lib\rt.jar'))]
-
-    javaHome = None
-    if len(candidateJdks) != 0:
-        log('Missing value for {0}.'.format(varName))
-        javaHome = select_items(candidateJdks + ['<other>'], allowMultiple=allowMultiple)
-        if javaHome == '<other>':
-            javaHome = None
-        if javaHome != None and allowMultiple:
-            javaHome = os.pathsep.join(javaHome)
-
-    while javaHome is None:
-        javaHome = raw_input('Enter path of JDK for {0}: '.format(varName))
-        rtJarPath = join(javaHome, 'jre', 'lib', 'rt.jar')
-        if not exists(rtJarPath):
-            log('Does not appear to be a valid JDK as ' + rtJarPath + ' does not exist')
-            javaHome = None
+   """
+    for i in range(len(args)):
+        if useDoubleDash:
+            if args[i] == '--':
+                vmArgs = args[:i]
+                remainder = args[i + 1:]
+                return vmArgs, remainder
         else:
-            break
-
-    envPath = join(_primary_suite.mxDir, 'env')
-    if ask_yes_no('Persist this setting by adding "{0}={1}" to {2}'.format(varName, javaHome, envPath), 'y'):
-        with open(envPath, 'a') as fp:
-            print >> fp, varName + '=' + javaHome
-
-    return javaHome
+            if not args[i].startswith('-'):
+                if i != 0 and (args[i - 1] == '-cp' or args[i - 1] == '-classpath'):
+                    if not allowClasspath:
+                        abort('Cannot supply explicit class path option')
+                    else:
+                        continue
+                vmArgs = args[:i]
+                remainder = args[i:]
+                return vmArgs, remainder
+    return args, []
 
 class ArgParser(ArgumentParser):
     # Override parent to append the list of available commands
@@ -1706,6 +1814,8 @@ class ArgParser(ArgumentParser):
         self.add_argument('-v', action='store_true', dest='verbose', help='enable verbose output')
         self.add_argument('-V', action='store_true', dest='very_verbose', help='enable very verbose output')
         self.add_argument('-w', action='store_true', dest='warn', help='enable warning messages')
+        self.add_argument('-y', action='store_const', const='y', dest='answer', help='answer \'y\' to all questions asked')
+        self.add_argument('-n', action='store_const', const='n', dest='answer', help='answer \'n\' to all questions asked')
         self.add_argument('-p', '--primary-suite-path', help='set the primary suite directory', metavar='<path>')
         self.add_argument('--dbg', type=int, dest='java_dbg_port', help='make Java processes wait on <port> for a debugger', metavar='<port>')
         self.add_argument('-d', action='store_const', const=8000, dest='java_dbg_port', help='alias for "-dbg 8000"')
@@ -1718,6 +1828,7 @@ class ArgParser(ArgumentParser):
         self.add_argument('--user-home', help='users home directory', metavar='<path>', default=os.path.expanduser('~'))
         self.add_argument('--java-home', help='primary JDK directory (must be JDK 7 or later)', metavar='<path>')
         self.add_argument('--extra-java-homes', help='secondary JDK directories separated by "' + os.pathsep + '"', metavar='<path>')
+        self.add_argument('--strict-compliance', action='store_true', dest='strict_compliance', help='Projects with an explicit compliance will only be built if a JDK exactly matching the compliance is available', default=False)
         self.add_argument('--ignore-project', action='append', dest='ignored_projects', help='name of project to ignore', metavar='<name>', default=[])
         self.add_argument('--kill-with-sigquit', action='store_true', dest='killwithsigquit', help='send sigquit first before killing child processes')
         if get_os() != 'windows':
@@ -1743,14 +1854,15 @@ class ArgParser(ArgumentParser):
         if opts.very_verbose:
             opts.verbose = True
 
-        opts.java_home = _handle_lookup_java_home(opts.java_home)
-        opts.extra_java_homes = _handle_lookup_extra_java_homes(opts.extra_java_homes)
-
         if opts.user_home is None or opts.user_home == '':
             abort('Could not find user home. Use --user-home option or ensure HOME environment variable is set.')
 
-        os.environ['JAVA_HOME'] = opts.java_home
+        if opts.java_home:
+            os.environ['JAVA_HOME'] = opts.java_home
         os.environ['HOME'] = opts.user_home
+
+        if os.environ.get('STRICT_COMPLIANCE'):
+            _opts.strict_compliance = True
 
         opts.ignored_projects = opts.ignored_projects + os.environ.get('IGNORED_PROJECTS', '').split(',')
 
@@ -1762,7 +1874,7 @@ class ArgParser(ArgumentParser):
 
 def _format_commands():
     msg = '\navailable commands:\n\n'
-    for cmd in sorted(_commands.iterkeys()):
+    for cmd in sorted([k for k in _commands.iterkeys() if ':' not in k]) + sorted([k for k in _commands.iterkeys() if ':' in k]):
         c, _ = _commands[cmd][:2]
         doc = c.__doc__
         if doc is None:
@@ -1770,21 +1882,272 @@ def _format_commands():
         msg += ' {0:<20} {1}\n'.format(cmd, doc.split('\n', 1)[0])
     return msg + '\n'
 
-def java(requiredCompliance=None):
+_canceled_java_requests = set()
+
+def java(versionCheck=None, purpose=None, cancel=None, versionDescription=None, defaultJdk=None):
     """
     Get a JavaConfig object containing Java commands launch details.
-    If requiredCompliance is None, the compliance level specified by --java-home/JAVA_HOME
-    is returned. Otherwise, the JavaConfig exactly matching requiredCompliance is returned
-    or None if there is no exact match.
     """
-    assert _java_homes
-    if not requiredCompliance:
-        return _java_homes[0]
-    for java in _java_homes:
-        if java.javaCompliance == requiredCompliance:
-            return java
-    return None
 
+    if defaultJdk is None:
+        defaultJdk = versionCheck is None and not purpose
+
+    # interpret string and compliance as compliance check
+    if isinstance(versionCheck, types.StringTypes):
+        requiredCompliance = JavaCompliance(versionCheck)
+        versionCheck, versionDescription = _convert_compliance_to_version_check(requiredCompliance)
+    elif isinstance(versionCheck, JavaCompliance):
+        versionCheck, versionDescription = _convert_compliance_to_version_check(versionCheck)
+
+    global _default_java_home, _extra_java_homes
+    if cancel and (versionDescription, purpose) in _canceled_java_requests:
+        return None
+
+    if defaultJdk:
+        if not _default_java_home:
+            _default_java_home = _find_jdk(versionCheck=versionCheck, versionDescription=versionDescription, purpose=purpose, cancel=cancel, isDefaultJdk=True)
+            if not _default_java_home:
+                assert cancel and (versionDescription or purpose)
+                _canceled_java_requests.add((versionDescription, purpose))
+        return _default_java_home
+
+    for java in _extra_java_homes:
+        if not versionCheck or versionCheck(java.version):
+            return java
+
+    jdk = _find_jdk(versionCheck=versionCheck, versionDescription=versionDescription, purpose=purpose, cancel=cancel, isDefaultJdk=False)
+    if jdk:
+        assert jdk not in _extra_java_homes
+        _extra_java_homes = _sorted_unique_jdk_configs(_extra_java_homes + [jdk])
+    else:
+        assert cancel and (versionDescription or purpose)
+        _canceled_java_requests.add((versionDescription, purpose))
+    return jdk
+
+def _convert_compliance_to_version_check(requiredCompliance):
+    if _opts.strict_compliance:
+        versionDesc = str(requiredCompliance)
+        versionCheck = requiredCompliance.exactMatch
+    else:
+        versionDesc = '>=' + str(requiredCompliance)
+        compVersion = VersionSpec(str(requiredCompliance))
+        versionCheck = lambda version: version >= compVersion
+    return (versionCheck, versionDesc)
+
+def _find_jdk(versionCheck=None, versionDescription=None, purpose=None, cancel=None, isDefaultJdk=False):
+    assert (versionDescription and versionCheck) or (not versionDescription and not versionCheck)
+    if not versionCheck:
+        versionCheck = lambda v: True
+
+    candidateJdks = []
+    source = ''
+    if _opts.java_home:
+        candidateJdks.append(_opts.java_home)
+        source = '--java-home'
+    elif os.environ.get('JAVA_HOME'):
+        candidateJdks.append(os.environ.get('JAVA_HOME'))
+        source = 'JAVA_HOME'
+
+    result = _find_jdk_in_candidates(candidateJdks, versionCheck, warn=True, source=source)
+    if result:
+        return result
+
+    candidateJdks = []
+
+    if _opts.extra_java_homes:
+        candidateJdks += _opts.extra_java_homes.split(os.pathsep)
+        source = '--extra-java-homes'
+    elif os.environ.get('EXTRA_JAVA_HOMES'):
+        candidateJdks += os.environ.get('EXTRA_JAVA_HOMES').split(os.pathsep)
+        source = 'EXTRA_JAVA_HOMES'
+
+    result = _find_jdk_in_candidates(candidateJdks, versionCheck, warn=True, source=source)
+    if not result:
+        configs = _find_available_jdks(versionCheck)
+    elif isDefaultJdk:  # we found something in EXTRA_JAVA_HOMES but we want to set JAVA_HOME, look for further options
+        configs = [result] + _find_available_jdks(versionCheck)
+    else:
+        if not isDefaultJdk:
+            return result
+        configs = [result]
+
+    configs = _sorted_unique_jdk_configs(configs)
+
+    if len(configs) > 1:
+        if not is_interactive():
+            msg = "Multiple possible choices for a JDK"
+            if purpose:
+                msg += ' for ' + purpose
+            msg += ': '
+            if versionDescription:
+                msg += '(version ' + versionDescription + ')'
+            selected = configs[0]
+            msg += ". Selecting " + str(selected)
+            log(msg)
+        else:
+            msg = 'Please select a '
+            if isDefaultJdk:
+                msg += 'default '
+            msg += 'JDK'
+            if purpose:
+                msg += ' for ' + purpose
+            msg += ': '
+            if versionDescription:
+                msg += '(version ' + versionDescription + ')'
+            log(msg)
+            choices = configs + ['<other>']
+            if cancel:
+                choices.append('Cancel (' + cancel + ')')
+
+            selected = select_items(choices, allowMultiple=False)
+            if isinstance(selected, types.StringTypes) and selected == '<other>':
+                selected = None
+            if isinstance(selected, types.StringTypes) and selected == 'Cancel (' + cancel + ')':
+                return None
+    elif len(configs) == 1:
+        selected = configs[0]
+        msg = 'Selected ' + str(selected) + ' as '
+        if isDefaultJdk:
+            msg += 'default '
+        msg += 'JDK'
+        if versionDescription:
+            msg = msg + ' ' + versionDescription
+        if purpose:
+            msg += ' for ' + purpose
+        log(msg)
+    else:
+        msg = 'Could not find any JDK'
+        if purpose:
+            msg += ' for ' + purpose
+        msg += ' '
+        if versionDescription:
+            msg = msg + '(version ' + versionDescription + ')'
+        log(msg)
+        selected = None
+
+    while not selected:
+        jdkLocation = raw_input('Enter path of JDK: ')
+        selected = _find_jdk_in_candidates([jdkLocation], versionCheck, warn=True)
+        if not selected:
+            assert versionDescription
+            log("Error: JDK at '" + jdkLocation + "' is not compatible with version " + versionDescription)
+
+    varName = 'JAVA_HOME' if isDefaultJdk else 'EXTRA_JAVA_HOMES'
+    allowMultiple = not isDefaultJdk
+    valueSeparator = os.pathsep if allowMultiple else None
+    ask_persist_env(varName, selected.jdk, valueSeparator)
+
+    os.environ[varName] = selected.jdk
+
+    return selected
+
+def ask_persist_env(varName, value, valueSeparator=None):
+    envPath = join(_primary_suite.mxDir, 'env')
+    if is_interactive() and ask_yes_no('Persist this setting by adding "{0}={1}" to {2}'.format(varName, value, envPath), 'y'):
+        envLines = []
+        if exists(envPath):
+            with open(envPath) as fp:
+                append = True
+                for line in fp:
+                    if line.rstrip().startswith(varName):
+                        _, currentValue = line.split('=', 1)
+                        currentValue = currentValue.strip()
+                        if not valueSeparator and currentValue:
+                            if not ask_yes_no('{0} is already set to {1}, overwrite with {2}?'.format(varName, currentValue, value), 'n'):
+                                return
+                            else:
+                                line = varName + '=' + value + os.linesep
+                        else:
+                            line = line.rstrip()
+                            if currentValue:
+                                line += valueSeparator
+                            line += value + os.linesep
+                        append = False
+                    if not line.endswith(os.linesep):
+                        line += os.linesep
+                    envLines.append(line)
+        else:
+            append = True
+
+        if append:
+            envLines.append(varName + '=' + value + os.linesep)
+
+        with open(envPath, 'w') as fp:
+            for line in envLines:
+                fp.write(line)
+
+_os_jdk_locations = {
+    'darwin': {
+        'bases': ['/Library/Java/JavaVirtualMachines'],
+        'suffix': 'Contents/Home'
+    },
+    'linux': {
+        'bases': [
+            '/usr/lib/jvm',
+            '/usr/java'
+        ]
+    },
+    'solaris': {
+        'bases': ['/usr/jdk/instances']
+    },
+    'windows': {
+        'bases': [r'C:\Program Files\Java']
+    },
+}
+
+def _find_available_jdks(versionCheck):
+    candidateJdks = []
+    os_name = get_os()
+    if os_name in _os_jdk_locations:
+        jdkLocations = _os_jdk_locations[os_name]
+        for base in jdkLocations['bases']:
+            if exists(base):
+                if 'suffix' in jdkLocations:
+                    suffix = jdkLocations['suffix']
+                    candidateJdks += [join(base, n, suffix) for n in os.listdir(base)]
+                else:
+                    candidateJdks += [join(base, n) for n in os.listdir(base)]
+
+    return _filtered_jdk_configs(candidateJdks, versionCheck)
+
+def _sorted_unique_jdk_configs(configs):
+    path_seen = set()
+    unique_configs = [c for c in configs if c.jdk not in path_seen and not path_seen.add(c.jdk)]
+
+    def _compare_configs(c1, c2):
+        if c1 == _default_java_home:
+            if c2 != _default_java_home:
+                return 1
+        elif c2 == _default_java_home:
+            return -1
+        if c1 in _extra_java_homes:
+            if c2 not in _extra_java_homes:
+                return 1
+        elif c2 in _extra_java_homes:
+            return -1
+        return VersionSpec.__cmp__(c1.version, c2.version)
+    return sorted(unique_configs, cmp=_compare_configs, reverse=True)
+
+def is_interactive():
+    return sys.__stdin__.isatty()
+
+def _filtered_jdk_configs(candidates, versionCheck, warn=False, source=None):
+    filtered = []
+    for candidate in candidates:
+        try:
+            config = JavaConfig(candidate)
+            if versionCheck(config.version):
+                filtered.append(config)
+        except JavaConfigException as e:
+            if warn:
+                log('Path in ' + source + "' is not pointing to a JDK (" + e.message + ")")
+    return filtered
+
+def _find_jdk_in_candidates(candidates, versionCheck, warn=False, source=None):
+    filtered = _filtered_jdk_configs(candidates, versionCheck, warn, source)
+    if filtered:
+        return filtered[0]
+    return None
 
 def run_java(args, nonZeroIsFatal=True, out=None, err=None, cwd=None, addDefaultArgs=True, javaConfig=None):
     if not javaConfig:
@@ -2053,6 +2416,10 @@ class JavaCompliance:
     def __hash__(self):
         return self.value.__hash__()
 
+    def exactMatch(self, version):
+        assert isinstance(version, VersionSpec)
+        return len(version.parts) > 1 and version.parts[0] == 1 and version.parts[1] == self.value
+
 """
 A version specification as defined in JSR-56
 """
@@ -2072,15 +2439,20 @@ class VersionSpec:
         return cmp(self.parts, other.parts)
 
 def _filter_non_existant_paths(paths):
-    return os.pathsep.join([path for path in _separatedCygpathW2U(paths).split(os.pathsep) if exists(path)])
+    if paths:
+        return os.pathsep.join([path for path in _separatedCygpathW2U(paths).split(os.pathsep) if exists(path)])
+    return None
+
+class JavaConfigException(Exception):
+    def __init__(self, value):
+        Exception.__init__(self, value)
 
 """
 A JavaConfig object encapsulates info on how Java commands are run.
 """
 class JavaConfig:
-    def __init__(self, java_home, java_dbg_port):
+    def __init__(self, java_home):
         self.jdk = java_home
-        self.debug_port = java_dbg_port
         self.jar = exe_suffix(join(self.jdk, 'bin', 'jar'))
         self.java = exe_suffix(join(self.jdk, 'bin', 'java'))
         self.javac = exe_suffix(join(self.jdk, 'bin', 'javac'))
@@ -2088,12 +2460,13 @@ class JavaConfig:
         self.javadoc = exe_suffix(join(self.jdk, 'bin', 'javadoc'))
         self.pack200 = exe_suffix(join(self.jdk, 'bin', 'pack200'))
         self.toolsjar = join(self.jdk, 'lib', 'tools.jar')
+        self._classpaths_initialized = False
         self._bootclasspath = None
         self._extdirs = None
         self._endorseddirs = None
 
         if not exists(self.java):
-            abort('Java launcher does not exist: ' + self.java)
+            raise JavaConfigException('Java launcher does not exist: ' + self.java)
 
         def delAtAndSplit(s):
             return shlex.split(s.lstrip('@'))
@@ -2110,8 +2483,7 @@ class JavaConfig:
             try:
                 output = subprocess.check_output([self.java, '-version'], stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError as e:
-                print e.output
-                abort(e.returncode)
+                raise JavaConfigException(e.returncode + " :" + e.output)
 
         def _checkOutput(out):
             return 'version' in out
@@ -2127,26 +2499,24 @@ class JavaConfig:
         self.version = VersionSpec(version.split()[2].strip('"'))
         self.javaCompliance = JavaCompliance(self.version.versionString)
 
-        if self.debug_port is not None:
-            self.java_args += ['-Xdebug', '-Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=' + str(self.debug_port)]
+        if _opts.java_dbg_port is not None:
+            self.java_args += ['-Xdebug', '-Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=' + str(_opts.java_dbg_port)]
 
     def _init_classpaths(self):
-        myDir = dirname(__file__)
-        outDir = join(dirname(__file__), '.jdk' + str(self.version))
-        if not exists(outDir):
-            os.makedirs(outDir)
-        javaSource = join(myDir, 'ClasspathDump.java')
-        if not exists(join(outDir, 'ClasspathDump.class')):
-            subprocess.check_call([self.javac, '-d', _cygpathU2W(outDir), _cygpathU2W(javaSource)], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-        self._bootclasspath, self._extdirs, self._endorseddirs = [x if x != 'null' else None for x in subprocess.check_output([self.java, '-cp', _cygpathU2W(outDir), 'ClasspathDump'], stderr=subprocess.PIPE).split('|')]
-        if not self._bootclasspath or not self._extdirs or not self._endorseddirs:
-            warn("Could not find all classpaths: boot='" + str(self._bootclasspath) + "' extdirs='" + str(self._extdirs) + "' endorseddirs='" + str(self._endorseddirs) + "'")
-        self._bootclasspath = _filter_non_existant_paths(self._bootclasspath)
-        self._extdirs = _filter_non_existant_paths(self._extdirs)
-        self._endorseddirs = _filter_non_existant_paths(self._endorseddirs)
+        if not self._classpaths_initialized:
+            _, binDir = _compile_mx_class('ClasspathDump', jdk=self)
+            self._bootclasspath, self._extdirs, self._endorseddirs = [x if x != 'null' else None for x in subprocess.check_output([self.java, '-cp', _cygpathU2W(binDir), 'ClasspathDump'], stderr=subprocess.PIPE).split('|')]
+            if self.javaCompliance <= JavaCompliance('1.8'):
+                # All 3 system properties accessed by ClasspathDump are expected to exist
+                if not self._bootclasspath or not self._extdirs or not self._endorseddirs:
+                    warn("Could not find all classpaths: boot='" + str(self._bootclasspath) + "' extdirs='" + str(self._extdirs) + "' endorseddirs='" + str(self._endorseddirs) + "'")
+            self._bootclasspath = _filter_non_existant_paths(self._bootclasspath)
+            self._extdirs = _filter_non_existant_paths(self._extdirs)
+            self._endorseddirs = _filter_non_existant_paths(self._endorseddirs)
+            self._classpaths_initialized = True
 
     def __repr__(self):
-        return "JavaConfig(" + str(self.jdk) + ", " + str(self.debug_port) + ")"
+        return "JavaConfig(" + str(self.jdk) + ")"
 
     def __str__(self):
         return "Java " + str(self.version) + " (" + str(self.javaCompliance) + ") from " + str(self.jdk)
@@ -2155,6 +2525,8 @@ class JavaConfig:
         return hash(self.jdk)
 
     def __cmp__(self, other):
+        if other is None:
+            return False
         if isinstance(other, JavaConfig):
             compilanceCmp = cmp(self.javaCompliance, other.javaCompliance)
             if compilanceCmp:
@@ -2175,33 +2547,50 @@ class JavaConfig:
         return self.java_args_pfx + self.java_args + self.java_args_sfx + args
 
     def bootclasspath(self):
-        if self._bootclasspath is None:
-            self._init_classpaths()
+        self._init_classpaths()
         return _separatedCygpathU2W(self._bootclasspath)
 
-    def extdirs(self):
-        if self._extdirs is None:
-            self._init_classpaths()
-        return _separatedCygpathU2W(self._extdirs)
 
-    def endorseddirs(self):
-        if self._endorseddirs is None:
-            self._init_classpaths()
-        return _separatedCygpathU2W(self._endorseddirs)
+    """
+    Add javadoc style options for the library paths of this JDK.
+    """
+    def javadocLibOptions(self, args):
+        self._init_classpaths()
+        if args is None:
+            args = []
+        if self._bootclasspath:
+            args.append('-bootclasspath')
+            args.append(_separatedCygpathU2W(self._bootclasspath))
+        if self._extdirs:
+            args.append('-extdirs')
+            args.append(_separatedCygpathU2W(self._extdirs))
+        return args
+
+    """
+    Add javac style options for the library paths of this JDK.
+    """
+    def javacLibOptions(self, args):
+        args = self.javadocLibOptions(args)
+        if self._endorseddirs:
+            args.append('-endorseddirs')
+            args.append(_separatedCygpathU2W(self._endorseddirs))
+        return args
 
     def containsJar(self, jar):
-        if self._bootclasspath is None:
-            self._init_classpaths()
+        self._init_classpaths()
 
-        for e in self._bootclasspath.split(os.pathsep):
-            if basename(e) == jar:
-                return True
-        for d in self._extdirs.split(os.pathsep):
-            if len(d) and jar in os.listdir(d):
-                return True
-        for d in self._endorseddirs.split(os.pathsep):
-            if len(d) and jar in os.listdir(d):
-                return True
+        if self._bootclasspath:
+            for e in self._bootclasspath.split(os.pathsep):
+                if basename(e) == jar:
+                    return True
+        if self._extdirs:
+            for d in self._extdirs.split(os.pathsep):
+                if len(d) and jar in os.listdir(d):
+                    return True
+        if self._endorseddirs:
+            for d in self._endorseddirs.split(os.pathsep):
+                if len(d) and jar in os.listdir(d):
+                    return True
         return False
 
 def check_get_env(key):
@@ -2329,21 +2718,18 @@ def download(path, urls, verbose=False):
 
     assert not path.endswith(os.sep)
 
-    myDir = dirname(__file__)
-    javaSource = join(myDir, 'URLConnectionDownload.java')
-    javaClass = join(myDir, 'URLConnectionDownload.class')
-    if not exists(javaClass) or getmtime(javaClass) < getmtime(javaSource):
-        subprocess.check_call([java().javac, '-d', _cygpathU2W(myDir), _cygpathU2W(javaSource)])
+    _, binDir = _compile_mx_class('URLConnectionDownload')
+
     verbose = []
     if sys.stderr.isatty():
         verbose.append("-v")
-    if run([java().java, '-cp', _cygpathU2W(myDir), 'URLConnectionDownload', _cygpathU2W(path)] + verbose + urls, nonZeroIsFatal=False) == 0:
+    if run([java().java, '-cp', _cygpathU2W(binDir), 'URLConnectionDownload', _cygpathU2W(path)] + verbose + urls, nonZeroIsFatal=False) == 0:
         return
 
     abort('Could not download to ' + path + ' from any of the following URLs:\n\n    ' +
               '\n    '.join(urls) + '\n\nPlease use a web browser to do the download manually')
 
-def update_file(path, content):
+def update_file(path, content, showDiff=False):
     """
     Updates a file with some given content if the content differs from what's in
     the file already. The return value indicates if the file was updated.
@@ -2364,7 +2750,14 @@ def update_file(path, content):
         with open(path, 'wb') as f:
             f.write(content)
 
-        log(('modified ' if existed else 'created ') + path)
+        if existed:
+            log('modified ' + path)
+            if showDiff:
+                log('diff: ' + path)
+                log(''.join(difflib.unified_diff(old.splitlines(1), content.splitlines(1))))
+
+        else:
+            log('created ' + path)
         return True
     except IOError as e:
         abort('Error while writing to ' + path + ': ' + str(e))
@@ -2422,9 +2815,12 @@ class JavaCompileTask:
                 if not args.error_prone:
                     javac = args.alt_javac if args.alt_javac else mainJava.javac
                     self.logCompilation('javac' if not args.alt_javac else args.alt_javac)
-                    javacCmd = [javac, '-g', '-J-Xmx1g', '-source', compliance, '-target', compliance, '-classpath', cp, '-d', outputDir, '-bootclasspath', jdk.bootclasspath(), '-endorseddirs', jdk.endorseddirs(), '-extdirs', jdk.extdirs()]
-                    if jdk.debug_port is not None:
-                        javacCmd += ['-J-Xdebug', '-J-Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=' + str(jdk.debug_port)]
+                    javacCmd = [javac, '-g', '-J-Xmx1g', '-source', compliance, '-target', compliance, '-classpath', cp, '-d', outputDir]
+                    if _opts.very_verbose:
+                        javacCmd.append('-verbose')
+                    jdk.javacLibOptions(javacCmd)
+                    if _opts.java_dbg_port is not None:
+                        javacCmd += ['-J-Xdebug', '-J-Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=' + str(_opts.java_dbg_port)]
                     javacCmd += processorArgs
                     javacCmd += ['@' + _cygpathU2W(argfile.name)]
 
@@ -2434,7 +2830,10 @@ class JavaCompileTask:
                 else:
                     self.logCompilation('javac (with error-prone)')
                     javaArgs = ['-Xmx1g']
-                    javacArgs = ['-g', '-source', compliance, '-target', compliance, '-classpath', cp, '-d', outputDir, '-bootclasspath', jdk.bootclasspath(), '-endorseddirs', jdk.endorseddirs(), '-extdirs', jdk.extdirs()]
+                    javacArgs = ['-g', '-source', compliance, '-target', compliance, '-classpath', cp, '-d', outputDir]
+                    if _opts.very_verbose:
+                        javacArgs.append('-verbose')
+                    jdk.javacLibOptions(javacCmd)
                     javacArgs += processorArgs
                     javacArgs += ['@' + argfile.name]
                     if not args.warnAPI:
@@ -2447,16 +2846,16 @@ class JavaCompileTask:
 
                 jdtArgs = ['-' + compliance,
                          '-cp', cp, '-g', '-enableJavadoc',
-                         '-d', outputDir,
-                         '-bootclasspath', jdk.bootclasspath(),
-                         '-endorseddirs', jdk.endorseddirs(),
-                         '-extdirs', jdk.extdirs()]
+                         '-d', outputDir]
+                if _opts.very_verbose:
+                    jdtArgs.append('-verbose')
+                jdk.javacLibOptions(jdtArgs)
                 jdtArgs += processorArgs
 
                 jdtProperties = join(self.proj.dir, '.settings', 'org.eclipse.jdt.core.prefs')
-                rootJdtProperties = join(self.proj.suite.mxDir, 'eclipse-settings', 'org.eclipse.jdt.core.prefs')
-                if not exists(jdtProperties) or os.path.getmtime(jdtProperties) < os.path.getmtime(rootJdtProperties):
-                    # Try to fix a missing properties file by running eclipseinit
+                jdtPropertiesSources = self.proj.eclipse_settings_sources()['org.eclipse.jdt.core.prefs']
+                if not exists(jdtProperties) or os.path.getmtime(jdtProperties) < min(map(os.path.getmtime, jdtPropertiesSources)):
+                    # Try to fix a missing or out of date properties file by running eclipseinit
                     _eclipseinit_project(self.proj)
                 if not exists(jdtProperties):
                     log('JDT properties file {0} not found'.format(jdtProperties))
@@ -2513,6 +2912,7 @@ def build(args, parser=None):
     parser.add_argument('-p', action='store_true', dest='parallelize', help='parallelizes Java compilation if possible')
     parser.add_argument('--source', dest='compliance', help='Java compliance level for projects without an explicit one')
     parser.add_argument('--Wapi', action='store_true', dest='warnAPI', help='show warnings about using internal APIs')
+    parser.add_argument('--check-distributions', action='store_true', dest='check_distributions', help='check built distributions for overlap')
     parser.add_argument('--projects', action='store', help='comma separated projects to build (omit to build all projects)')
     parser.add_argument('--only', action='store', help='comma separated projects to build, without checking their dependencies (omit to build all projects)')
     parser.add_argument('--no-java', action='store_false', dest='java', help='do not build Java projects')
@@ -2522,7 +2922,7 @@ def build(args, parser=None):
     parser.add_argument('--alt-javac', dest='alt_javac', help='path to alternative javac executable', metavar='<path>')
     compilerSelect = parser.add_mutually_exclusive_group()
     compilerSelect.add_argument('--error-prone', dest='error_prone', help='path to error-prone.jar', metavar='<path>')
-    compilerSelect.add_argument('--jdt', help='path to ecj.jar, the Eclipse batch compiler', default=_defaultEcjPath(), metavar='<path>')
+    compilerSelect.add_argument('--jdt', help='path to ecj.jar, the stand alone Eclipse batch compiler', default=_defaultEcjPath(), metavar='<path>')
     compilerSelect.add_argument('--force-javac', action='store_true', dest='javac', help='use javac whether ecj.jar is found or not')
 
     if suppliedParser:
@@ -2546,6 +2946,12 @@ def build(args, parser=None):
                 jdtJar = None
             else:
                 abort('Eclipse batch compiler jar does not exist: ' + args.jdt)
+        else:
+            with zipfile.ZipFile(jdtJar, 'r') as zf:
+                if 'org/eclipse/jdt/internal/compiler/apt/' not in zf.namelist():
+                    abort('Specified Eclipse compiler does not include annotation processing support. ' +
+                          'Ensure you are using a stand alone ecj.jar, not org.eclipse.jdt.core_*.jar ' +
+                          'from within the plugins/ directory of an Eclipse IDE installation.')
 
     if args.only is not None:
         # N.B. This build will not include dependencies including annotation processor dependencies
@@ -2560,7 +2966,7 @@ def build(args, parser=None):
         # N.B. Limiting to a suite only affects the starting set of projects. Dependencies in other suites will still be compiled
         sortedProjects = sorted_project_deps(projects, includeAnnotationProcessors=True)
 
-    if args.java:
+    if args.java and jdtJar:
         ideinit([], refreshOnly=True, buildProcessorJars=False)
 
     tasks = {}
@@ -2584,7 +2990,6 @@ def build(args, parser=None):
         # skip building this Java project if its Java compliance level is "higher" than the configured JDK
         requiredCompliance = p.javaCompliance if p.javaCompliance else JavaCompliance(args.compliance) if args.compliance else None
         jdk = java(requiredCompliance)
-        assert jdk
 
         outputDir = p.output_dir()
 
@@ -2607,7 +3012,7 @@ def build(args, parser=None):
         nonjavafiletuples = []
         for sourceDir in sourceDirs:
             for root, _, files in os.walk(sourceDir):
-                javafiles = [join(root, name) for name in files if name.endswith('.java') and name != 'package-info.java']
+                javafiles = [join(root, name) for name in files if name.endswith('.java')]
                 javafilelist += javafiles
 
                 nonjavafiletuples += [(sourceDir, [join(root, name) for name in files if not name.endswith('.java')])]
@@ -2616,8 +3021,9 @@ def build(args, parser=None):
                     for javafile in javafiles:
                         classfile = TimeStampFile(outputDir + javafile[len(sourceDir):-len('java')] + 'class')
                         if not classfile.exists() or classfile.isOlderThan(javafile):
-                            buildReason = 'class file(s) out of date'
-                            break
+                            if basename(classfile.path) != 'package-info.class':
+                                buildReason = 'class file(s) out of date (witness: ' + classfile.path + ')'
+                                break
 
         apsOutOfDate = p.update_current_annotation_processors_file()
         if apsOutOfDate:
@@ -2739,10 +3145,27 @@ def build(args, parser=None):
                 log('Compiling {0} failed'.format(t.proj.name))
             abort('{0} Java compilation tasks failed'.format(len(failed)))
 
-    if args.java:
+    if args.java and not args.only:
+        files = []
+        rebuiltProjects = frozenset([t.proj for t in tasks.itervalues()])
         for dist in sorted_dists():
-            if dist not in updatedAnnotationProcessorDists:
-                archive(['@' + dist.name])
+            if not exists(dist.path):
+                log('Creating jar for {0}'.format(dist.name))
+                dist.make_archive()
+            elif dist not in updatedAnnotationProcessorDists:
+                projectsInDist = dist.sorted_deps()
+                n = len(rebuiltProjects.intersection(projectsInDist))
+                if n != 0:
+                    log('Updating jar for {0} [{1} constituent projects (re)built]'.format(dist.name, n))
+                    dist.make_archive()
+                else:
+                    logv('[all constituent projects for {0} are up to date - skipping jar updating]'.format(dist.name))
+            if args.check_distributions and not dist.isProcessorDistribution:
+                with zipfile.ZipFile(dist.path, 'r') as zf:
+                    files.extend([member for member in zf.namelist() if not member.startswith('META-INF')])
+        dups = set([x for x in files if files.count(x) > 1])
+        if len(dups) > 0:
+            abort('Distributions overlap! duplicates: ' + str(dups))
 
     if suppliedParser:
         return args
@@ -2806,7 +3229,7 @@ def _handleNonJavaFiles(outputDir, p, clean, nonjavafiletuples):
                 if exists(dirname(dst)) and (not exists(dst) or os.path.getmtime(dst) < os.path.getmtime(src)):
                     shutil.copyfile(src, dst)
 
-def _chunk_files_for_command_line(files, limit=None, pathFunction=None):
+def _chunk_files_for_command_line(files, limit=None, pathFunction=lambda f: f):
     """
     Returns a generator for splitting up a list of files into chunks such that the
     size of the space separated file paths in a chunk is less than a given limit.
@@ -2823,11 +3246,16 @@ def _chunk_files_for_command_line(files, limit=None, pathFunction=None):
         else:
             # Using just SC_ARG_MAX without extra downwards adjustment
             # results in "[Errno 7] Argument list too long" on MacOS.
-            syslimit = os.sysconf('SC_ARG_MAX') - 20000
+            commandLinePrefixAllowance = 20000
+            syslimit = os.sysconf('SC_ARG_MAX')
+            if syslimit == -1:
+                syslimit = 262144 # we could use sys.maxint but we prefer a more robust smaller value
             limit = syslimit - commandLinePrefixAllowance
+            assert limit > 0
     for i in range(len(files)):
-        path = files[i] if pathFunction is None else pathFunction(files[i])
+        path = pathFunction(files[i])
         size = len(path) + 1
+        assert size < limit
         if chunkSize + size < limit:
             chunkSize += size
         else:
@@ -2873,19 +3301,33 @@ def eclipseformat(args):
         projects = [project(name) for name in args.projects.split(',')]
 
     class Batch:
-        def __init__(self, settingsDir, javaCompliance):
+        def __init__(self, settingsDir):
             self.path = join(settingsDir, 'org.eclipse.jdt.core.prefs')
-            self.javaCompliance = javaCompliance
-            self.javafiles = list()
             with open(join(settingsDir, 'org.eclipse.jdt.ui.prefs')) as fp:
                 jdtUiPrefs = fp.read()
             self.removeTrailingWhitespace = 'sp_cleanup.remove_trailing_whitespaces_all=true' in jdtUiPrefs
             if self.removeTrailingWhitespace:
                 assert 'sp_cleanup.remove_trailing_whitespaces=true' in jdtUiPrefs and 'sp_cleanup.remove_trailing_whitespaces_ignore_empty=false' in jdtUiPrefs
+            self.cachedHash = None
 
-        def settings(self):
+        def __hash__(self):
+            if not self.cachedHash:
+                with open(self.path) as fp:
+                    self.cachedHash = (fp.read(), self.removeTrailingWhitespace).__hash__()
+            return self.cachedHash
+
+        def __eq__(self, other):
+            if not isinstance(other, Batch):
+                return False
+            if self.removeTrailingWhitespace != other.removeTrailingWhitespace:
+                return False
+            if self.path == other.path:
+                return True
             with open(self.path) as fp:
-                return fp.read() + java(self.javaCompliance).java + str(self.removeTrailingWhitespace)
+                with open(other.path) as ofp:
+                    if fp.read() != ofp.read():
+                        return False
+            return True
 
     class FileInfo:
         def __init__(self, path):
@@ -2922,33 +3364,32 @@ def eclipseformat(args):
             continue
         sourceDirs = p.source_dirs()
 
-        batch = Batch(join(p.dir, '.settings'), p.javaCompliance)
+        batch = Batch(join(p.dir, '.settings'))
 
         if not exists(batch.path):
             if _opts.verbose:
                 log('[no Eclipse Code Formatter preferences at {0} - skipping]'.format(batch.path))
             continue
-
+        javafiles = []
         for sourceDir in sourceDirs:
             for root, _, files in os.walk(sourceDir):
                 for f in [join(root, name) for name in files if name.endswith('.java')]:
-                    batch.javafiles.append(FileInfo(f))
-        if len(batch.javafiles) == 0:
+                    javafiles.append(FileInfo(f))
+        if len(javafiles) == 0:
             logv('[no Java sources in {0} - skipping]'.format(p.name))
             continue
 
-        res = batches.setdefault(batch.settings(), batch)
-        if res is not batch:
-            res.javafiles = res.javafiles + batch.javafiles
+        res = batches.setdefault(batch, javafiles)
+        if res is not javafiles:
+            res.extend(javafiles)
 
     log("we have: " + str(len(batches)) + " batches")
-    for batch in batches.itervalues():
-        for chunk in _chunk_files_for_command_line(batch.javafiles, pathFunction=lambda f: f.path):
+    for batch, javafiles in batches.iteritems():
+        for chunk in _chunk_files_for_command_line(javafiles, pathFunction=lambda f: f.path):
             run([args.eclipse_exe,
                 '-nosplash',
                 '-application',
                 'org.eclipse.jdt.core.JavaCodeFormatter',
-                '-vm', java(batch.javaCompliance).java,
                 '-config', batch.path]
                 + [f.path for f in chunk])
             for fi in chunk:
@@ -3094,6 +3535,7 @@ def _archive(args):
 def archive(args):
     """create jar files for projects and distributions"""
     parser = ArgumentParser(prog='mx archive')
+    parser.add_argument('--parsable', action='store_true', dest='parsable', help='Outputs results in a stable parsable way (one archive per line, <ARCHIVE>=<path>)')
     parser.add_argument('names', nargs=REMAINDER, metavar='[<project>|@<distribution>]...')
     args = parser.parse_args(args)
 
@@ -3104,11 +3546,17 @@ def archive(args):
             d = distribution(dname)
             d.make_archive()
             archives.append(d.path)
+            if args.parsable:
+                log('{0}={1}'.format(dname, d.path))
         else:
             p = project(name)
-            archives.append(p.make_archive())
+            path = p.make_archive()
+            archives.append(path)
+            if args.parsable:
+                log('{0}={1}'.format(name, path))
 
-    logv("generated archives: " + str(archives))
+    if not args.parsable:
+        logv("generated archives: " + str(archives))
     return archives
 
 def canonicalizeprojects(args):
@@ -3119,9 +3567,10 @@ def canonicalizeprojects(args):
     nonCanonical = []
     for s in suites(True):
         for p in s.projects:
-            for pkg in p.defined_java_packages():
-                if not pkg.startswith(p.name):
-                    abort('package in {0} does not have prefix matching project name: {1}'.format(p, pkg))
+            if p.checkPackagePrefix:
+                for pkg in p.defined_java_packages():
+                    if not pkg.startswith(p.name):
+                        abort('package in {0} does not have prefix matching project name: {1}'.format(p, pkg))
 
             ignoredDeps = set([name for name in p.deps if project(name, False) is not None])
             for pkg in p.imported_java_packages():
@@ -3215,7 +3664,7 @@ def checkstyle(args):
 
         config = join(project(p.checkstyleProj).dir, '.checkstyle_checks.xml')
         if not exists(config):
-            logv('[No Checkstyle configuration foudn for {0} - skipping]'.format(p))
+            logv('[No Checkstyle configuration found for {0} - skipping]'.format(p))
             continue
 
         # skip checking this Java project if its Java compliance level is "higher" than the configured JDK
@@ -3389,6 +3838,7 @@ def projectgraph(args, suite=None):
     """create graph for project structure ("mx projectgraph | dot -Tpdf -oprojects.pdf" or "mx projectgraph --igv")"""
 
     parser = ArgumentParser(prog='mx projectgraph')
+    parser.add_argument('--dist', action='store_true', help='group projects by distribution')
     parser.add_argument('--igv', action='store_true', help='output to IGV listening on 127.0.0.1:4444')
     parser.add_argument('--igv-format', action='store_true', help='output graph in IGV format')
 
@@ -3438,6 +3888,20 @@ def projectgraph(args, suite=None):
     print 'digraph projects {'
     print 'rankdir=BT;'
     print 'node [shape=rect];'
+    if args.dist:
+        projs = {}
+        for d in sorted_dists():
+            if not d.isProcessorDistribution:
+                print 'subgraph "cluster_' + d.name + '" {'
+                print 'label="' + d.name + '";'
+                for p in d.sorted_deps(includeLibs=False, transitive=True):
+                    if p in projs:
+                        if not projs[p] in d.get_dist_deps(includeSelf=False, transitive=True):
+                            raise RuntimeError('ERROR: project ' + p.name + ' in two dists: ' + projs[p].name + ' and ' + d.name)
+                    else:
+                        projs[p] = d
+                        print '"' + p.name + '";'
+                print '}'
     for p in projects():
         for dep in p.canonical_deps():
             print '"' + p.name + '"->"' + dep + '";'
@@ -3510,7 +3974,7 @@ def make_eclipse_attach(suite, hostname, port, name=None, deps=None):
     launchFile = join(eclipseLaunches, name + '.launch')
     return update_file(launchFile, launch), launchFile
 
-def make_eclipse_launch(javaArgs, jre, name=None, deps=None):
+def make_eclipse_launch(suite, javaArgs, jre, name=None, deps=None):
     """
     Creates an Eclipse launch configuration file for running/debugging a Java command.
     """
@@ -3572,7 +4036,7 @@ def make_eclipse_launch(javaArgs, jre, name=None, deps=None):
     launch.close('launchConfiguration')
     launch = launch.xml(newl='\n', standalone='no') % slm.xml(escape=True, standalone='no')
 
-    eclipseLaunches = join('mx', 'eclipse-launches')
+    eclipseLaunches = join(suite.mxDir, 'eclipse-launches')
     if not exists(eclipseLaunches):
         os.makedirs(eclipseLaunches)
     return update_file(join(eclipseLaunches, name + '.launch'), launch)
@@ -3594,12 +4058,11 @@ def _check_ide_timestamp(suite, configZip, ide):
         return False
 
     if ide == 'eclipse':
-        eclipseSettingsDir = join(suite.mxDir, 'eclipse-settings')
-        if exists(eclipseSettingsDir):
-            for name in os.listdir(eclipseSettingsDir):
-                path = join(eclipseSettingsDir, name)
-                if configZip.isOlderThan(path):
-                    return False
+        for p in suite.projects:
+            for _, sources in p.eclipse_settings_sources().iteritems():
+                for source in sources:
+                    if configZip.isOlderThan(source):
+                        return False
     return True
 
 def _eclipseinit_project(p, files=None, libFiles=None):
@@ -3784,37 +4247,15 @@ def _eclipseinit_project(p, files=None, libFiles=None):
     if not exists(settingsDir):
         os.mkdir(settingsDir)
 
-    # collect the defaults from mxtool
-    defaultEclipseSettingsDir = join(dirname(__file__), 'eclipse-settings')
-    esdict = {}
-    if exists(defaultEclipseSettingsDir):
-        for name in os.listdir(defaultEclipseSettingsDir):
-            if isfile(join(defaultEclipseSettingsDir, name)):
-                esdict[name] = os.path.abspath(join(defaultEclipseSettingsDir, name))
-
-    # check for suite overrides
-    eclipseSettingsDir = join(p.suite.mxDir, 'eclipse-settings')
-    if exists(eclipseSettingsDir):
-        for name in os.listdir(eclipseSettingsDir):
-            if isfile(join(eclipseSettingsDir, name)):
-                esdict[name] = os.path.abspath(join(eclipseSettingsDir, name))
-
-    # check for project overrides
-    projectSettingsDir = join(p.dir, 'eclipse-settings')
-    if exists(projectSettingsDir):
-        for name in os.listdir(projectSettingsDir):
-            if isfile(join(projectSettingsDir, name)):
-                esdict[name] = os.path.abspath(join(projectSettingsDir, name))
-
     # copy a possibly modified file to the project's .settings directory
-    for name, path in esdict.iteritems():
-        # ignore this file altogether if this project has no annotation processors
-        if name == "org.eclipse.jdt.apt.core.prefs" and not processorPath:
-            continue
-
-        with open(path) as f:
-            content = f.read()
-        content = content.replace('${javaCompliance}', str(p.javaCompliance))
+    for name, sources in p.eclipse_settings_sources().iteritems():
+        out = StringIO.StringIO()
+        print >> out, '# GENERATED -- DO NOT EDIT'
+        for source in sources:
+            print >> out, '# Source:', source
+            with open(source) as f:
+                print >> out, f.read()
+        content = out.getvalue().replace('${javaCompliance}', str(p.javaCompliance))
         if processorPath:
             content = content.replace('org.eclipse.jdt.core.compiler.processAnnotations=disabled', 'org.eclipse.jdt.core.compiler.processAnnotations=enabled')
         update_file(join(settingsDir, name), content)
@@ -3883,7 +4324,7 @@ def _eclipseinit_suite(args, suite, buildProcessorJars=True, refreshOnly=False):
         out.open('buildSpec')
         dist.dir = projectDir
         dist.javaCompliance = max([p.javaCompliance for p in distProjects])
-        _genEclipseBuilder(out, dist, 'Create' + dist.name + 'Dist', 'archive @' + dist.name, relevantResources=relevantResources, logToFile=True, refresh=False, async=True)
+        _genEclipseBuilder(out, dist, 'Create' + dist.name + 'Dist', '-v archive @' + dist.name, relevantResources=relevantResources, logToFile=True, refresh=False, async=False, logToConsole=False, appendToLogFile=False)
         out.close('buildSpec')
         out.open('natures')
         out.element('nature', data='org.eclipse.jdt.core.javanature')
@@ -3921,8 +4362,7 @@ def _genEclipseBuilder(dotProjectDoc, p, name, mxCommand, refresh=True, refreshF
     launchOut.open('launchConfiguration', {'type' : 'org.eclipse.ui.externaltools.ProgramBuilderLaunchConfigurationType'})
     launchOut.element('booleanAttribute', {'key' : 'org.eclipse.debug.core.capture_output', 'value': consoleOn})
     launchOut.open('mapAttribute', {'key' : 'org.eclipse.debug.core.environmentVariables'})
-    launchOut.element('mapEntry', {'key' : 'JAVA_HOME', 'value' : _opts.java_home})
-    launchOut.element('mapEntry', {'key' : 'EXTRA_JAVA_HOMES', 'value' : _opts.extra_java_homes})
+    launchOut.element('mapEntry', {'key' : 'JAVA_HOME', 'value' : java().jdk})
     launchOut.close('mapAttribute')
 
     if refresh:
@@ -4170,13 +4610,43 @@ def _netbeansinit_project(p, jdks=None, files=None, libFiles=None):
     out.open('project', {'name' : p.name, 'default' : 'default', 'basedir' : '.'})
     out.element('description', data='Builds, tests, and runs the project ' + p.name + '.')
     out.element('import', {'file' : 'nbproject/build-impl.xml'})
-    out.open('target', {'name' : '-post-compile'})
-    out.open('exec', {'executable' : sys.executable})
+    out.open('target', {'name' : '-post-init'})
+    out.open('pathconvert', {'property' : 'comma.javac.classpath', 'pathsep' : ','})
+    out.element('path', {'path' : '${javac.classpath}'})
+    out.close('pathconvert')
+
+    out.open('restrict', {'id' : 'missing.javac.classpath'})
+    out.element('filelist', {'dir' : '${basedir}', 'files' : '${comma.javac.classpath}'})
+    out.open('not')
+    out.element('exists')
+    out.close('not')
+    out.close('restrict')
+
+    out.element('property', {'name' : 'missing.javac.classpath', 'refid' : 'missing.javac.classpath'})
+
+    out.open('condition', {'property' : 'no.dependencies', 'value' : 'true'})
+    out.element('equals', {'arg1' : '${missing.javac.classpath}', 'arg2' : ''})
+    out.close('condition')
+
+    out.element('property', {'name' : 'no.dependencies', 'value' : 'false'})
+
+    out.open('condition', {'property' : 'no.deps'})
+    out.element('equals', {'arg1' : '${no.dependencies}', 'arg2' : 'true'})
+    out.close('condition')
+
+    out.close('target')
+    out.open('target', {'name' : 'compile'})
+    out.open('exec', {'executable' : sys.executable, 'failonerror' : 'true'})
     out.element('env', {'key' : 'JAVA_HOME', 'value' : jdk.jdk})
     out.element('arg', {'value' : os.path.abspath(__file__)})
-    out.element('arg', {'value' : 'archive'})
-    out.element('arg', {'value' : '@GRAAL'})
+    out.element('arg', {'value' : 'build'})
+    out.element('arg', {'value' : '--only'})
+    out.element('arg', {'value' : p.name})
+    out.element('arg', {'value' : '--force-javac'})
+    out.element('arg', {'value' : '--no-native'})
     out.close('exec')
+    out.close('target')
+    out.open('target', {'name' : 'jar', 'depends' : 'compile'})
     out.close('target')
     out.close('project')
     update_file(join(p.dir, 'build.xml'), out.xml(indent='\t', newl='\n'))
@@ -4632,22 +5102,34 @@ def ideinit(args, refreshOnly=False, buildProcessorJars=True):
 
 def fsckprojects(args):
     """find directories corresponding to deleted Java projects and delete them"""
+    if not is_interactive():
+        log('fsckprojects command must be run in an interactive shell')
+        return
+    hg = HgConfig()
+    projectDirs = [p.dir for suite in suites() for p in suite.projects]
+    distIdeDirs = [d.get_ide_project_dir() for suite in suites() for d in suite.dists if d.get_ide_project_dir() is not None]
     for suite in suites(True):
-        projectDirs = [p.dir for p in suite.projects]
         for dirpath, dirnames, files in os.walk(suite.dir):
             if dirpath == suite.dir:
-                # no point in traversing .hg or lib/
-                dirnames[:] = [d for d in dirnames if d not in ['.hg', 'lib']]
+                # no point in traversing .hg, lib, or .workspace
+                dirnames[:] = [d for d in dirnames if d not in ['.hg', 'lib', '.workspace']]
             elif dirpath in projectDirs:
-                # don't traverse subdirs of an existing project in this suite
+                # don't traverse subdirs of an existing project
+                dirnames[:] = []
+            elif dirpath in distIdeDirs:
+                # don't traverse subdirs of an existing distribution
                 dirnames[:] = []
             else:
-                projectConfigFiles = frozenset(['.classpath', 'nbproject'])
+                projectConfigFiles = frozenset(['.classpath', '.project', 'nbproject'])
                 indicators = projectConfigFiles.intersection(files)
                 if len(indicators) != 0:
-                    if not sys.stdout.isatty() or ask_yes_no(dirpath + ' looks like a removed project -- delete it', 'n'):
-                        shutil.rmtree(dirpath)
-                        log('Deleted ' + dirpath)
+                    indicators = [os.path.relpath(join(dirpath, i), suite.dir) for i in indicators]
+                    indicatorsInHg = hg.locate(suite.dir, indicators)
+                    # Only proceed if there are indicator files that are not under HG
+                    if len(indicators) > len(indicatorsInHg):
+                        if ask_yes_no(dirpath + ' looks like a removed project -- delete it', 'n'):
+                            shutil.rmtree(dirpath)
+                            log('Deleted ' + dirpath)
 
 def javadoc(args, parser=None, docDir='javadoc', includeDeps=True, stdDoclet=True):
     """generate javadoc for some/all Java projects"""
@@ -4764,6 +5246,7 @@ def javadoc(args, parser=None, docDir='javadoc', includeDeps=True, stdDoclet=Tru
                 # Once https://bugs.openjdk.java.net/browse/JDK-8041628 is fixed,
                 # this should be reverted to:
                 # javadocExe = java().javadoc
+                # we can then also respect _opts.relatex_compliance
                 javadocExe = projectJava.javadoc
 
                 run([javadocExe, memory,
@@ -4773,9 +5256,8 @@ def javadoc(args, parser=None, docDir='javadoc', includeDeps=True, stdDoclet=Tru
                      '-d', out,
                      '-overview', overviewFile,
                      '-sourcepath', sp,
-                     '-source', str(projectJava.javaCompliance),
-                     '-bootclasspath', projectJava.bootclasspath(),
-                     '-extdirs', projectJava.extdirs()] +
+                     '-source', str(projectJava.javaCompliance)] +
+                     projectJava.javadocLibOptions([]) +
                      ([] if projectJava.javaCompliance < JavaCompliance('1.8') else ['-Xdoclint:none']) +
                      links +
                      extraArgs +
@@ -4985,15 +5467,17 @@ def select_items(items, descriptions=None, allowMultiple=True):
     if len(items) <= 1:
         return items
     else:
+        assert is_interactive()
+        numlen = str(len(str(len(items))))
         if allowMultiple:
-            log('[0] <all>')
+            log(('[{0:>' + numlen + '}] <all>').format(0))
         for i in range(0, len(items)):
             if descriptions is None:
-                log('[{0}] {1}'.format(i + 1, items[i]))
+                log(('[{0:>' + numlen + '}] {1}').format(i + 1, items[i]))
             else:
                 assert len(items) == len(descriptions)
                 wrapper = textwrap.TextWrapper(subsequent_indent='    ')
-                log('\n'.join(wrapper.wrap('[{0}] {1} - {2}'.format(i + 1, items[i], descriptions[i]))))
+                log('\n'.join(wrapper.wrap(('[{0:>' + numlen + '}] {1} - {2}').format(i + 1, items[i], descriptions[i]))))
         while True:
             if allowMultiple:
                 s = raw_input('Enter number(s) of selection (separate multiple choices with spaces): ').split()
@@ -5162,10 +5646,69 @@ def show_suites(args):
         _show_section('projects', s.projects)
         _show_section('distributions', s.dists)
 
+def _compile_mx_class(javaClassName, classpath=None, jdk=None, myDir=None):
+    myDir = dirname(__file__) if myDir is None else myDir
+    binDir = join(myDir, 'bin' if not jdk else '.jdk' + str(jdk.version))
+    javaSource = join(myDir, javaClassName + '.java')
+    javaClass = join(binDir, javaClassName + '.class')
+    if not exists(javaClass) or getmtime(javaClass) < getmtime(javaSource):
+        if not exists(binDir):
+            os.mkdir(binDir)
+        javac = jdk.javac if jdk else java().javac
+        cmd = [javac, '-d', _cygpathU2W(binDir)]
+        if classpath:
+            cmd += ['-cp', _separatedCygpathU2W(binDir + os.pathsep + classpath)]
+        cmd += [_cygpathU2W(javaSource)]
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError:
+            abort('failed to compile:' + javaSource)
+
+    return (myDir, binDir)
+
+def checkcopyrights(args):
+    '''run copyright check on the sources'''
+    class CP(ArgumentParser):
+        def format_help(self):
+            return ArgumentParser.format_help(self) + self._get_program_help()
+
+        def _get_program_help(self):
+            help_output = subprocess.check_output([java().java, '-cp', _cygpathU2W(binDir), 'CheckCopyright', '--help'])
+            return '\nother argumemnts preceded with --\n' +  help_output
+
+    myDir, binDir = _compile_mx_class('CheckCopyright')
+
+    parser = CP(prog='mx checkcopyrights')
+
+    parser.add_argument('--primary', action='store_true', help='limit checks to primary suite')
+    parser.add_argument('remainder', nargs=REMAINDER, metavar='...')
+    args = parser.parse_args(args)
+    remove_doubledash(args.remainder)
+
+
+    # ensure compiled form of code is up to date
+
+    result = 0
+    # copyright checking is suite specific as each suite may have different overrides
+    for s in suites(True):
+        if args.primary and not s.primary:
+            continue
+        custom_copyrights = _cygpathU2W(join(s.mxDir, 'copyrights'))
+        custom_args = []
+        if exists(custom_copyrights):
+            custom_args = ['--custom-copyright-dir', custom_copyrights]
+        rc = run([java().java, '-cp', _cygpathU2W(binDir), 'CheckCopyright', '--copyright-dir', _cygpathU2W(myDir)] + custom_args + args.remainder, cwd=s.dir, nonZeroIsFatal=False)
+        result = result if rc == 0 else rc
+    return result
+
+def remove_doubledash(args):
+    if '--' in args:
+        args.remove('--')
+
 def ask_yes_no(question, default=None):
     """"""
     assert not default or default == 'y' or default == 'n'
-    if not sys.stdout.isatty():
+    if not is_interactive():
         if default:
             return default
         else:
@@ -5173,9 +5716,13 @@ def ask_yes_no(question, default=None):
     questionMark = '? [yn]: '
     if default:
         questionMark = questionMark.replace(default, default.upper())
-    answer = raw_input(question + questionMark) or default
-    while not answer:
-        answer = raw_input(question + questionMark)
+    if _opts.answer:
+        answer = str(_opts.answer)
+        print question + questionMark + answer
+    else:
+        answer = raw_input(question + questionMark) or default
+        while not answer:
+            answer = raw_input(question + questionMark)
     return answer.lower().startswith('y')
 
 def add_argument(*args, **kwargs):
@@ -5187,9 +5734,22 @@ def add_argument(*args, **kwargs):
 
 def update_commands(suite, new_commands):
     for key, value in new_commands.iteritems():
-        if _commands.has_key(key):
-            warn("redefining command '" + key + "' in suite " + suite.name)
+        assert ':' not in key
+        old = _commands.get(key)
+        if old is not None:
+            oldSuite = _commandsToSuite.get(key)
+            if not oldSuite:
+                # Core mx command is overridden by first suite
+                # defining command of same name. The core mx
+                # command has its name prefixed with ':'.
+                _commands[':' + key] = old
+            else:
+                # Previously specified command from another suite
+                # is not overridden. Instead, the new command
+                # has a name qualified by the suite name.
+                key = suite.name + ':' + key
         _commands[key] = value
+        _commandsToSuite[key] = suite
 
 def warn(msg):
     if _warn:
@@ -5197,7 +5757,7 @@ def warn(msg):
 
 # Table of commands in alphabetical order.
 # Keys are command names, value are lists: [<function>, <usage msg>, <format args to doc string of function>...]
-# If any of the format args are instances of Callable, then they are called with an 'env' are before being
+# If any of the format args are instances of Callable, then they are called before being
 # used in the call to str.format().
 # Suite extensions should not update this table directly, but use update_commands
 _commands = {
@@ -5205,10 +5765,12 @@ _commands = {
     'build': [build, '[options]'],
     'checkstyle': [checkstyle, ''],
     'canonicalizeprojects': [canonicalizeprojects, ''],
+    'checkcopyrights': [checkcopyrights, '[options]'],
     'clean': [clean, ''],
     'eclipseinit': [eclipseinit, ''],
     'eclipseformat': [eclipseformat, ''],
     'exportlibs': [exportlibs, ''],
+    'findbugs': [mx_findbugs.findbugs, ''],
     'findclass': [findclass, ''],
     'fsckprojects': [fsckprojects, ''],
     'help': [help_, '[command]'],
@@ -5224,18 +5786,18 @@ _commands = {
     'netbeansinit': [netbeansinit, ''],
     'suites': [show_suites, ''],
     'projects': [show_projects, ''],
+    'unittest' : [mx_unittest.unittest, '[unittest options] [--] [VM options] [filters...]', mx_unittest.unittestHelpSuffix],
 }
+_commandsToSuite = {}
 
 _argParser = ArgParser()
 
 def _suitename(mxDir):
     base = os.path.basename(mxDir)
     parts = base.split('.')
-    # temporary workaround until mx.graal exists
-    if len(parts) == 1:
-        return 'graal'
-    else:
-        return parts[1]
+    assert len(parts) == 2
+    assert parts[0] == 'mx'
+    return parts[1]
 
 def _is_suite_dir(d, mxDirName=None):
     """
@@ -5243,11 +5805,10 @@ def _is_suite_dir(d, mxDirName=None):
     If mxDirName is None, matches any suite name, otherwise checks for exactly that suite.
     """
     if os.path.isdir(d):
-        for f in os.listdir(d):
-            if (mxDirName == None and (f == 'mx' or fnmatch.fnmatch(f, 'mx.*'))) or f == mxDirName:
-                mxDir = join(d, f)
-                if exists(mxDir) and isdir(mxDir) and (exists(join(mxDir, 'suite.py'))):
-                    return mxDir
+        for f in [mxDirName] if mxDirName else [e for e in os.listdir(d) if e.startswith('mx.')]:
+            mxDir = join(d, f)
+            if exists(mxDir) and isdir(mxDir) and (exists(join(mxDir, 'suite.py'))):
+                return mxDir
 
 def _check_primary_suite():
     if _primary_suite is None:
@@ -5285,6 +5846,11 @@ def _findPrimarySuiteMxDir():
     return _findPrimarySuiteMxDirFrom(dirname(__file__))
 
 def main():
+    mxMxDir = _is_suite_dir(os.path.abspath(dirname(__file__)))
+    assert mxMxDir
+    global _mx_suite
+    _mx_suite = _loadSuite(mxMxDir)
+
     primarySuiteMxDir = _findPrimarySuiteMxDir()
     if primarySuiteMxDir:
         global _primary_suite
@@ -5294,16 +5860,6 @@ def main():
 
     opts, commandAndArgs = _argParser._parse_cmd_line()
     assert _opts == opts
-
-    global _java_homes
-    defaultJdk = JavaConfig(opts.java_home, opts.java_dbg_port)
-    _java_homes = [defaultJdk]
-    if opts.extra_java_homes:
-        for java_home in opts.extra_java_homes.split(os.pathsep):
-            extraJdk = JavaConfig(java_home, opts.java_dbg_port)
-            if extraJdk > defaultJdk:
-                abort('Secondary JDK ' + extraJdk.jdk + ' has higher compliance level than default JDK ' + defaultJdk.jdk)
-            _java_homes.append(extraJdk)
 
     for s in suites():
         s._post_init(opts)
@@ -5353,9 +5909,6 @@ version = VersionSpec("1.0")
 currentUmask = None
 
 if __name__ == '__main__':
-    # rename this module as 'mx' so it is not imported twice by the commands.py modules
-    sys.modules['mx'] = sys.modules.pop('__main__')
-
     # Capture the current umask since there's no way to query it without mutating it.
     currentUmask = os.umask(0)
     os.umask(currentUmask)

@@ -23,10 +23,13 @@
 package com.oracle.graal.phases.common;
 
 import static com.oracle.graal.compiler.common.GraalOptions.*;
+import static com.oracle.graal.phases.common.LoweringPhase.ProcessBlockState.*;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.Graph.Mark;
 import com.oracle.graal.graph.*;
@@ -117,7 +120,7 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
 
         @Override
         public GuardingNode createGuard(FixedNode before, LogicNode condition, DeoptimizationReason deoptReason, DeoptimizationAction action) {
-            return createGuard(before, condition, deoptReason, action, false);
+            return createGuard(before, condition, deoptReason, action, JavaConstant.NULL_POINTER, false);
         }
 
         public StampProvider getStampProvider() {
@@ -125,7 +128,7 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
         }
 
         @Override
-        public GuardingNode createGuard(FixedNode before, LogicNode condition, DeoptimizationReason deoptReason, DeoptimizationAction action, boolean negated) {
+        public GuardingNode createGuard(FixedNode before, LogicNode condition, DeoptimizationReason deoptReason, DeoptimizationAction action, JavaConstant speculation, boolean negated) {
             if (OptEliminateGuards.getValue()) {
                 for (Node usage : condition.usages()) {
                     if (!activeGuards.isNew(usage) && activeGuards.isMarked(usage) && ((GuardNode) usage).isNegated() == negated) {
@@ -135,7 +138,7 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
             }
             StructuredGraph graph = before.graph();
             if (!condition.graph().getGuardsStage().allowsFloatingGuards()) {
-                FixedGuardNode fixedGuard = graph.add(new FixedGuardNode(condition, deoptReason, action, negated));
+                FixedGuardNode fixedGuard = graph.add(new FixedGuardNode(condition, deoptReason, action, speculation, negated));
                 graph.addBeforeFixed(before, fixedGuard);
                 DummyGuardHandle handle = graph.add(new DummyGuardHandle(fixedGuard));
                 fixedGuard.lower(this);
@@ -143,7 +146,7 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
                 handle.safeDelete();
                 return result;
             } else {
-                GuardNode newGuard = graph.unique(new GuardNode(condition, guardAnchor, deoptReason, action, negated, JavaConstant.NULL_POINTER));
+                GuardNode newGuard = graph.unique(new GuardNode(condition, guardAnchor, deoptReason, action, negated, speculation));
                 if (OptEliminateGuards.getValue()) {
                     activeGuards.markAndGrow(newGuard);
                 }
@@ -250,35 +253,50 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
         @Override
         public void run(StructuredGraph graph) {
             schedule.apply(graph, false);
-            processBlock(schedule.getCFG().getStartBlock(), graph.createNodeBitMap(), null);
+            schedule.getCFG().computePostdominators();
+            Block startBlock = schedule.getCFG().getStartBlock();
+            ProcessFrame rootFrame = new ProcessFrame(startBlock, graph.createNodeBitMap(), startBlock.getBeginNode(), null);
+            LoweringPhase.processBlock(rootFrame);
         }
 
-        private void processBlock(Block block, NodeBitMap activeGuards, AnchoringNode parentAnchor) {
+        private class ProcessFrame extends Frame<ProcessFrame> {
+            private final NodeBitMap activeGuards;
+            private AnchoringNode anchor;
 
-            AnchoringNode anchor = parentAnchor;
-            if (anchor == null) {
-                anchor = block.getBeginNode();
-            }
-            anchor = process(block, activeGuards, anchor);
-
-            // Process always reached block first.
-            Block alwaysReachedBlock = block.getPostdominator();
-            if (alwaysReachedBlock != null && alwaysReachedBlock.getDominator() == block) {
-                processBlock(alwaysReachedBlock, activeGuards, anchor);
+            public ProcessFrame(Block block, NodeBitMap activeGuards, AnchoringNode anchor, ProcessFrame parent) {
+                super(block, parent);
+                this.activeGuards = activeGuards;
+                this.anchor = anchor;
             }
 
-            // Now go for the other dominators.
-            for (Block dominated : block.getDominated()) {
-                if (dominated != alwaysReachedBlock) {
-                    assert dominated.getDominator() == block;
-                    processBlock(dominated, activeGuards, null);
+            @Override
+            public void preprocess() {
+                this.anchor = Round.this.process(block, activeGuards, anchor);
+            }
+
+            @Override
+            public ProcessFrame enter(Block b) {
+                return new ProcessFrame(b, activeGuards, b.getBeginNode(), this);
+            }
+
+            @Override
+            public Frame<?> enterAlwaysReached(Block b) {
+                AnchoringNode newAnchor = anchor;
+                if (parent != null && b.getLoop() != parent.block.getLoop() && !b.isLoopHeader()) {
+                    // We are exiting a loop => cannot reuse the anchor without inserting loop
+                    // proxies.
+                    newAnchor = b.getBeginNode();
                 }
+                return new ProcessFrame(b, activeGuards, newAnchor, this);
             }
 
-            if (parentAnchor == null && OptEliminateGuards.getValue()) {
-                for (GuardNode guard : anchor.asNode().usages().filter(GuardNode.class)) {
-                    if (activeGuards.isMarkedAndGrow(guard)) {
-                        activeGuards.clear(guard);
+            @Override
+            public void postprocess() {
+                if (anchor != null && OptEliminateGuards.getValue()) {
+                    for (GuardNode guard : anchor.asNode().usages().filter(GuardNode.class)) {
+                        if (activeGuards.isMarkedAndGrow(guard)) {
+                            activeGuards.clear(guard);
+                        }
                     }
                 }
             }
@@ -289,7 +307,7 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
             final LoweringToolImpl loweringTool = new LoweringToolImpl(context, startAnchor, activeGuards, b.getBeginNode());
 
             // Lower the instructions of this block.
-            List<ValueNode> nodes = schedule.nodesFor(b);
+            List<Node> nodes = schedule.nodesFor(b);
             for (Node node : nodes) {
 
                 if (node.isDeleted()) {
@@ -357,8 +375,7 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
             if (node instanceof FloatingNode) {
                 for (Node usage : node.usages()) {
                     if (usage instanceof ValueNode) {
-                        Block usageBlock = schedule.getCFG().blockFor(usage);
-                        if (usageBlock == null) {
+                        if (schedule.getCFG().getNodeToBlock().isNew(usage) || schedule.getCFG().blockFor(usage) == null) {
                             unscheduledUsages.add(usage);
                         }
                     }
@@ -367,4 +384,111 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
             return unscheduledUsages;
         }
     }
+
+    enum ProcessBlockState {
+        ST_ENTER,
+        ST_PROCESS,
+        ST_ENTER_ALWAYS_REACHED,
+        ST_LEAVE,
+        ST_PROCESS_ALWAYS_REACHED;
+    }
+
+    /**
+     * This state-machine resembles the following recursion:
+     *
+     * <pre>
+     * void processBlock(Block block) {
+     *     preprocess();
+     *     // Process always reached block first.
+     *     Block alwaysReachedBlock = block.getPostdominator();
+     *     if (alwaysReachedBlock != null &amp;&amp; alwaysReachedBlock.getDominator() == block) {
+     *         processBlock(alwaysReachedBlock);
+     *     }
+     * 
+     *     // Now go for the other dominators.
+     *     for (Block dominated : block.getDominated()) {
+     *         if (dominated != alwaysReachedBlock) {
+     *             assert dominated.getDominator() == block;
+     *             processBlock(dominated);
+     *         }
+     *     }
+     *     postprocess();
+     * }
+     * </pre>
+     *
+     * This is necessary, as the recursive implementation quickly exceed the stack depth on SPARC.
+     *
+     * @param rootFrame contains the starting block.
+     */
+    public static void processBlock(final Frame<?> rootFrame) {
+        ProcessBlockState state = ST_PROCESS;
+        Frame<?> f = rootFrame;
+        while (f != null) {
+            ProcessBlockState nextState;
+            if (state == ST_PROCESS || state == ST_PROCESS_ALWAYS_REACHED) {
+                f.preprocess();
+                nextState = state == ST_PROCESS_ALWAYS_REACHED ? ST_ENTER : ST_ENTER_ALWAYS_REACHED;
+            } else if (state == ST_ENTER_ALWAYS_REACHED) {
+                if (f.alwaysReachedBlock != null && f.alwaysReachedBlock.getDominator() == f.block) {
+                    f = f.enterAlwaysReached(f.alwaysReachedBlock);
+                    nextState = ST_PROCESS;
+                } else {
+                    nextState = ST_ENTER;
+                }
+            } else if (state == ST_ENTER) {
+                if (f.dominated.hasNext()) {
+                    Block n = f.dominated.next();
+                    if (n == f.alwaysReachedBlock) {
+                        if (f.dominated.hasNext()) {
+                            n = f.dominated.next();
+                        } else {
+                            n = null;
+                        }
+                    }
+                    if (n == null) {
+                        nextState = ST_LEAVE;
+                    } else {
+                        f = f.enter(n);
+                        assert f.block.getDominator() == f.parent.block;
+                        nextState = ST_PROCESS;
+                    }
+                } else {
+                    nextState = ST_LEAVE;
+                }
+            } else if (state == ST_LEAVE) {
+                f.postprocess();
+                f = f.parent;
+                nextState = ST_ENTER;
+            } else {
+                throw JVMCIError.shouldNotReachHere();
+            }
+            state = nextState;
+        }
+    }
+
+    public abstract static class Frame<T extends Frame<?>> {
+        final Block block;
+        final T parent;
+        Iterator<Block> dominated;
+        final Block alwaysReachedBlock;
+
+        public Frame(Block block, T parent) {
+            super();
+            this.block = block;
+            this.alwaysReachedBlock = block.getPostdominator();
+            this.dominated = block.getDominated().iterator();
+            this.parent = parent;
+        }
+
+        public Frame<?> enterAlwaysReached(Block b) {
+            return enter(b);
+        }
+
+        public abstract Frame<?> enter(Block b);
+
+        public abstract void preprocess();
+
+        public abstract void postprocess();
+    }
+
 }

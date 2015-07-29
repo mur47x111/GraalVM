@@ -26,9 +26,10 @@ import static org.junit.Assert.*;
 
 import java.util.*;
 
+import jdk.internal.jvmci.meta.*;
+
 import org.junit.*;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.calc.*;
 
 public class ConditionTest {

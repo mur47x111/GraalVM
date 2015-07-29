@@ -22,8 +22,9 @@
  */
 package com.oracle.graal.lir.debug;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.lir.*;
 
 /**

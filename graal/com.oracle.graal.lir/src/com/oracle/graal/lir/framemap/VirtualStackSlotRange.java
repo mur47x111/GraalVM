@@ -24,8 +24,8 @@ package com.oracle.graal.lir.framemap;
 
 import java.util.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 
 /**
  * Represents a {@link #getSlots() numbered} range of {@link VirtualStackSlot virtual stack slot} of
@@ -33,7 +33,6 @@ import com.oracle.graal.api.meta.*;
  */
 public class VirtualStackSlotRange extends VirtualStackSlot {
 
-    private static final long serialVersionUID = 5152592950118317121L;
     private final BitSet objects;
     private final int slots;
 

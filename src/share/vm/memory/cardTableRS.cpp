@@ -53,9 +53,10 @@ CardTableRS::CardTableRS(MemRegion whole_heap,
 #else
   _ct_bs = new CardTableModRefBSForCTRS(whole_heap, max_covered_regions);
 #endif
+  _ct_bs->initialize();
   set_bs(_ct_bs);
   _last_cur_val_in_gen = NEW_C_HEAP_ARRAY3(jbyte, GenCollectedHeap::max_gens + 1,
-                         mtGC, 0, AllocFailStrategy::RETURN_NULL);
+                         mtGC, CURRENT_PC, AllocFailStrategy::RETURN_NULL);
   if (_last_cur_val_in_gen == NULL) {
     vm_exit_during_initialization("Could not create last_cur_val_in_gen array.");
   }
@@ -351,15 +352,22 @@ protected:
                    "[_begin, _end) = [" PTR_FORMAT "," PTR_FORMAT ")",
                    p2i(jp), p2i(_begin), p2i(_end)));
     oop obj = oopDesc::load_decode_heap_oop(p);
-    guarantee(obj == NULL || (HeapWord*)obj >= _boundary,
-              err_msg("pointer " PTR_FORMAT " at " PTR_FORMAT " on "
-                      "clean card crosses boundary" PTR_FORMAT,
-                      p2i((HeapWord*)obj), p2i(jp), p2i(_boundary)));
+    if (!(obj == NULL || (HeapWord*)obj >= _boundary)) {
+      tty->print_cr("pointer " PTR_FORMAT " at " PTR_FORMAT " on "
+                    "clean card crosses boundary" PTR_FORMAT,
+                    p2i((HeapWord*)obj), p2i(jp), p2i(_boundary));
+#ifndef PRODUCT
+      obj->print();
+#endif
+      had_error = true;
+    }
   }
 
 public:
+  bool had_error;
+  
   VerifyCleanCardClosure(HeapWord* b, HeapWord* begin, HeapWord* end) :
-    _boundary(b), _begin(begin), _end(end) {
+    _boundary(b), _begin(begin), _end(end), had_error(false) {
     assert(b <= begin,
            err_msg("Error: boundary " PTR_FORMAT " should be at or below begin " PTR_FORMAT,
                    p2i(b), p2i(begin)));
@@ -399,6 +407,7 @@ void CardTableRS::verify_space(Space* s, HeapWord* gen_boundary) {
   // We don't need to do young-gen spaces.
   if (s->end() <= gen_boundary) return;
   MemRegion used = s->used_region();
+  bool had_error = false;
 
   jbyte* cur_entry = byte_for(used.start());
   jbyte* limit = byte_after(used.last());
@@ -437,6 +446,13 @@ void CardTableRS::verify_space(Space* s, HeapWord* gen_boundary) {
         for (HeapWord* cur = start_block; cur < end; cur += s->block_size(cur)) {
           if (s->block_is_obj(cur) && s->obj_is_alive(cur)) {
             oop(cur)->oop_iterate_no_header(&verify_blk, mr);
+            had_error |= verify_blk.had_error;
+            if (verify_blk.had_error) {
+              verify_blk.had_error = false;
+#ifndef PRODUCT
+              oop(cur)->print();
+#endif
+            }
           }
         }
       }
@@ -597,6 +613,7 @@ void CardTableRS::verify_space(Space* s, HeapWord* gen_boundary) {
       cur_entry++;
     }
   }
+  guarantee(!had_error, "Card table errors found");
 }
 
 void CardTableRS::verify() {

@@ -22,55 +22,36 @@
  */
 package com.oracle.graal.debug.internal;
 
-import static java.lang.Thread.*;
-
-import java.lang.management.*;
+import static com.oracle.graal.debug.DebugCloseable.*;
+import jdk.internal.jvmci.debug.*;
 
 import com.oracle.graal.debug.*;
-import com.sun.management.ThreadMXBean;
 
-public final class MemUseTrackerImpl extends DebugValue implements DebugMemUseTracker {
-
-    private static final ThreadMXBean threadMXBean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-
-    /**
-     * The amount of memory allocated by {@link ThreadMXBean#getThreadAllocatedBytes(long)} itself.
-     */
-    private static final long threadMXBeanOverhead = -getCurrentThreadAllocatedBytes() + getCurrentThreadAllocatedBytes();
+public final class MemUseTrackerImpl extends AccumulatedDebugValue implements DebugMemUseTracker {
 
     public static long getCurrentThreadAllocatedBytes() {
-        return threadMXBean.getThreadAllocatedBytes(currentThread().getId()) - threadMXBeanOverhead;
+        return Management.getCurrentThreadAllocatedBytes();
     }
-
-    public static final Closeable VOID_CLOSEABLE = new Closeable() {
-
-        @Override
-        public void close() {
-        }
-    };
 
     /**
      * Records the most recent active tracker.
      */
-    private static final ThreadLocal<CloseableImpl> currentTracker = new ThreadLocal<>();
+    private static final ThreadLocal<CloseableCounterImpl> currentTracker = new ThreadLocal<>();
 
-    private final DebugValue flat;
-
-    public MemUseTrackerImpl(String name) {
-        super(name + "_Accm", true);
-        this.flat = new DebugValue(name + "_Flat", true) {
+    public MemUseTrackerImpl(String name, boolean conditional) {
+        super(name, conditional, new DebugValue(name + "_Flat", conditional) {
 
             @Override
             public String toString(long value) {
                 return valueToString(value);
             }
-        };
+        });
     }
 
     @Override
-    public Closeable start() {
+    public DebugCloseable start() {
         if (!isConditional() || Debug.isMemUseTrackingEnabled()) {
-            CloseableImpl result = new CloseableImpl();
+            MemUseCloseableCounterImpl result = new MemUseCloseableCounterImpl(this);
             currentTracker.set(result);
             return result;
         } else {
@@ -87,27 +68,21 @@ public final class MemUseTrackerImpl extends DebugValue implements DebugMemUseTr
         return valueToString(value);
     }
 
-    private final class CloseableImpl implements Closeable {
+    private static final class MemUseCloseableCounterImpl extends CloseableCounterImpl implements DebugCloseable {
 
-        private final CloseableImpl parent;
-        private final long start;
-        private long nestedAmountToSubtract;
+        private MemUseCloseableCounterImpl(AccumulatedDebugValue counter) {
+            super(currentTracker.get(), counter);
+        }
 
-        private CloseableImpl() {
-            this.parent = currentTracker.get();
-            this.start = getCurrentThreadAllocatedBytes();
+        @Override
+        long getCounterValue() {
+            return getCurrentThreadAllocatedBytes();
         }
 
         @Override
         public void close() {
-            long end = getCurrentThreadAllocatedBytes();
-            long allocated = end - start;
-            if (parent != null) {
-                parent.nestedAmountToSubtract += allocated;
-            }
+            super.close();
             currentTracker.set(parent);
-            MemUseTrackerImpl.this.addToCurrentValue(allocated);
-            flat.addToCurrentValue(allocated - nestedAmountToSubtract);
         }
     }
 }

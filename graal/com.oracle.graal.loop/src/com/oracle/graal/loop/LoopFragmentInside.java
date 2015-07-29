@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,12 +24,15 @@ package com.oracle.graal.loop;
 
 import java.util.*;
 
+import jdk.internal.jvmci.common.*;
+
 import com.oracle.graal.compiler.common.*;
+import com.oracle.graal.graph.Graph.DuplicationReplacement;
 import com.oracle.graal.graph.*;
-import com.oracle.graal.graph.Graph.*;
 import com.oracle.graal.graph.iterators.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.VirtualState.*;
+import com.oracle.graal.nodes.VirtualState.NodeClosure;
+import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.util.*;
 
 public class LoopFragmentInside extends LoopFragment {
@@ -193,7 +196,7 @@ public class LoopFragmentInside extends LoopFragment {
         } else if (phi instanceof MemoryPhiNode) {
             ret = new MemoryPhiNode(merge, ((MemoryPhiNode) phi).getLocationIdentity());
         } else {
-            throw GraalInternalError.shouldNotReachHere();
+            throw JVMCIError.shouldNotReachHere();
         }
         return graph.addWithoutUnique(ret);
     }

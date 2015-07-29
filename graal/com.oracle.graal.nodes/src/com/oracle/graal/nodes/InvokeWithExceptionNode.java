@@ -24,11 +24,13 @@ package com.oracle.graal.nodes;
 
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.java.*;
+import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.util.*;
 
@@ -79,6 +81,11 @@ public final class InvokeWithExceptionNode extends ControlSplitNode implements I
 
     public CallTargetNode callTarget() {
         return callTarget;
+    }
+
+    void setCallTarget(CallTargetNode callTarget) {
+        updateUsages(this.callTarget, callTarget);
+        this.callTarget = callTarget;
     }
 
     public MethodCallTargetNode methodCallTarget() {
@@ -154,13 +161,15 @@ public final class InvokeWithExceptionNode extends ControlSplitNode implements I
 
     @Override
     public LocationIdentity getLocationIdentity() {
-        return LocationIdentity.ANY_LOCATION;
+        return LocationIdentity.any();
     }
 
     @Override
     public Map<Object, Object> getDebugProperties(Map<Object, Object> map) {
         Map<Object, Object> debugProperties = super.getDebugProperties(map);
-        debugProperties.put("targetMethod", callTarget.targetName());
+        if (callTarget != null) {
+            debugProperties.put("targetMethod", callTarget.targetName());
+        }
         return debugProperties;
     }
 
@@ -231,5 +240,10 @@ public final class InvokeWithExceptionNode extends ControlSplitNode implements I
     public void setGuard(GuardingNode guard) {
         updateUsagesInterface(this.guard, guard);
         this.guard = guard;
+    }
+
+    @Override
+    public AbstractBeginNode getPrimarySuccessor() {
+        return this.next();
     }
 }

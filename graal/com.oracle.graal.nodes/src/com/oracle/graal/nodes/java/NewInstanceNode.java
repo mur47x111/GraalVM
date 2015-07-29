@@ -25,7 +25,8 @@ package com.oracle.graal.nodes.java;
 import java.lang.ref.*;
 import java.util.*;
 
-import com.oracle.graal.api.meta.*;
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
@@ -37,13 +38,21 @@ import com.oracle.graal.nodes.virtual.*;
  * The {@code NewInstanceNode} represents the allocation of an instance class object.
  */
 @NodeInfo(nameTemplate = "New {p#instanceClass/s}")
-public final class NewInstanceNode extends AbstractNewObjectNode implements VirtualizableAllocation {
+public class NewInstanceNode extends AbstractNewObjectNode implements VirtualizableAllocation {
 
     public static final NodeClass<NewInstanceNode> TYPE = NodeClass.create(NewInstanceNode.class);
     protected final ResolvedJavaType instanceClass;
 
     public NewInstanceNode(ResolvedJavaType type, boolean fillContents) {
-        super(TYPE, StampFactory.exactNonNull(type), fillContents);
+        this(TYPE, type, fillContents, null);
+    }
+
+    public NewInstanceNode(ResolvedJavaType type, boolean fillContents, FrameState stateBefore) {
+        this(TYPE, type, fillContents, stateBefore);
+    }
+
+    protected NewInstanceNode(NodeClass<? extends NewInstanceNode> c, ResolvedJavaType type, boolean fillContents, FrameState stateBefore) {
+        super(c, StampFactory.exactNonNull(type), fillContents, stateBefore);
         assert !type.isArray() && !type.isInterface() && !type.isPrimitive();
         this.instanceClass = type;
     }
@@ -70,7 +79,7 @@ public final class NewInstanceNode extends AbstractNewObjectNode implements Virt
             for (int i = 0; i < state.length; i++) {
                 state[i] = defaultFieldValue(fields[i]);
             }
-            tool.createVirtualObject(virtualObject, state, Collections.<MonitorIdNode> emptyList());
+            tool.createVirtualObject(virtualObject, state, Collections.<MonitorIdNode> emptyList(), false);
             tool.replaceWithVirtual(virtualObject);
         }
     }

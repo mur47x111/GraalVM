@@ -28,10 +28,11 @@ import java.lang.ref.*;
 import java.util.*;
 import java.util.stream.*;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.debug.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.debug.*;
+
 import com.oracle.truffle.api.*;
-import com.oracle.truffle.api.CompilerDirectives.*;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.impl.*;
 import com.oracle.truffle.api.nodes.*;
 

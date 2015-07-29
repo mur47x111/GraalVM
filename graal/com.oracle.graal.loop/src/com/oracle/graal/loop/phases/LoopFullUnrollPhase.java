@@ -23,6 +23,7 @@
 package com.oracle.graal.loop.phases;
 
 import com.oracle.graal.debug.*;
+
 import com.oracle.graal.loop.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.*;
@@ -51,7 +52,7 @@ public class LoopFullUnrollPhase extends BasePhase<PhaseContext> {
                         Debug.log("FullUnroll %s", loop);
                         LoopTransformations.fullUnroll(loop, context, canonicalizer);
                         FULLY_UNROLLED_LOOPS.increment();
-                        Debug.dump(graph, "After fullUnroll %s", loop);
+                        Debug.dump(graph, "FullUnroll %s", loop);
                         peeled = true;
                         break;
                     }

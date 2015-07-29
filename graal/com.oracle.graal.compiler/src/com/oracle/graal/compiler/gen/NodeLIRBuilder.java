@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,33 +22,41 @@
  */
 package com.oracle.graal.compiler.gen;
 
-import static com.oracle.graal.api.code.ValueUtil.*;
-import static com.oracle.graal.compiler.GraalDebugConfig.*;
+import static com.oracle.graal.compiler.common.BackendOptions.*;
 import static com.oracle.graal.compiler.common.GraalOptions.*;
 import static com.oracle.graal.lir.LIR.*;
+import static jdk.internal.jvmci.code.ValueUtil.*;
+import static com.oracle.graal.debug.JVMCIDebugConfig.*;
 
 import java.util.*;
 import java.util.Map.Entry;
 
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
-import com.oracle.graal.compiler.common.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.common.*;
+import jdk.internal.jvmci.debug.*;
+
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.*;
+
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.calc.*;
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.compiler.match.*;
-import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.lir.*;
 import com.oracle.graal.lir.StandardOp.JumpOp;
+import com.oracle.graal.lir.StandardOp.LabelOp;
 import com.oracle.graal.lir.debug.*;
 import com.oracle.graal.lir.gen.*;
 import com.oracle.graal.lir.gen.LIRGenerator.Options;
+import com.oracle.graal.lir.gen.LIRGeneratorTool.BlockScope;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.cfg.*;
 import com.oracle.graal.nodes.extended.*;
+import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.virtual.*;
 
@@ -57,16 +65,16 @@ import com.oracle.graal.nodes.virtual.*;
  */
 @MatchableNode(nodeClass = ConstantNode.class, shareable = true)
 @MatchableNode(nodeClass = FloatConvertNode.class, inputs = {"value"})
-@MatchableNode(nodeClass = FloatingReadNode.class, inputs = {"object", "location"})
+@MatchableNode(nodeClass = FloatingReadNode.class, inputs = {"address"})
 @MatchableNode(nodeClass = IfNode.class, inputs = {"condition"})
 @MatchableNode(nodeClass = SubNode.class, inputs = {"x", "y"})
 @MatchableNode(nodeClass = LeftShiftNode.class, inputs = {"x", "y"})
 @MatchableNode(nodeClass = NarrowNode.class, inputs = {"value"})
-@MatchableNode(nodeClass = ReadNode.class, inputs = {"object", "location"})
+@MatchableNode(nodeClass = ReadNode.class, inputs = {"address"})
 @MatchableNode(nodeClass = ReinterpretNode.class, inputs = {"value"})
 @MatchableNode(nodeClass = SignExtendNode.class, inputs = {"value"})
 @MatchableNode(nodeClass = UnsignedRightShiftNode.class, inputs = {"x", "y"})
-@MatchableNode(nodeClass = WriteNode.class, inputs = {"object", "location", "value"})
+@MatchableNode(nodeClass = WriteNode.class, inputs = {"address", "value"})
 @MatchableNode(nodeClass = ZeroExtendNode.class, inputs = {"value"})
 @MatchableNode(nodeClass = AndNode.class, inputs = {"x", "y"}, commutative = true)
 @MatchableNode(nodeClass = FloatEqualsNode.class, inputs = {"x", "y"}, commutative = true)
@@ -81,7 +89,6 @@ import com.oracle.graal.nodes.virtual.*;
 @MatchableNode(nodeClass = OrNode.class, inputs = {"x", "y"}, commutative = true)
 @MatchableNode(nodeClass = XorNode.class, inputs = {"x", "y"}, commutative = true)
 @MatchableNode(nodeClass = PiNode.class, inputs = {"object"})
-@MatchableNode(nodeClass = ConstantLocationNode.class, shareable = true)
 public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGenerationDebugContext {
 
     private final NodeMap<Value> nodeOperands;
@@ -92,20 +99,20 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
     private ValueNode currentInstruction;
     private ValueNode lastInstructionPrinted; // Debugging only
 
-    private Map<Class<? extends ValueNode>, List<MatchStatement>> matchRules;
+    private Map<Class<? extends Node>, List<MatchStatement>> matchRules;
 
     public NodeLIRBuilder(StructuredGraph graph, LIRGeneratorTool gen) {
         this.gen = gen;
         this.nodeOperands = graph.createNodeMap();
-        this.debugInfoBuilder = createDebugInfoBuilder(graph, nodeOperands);
+        this.debugInfoBuilder = createDebugInfoBuilder(graph, this);
         if (MatchExpressions.getValue()) {
             matchRules = MatchRuleRegistry.lookup(getClass());
         }
     }
 
-    @SuppressWarnings({"unused", "hiding"})
-    protected DebugInfoBuilder createDebugInfoBuilder(StructuredGraph graph, NodeMap<Value> nodeOperands) {
-        return new DebugInfoBuilder(nodeOperands);
+    @SuppressWarnings({"unused"})
+    protected DebugInfoBuilder createDebugInfoBuilder(StructuredGraph graph, NodeValueMap nodeValueMap) {
+        return new DebugInfoBuilder(nodeValueMap);
     }
 
     /**
@@ -116,18 +123,18 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
      * @param node A node that produces a result value.
      */
     @Override
-    public Value operand(ValueNode node) {
+    public Value operand(Node node) {
         Value operand = getOperand(node);
         assert operand != null : String.format("missing operand for %1s", node);
         return operand;
     }
 
     @Override
-    public boolean hasOperand(ValueNode node) {
+    public boolean hasOperand(Node node) {
         return getOperand(node) != null;
     }
 
-    private Value getOperand(ValueNode node) {
+    private Value getOperand(Node node) {
         if (nodeOperands == null) {
             return null;
         }
@@ -135,7 +142,8 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
     }
 
     public ValueNode valueForOperand(Value value) {
-        for (Entry<Node, Value> entry : getNodeOperands().entries()) {
+        assert nodeOperands != null;
+        for (Entry<Node, Value> entry : nodeOperands.entries()) {
             if (entry.getValue().equals(value)) {
                 return (ValueNode) entry.getKey();
             }
@@ -162,7 +170,7 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
      * Used by the {@link MatchStatement} machinery to override the generation LIR for some
      * ValueNodes.
      */
-    public void setMatchResult(ValueNode x, Value operand) {
+    public void setMatchResult(Node x, Value operand) {
         assert operand.equals(ComplexMatchValue.INTERIOR_MATCH) || operand instanceof ComplexMatchValue;
         assert operand instanceof ComplexMatchValue || x.getUsageCount() == 1 : "interior matches must be single user";
         assert nodeOperands != null && nodeOperands.get(x) == null : "operand cannot be set twice";
@@ -191,84 +199,161 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
         gen.append(op);
     }
 
-    public void doBlock(Block block, StructuredGraph graph, BlockMap<List<ValueNode>> blockMap) {
-        gen.doBlockStart(block);
-
-        if (block == gen.getResult().getLIR().getControlFlowGraph().getStartBlock()) {
-            assert block.getPredecessorCount() == 0;
-            emitPrologue(graph);
-        } else {
-            assert block.getPredecessorCount() > 0;
-        }
-
-        List<ValueNode> nodes = blockMap.get(block);
-
-        // Allow NodeLIRBuilder subclass to specialize code generation of any interesting groups
-        // of instructions
-        matchComplexExpressions(nodes);
-
-        for (int i = 0; i < nodes.size(); i++) {
-            ValueNode valueNode = nodes.get(i);
-            if (Options.TraceLIRGeneratorLevel.getValue() >= 3) {
-                TTY.println("LIRGen for " + valueNode);
-            }
-            Value operand = getOperand(valueNode);
-            if (operand == null) {
-                if (!peephole(valueNode)) {
-                    try {
-                        doRoot(valueNode);
-                    } catch (GraalInternalError e) {
-                        throw GraalGraphInternalError.transformAndAddContext(e, valueNode);
-                    } catch (Throwable e) {
-                        throw new GraalGraphInternalError(e).addContext(valueNode);
-                    }
-                }
-            } else if (ComplexMatchValue.INTERIOR_MATCH.equals(operand)) {
-                // Doesn't need to be evaluated
-                Debug.log("interior match for %s", valueNode);
-            } else if (operand instanceof ComplexMatchValue) {
-                Debug.log("complex match for %s", valueNode);
-                ComplexMatchValue match = (ComplexMatchValue) operand;
-                operand = match.evaluate(this);
-                if (operand != null) {
-                    setResult(valueNode, operand);
-                }
+    protected LIRKind getExactPhiKind(PhiNode phi) {
+        // TODO (je): maybe turn this into generator-style instead of allocating an ArrayList.
+        ArrayList<LIRKind> values = new ArrayList<>(phi.valueCount());
+        for (int i = 0; i < phi.valueCount(); i++) {
+            ValueNode node = phi.valueAt(i);
+            Value value = node instanceof ConstantNode ? ((ConstantNode) node).asJavaConstant() : getOperand(node);
+            if (value != null) {
+                values.add(value.getLIRKind());
             } else {
-                // There can be cases in which the result of an instruction is already set
-                // before by other instructions.
+                assert node instanceof ConstantNode || isPhiInputFromBackedge(phi, i) : String.format("Input %s to phi node %s is not yet available although it is not coming from a loop back edge",
+                                node, phi);
+                // non-java constant -> get Kind from stamp.
+                values.add(getLIRGeneratorTool().getLIRKind(node.stamp()));
             }
         }
-
-        if (!gen.hasBlockEnd(block)) {
-            NodeClassIterable successors = block.getEndNode().successors();
-            assert successors.count() == block.getSuccessorCount();
-            if (block.getSuccessorCount() != 1) {
-                /*
-                 * If we have more than one successor, we cannot just use the first one. Since
-                 * successors are unordered, this would be a random choice.
-                 */
-                throw new GraalInternalError("Block without BlockEndOp: " + block.getEndNode());
-            }
-            gen.emitJump(getLIRBlock((FixedNode) successors.first()));
-        }
-
-        assert verifyBlock(gen.getResult().getLIR(), block);
-        gen.doBlockEnd(block);
+        LIRKind derivedKind = LIRKind.merge(values);
+        assert verifyPHIKind(derivedKind, gen.getLIRKind(phi.stamp()));
+        return derivedKind;
     }
 
-    protected void matchComplexExpressions(List<ValueNode> nodes) {
+    private static boolean verifyPHIKind(LIRKind derivedKind, LIRKind phiKind) {
+        assert derivedKind.getPlatformKind() != Kind.Object || !derivedKind.isUnknownReference();
+        PlatformKind phiPlatformKind = phiKind.getPlatformKind();
+        assert derivedKind.equals(phiKind) || derivedKind.getPlatformKind().equals(phiPlatformKind instanceof Kind ? ((Kind) phiPlatformKind).getStackKind() : phiPlatformKind);
+        return true;
+    }
+
+    private static boolean isPhiInputFromBackedge(PhiNode phi, int index) {
+        AbstractMergeNode merge = phi.merge();
+        AbstractEndNode end = merge.phiPredecessorAt(index);
+        return end instanceof LoopEndNode && ((LoopEndNode) end).loopBegin().equals(merge);
+    }
+
+    private Value[] createPhiIn(AbstractMergeNode merge) {
+        List<Value> values = new ArrayList<>();
+        for (ValuePhiNode phi : merge.valuePhis()) {
+            assert getOperand(phi) == null;
+            Variable value = gen.newVariable(getExactPhiKind(phi));
+            values.add(value);
+            setResult(phi, value);
+        }
+        return values.toArray(new Value[values.size()]);
+    }
+
+    private Value[] createPhiOut(AbstractMergeNode merge, AbstractEndNode pred) {
+        List<Value> values = new ArrayList<>();
+        for (PhiNode phi : merge.valuePhis()) {
+            Value value = operand(phi.valueAt(pred));
+            assert value != null;
+            if (isRegister(value)) {
+                /*
+                 * Fixed register intervals are not allowed at block boundaries so we introduce a
+                 * new Variable.
+                 */
+                value = gen.emitMove(value);
+            }
+            values.add(value);
+        }
+        return values.toArray(new Value[values.size()]);
+    }
+
+    public void doBlock(Block block, StructuredGraph graph, BlockMap<List<Node>> blockMap) {
+        try (BlockScope blockScope = gen.getBlockScope(block)) {
+
+            if (block == gen.getResult().getLIR().getControlFlowGraph().getStartBlock()) {
+                assert block.getPredecessorCount() == 0;
+                emitPrologue(graph);
+            } else {
+                assert block.getPredecessorCount() > 0;
+                if (ConstructionSSAlirDuringLirBuilding.getValue()) {
+                    // create phi-in value array
+                    AbstractBeginNode begin = block.getBeginNode();
+                    if (begin instanceof AbstractMergeNode) {
+                        AbstractMergeNode merge = (AbstractMergeNode) begin;
+                        LabelOp label = (LabelOp) gen.getResult().getLIR().getLIRforBlock(block).get(0);
+                        label.setIncomingValues(createPhiIn(merge));
+                        if (Options.PrintIRWithLIR.getValue() && !TTY.isSuppressed()) {
+                            TTY.println("Created PhiIn: " + label);
+
+                        }
+                    }
+                }
+            }
+
+            List<Node> nodes = blockMap.get(block);
+
+            // Allow NodeLIRBuilder subclass to specialize code generation of any interesting groups
+            // of instructions
+            matchComplexExpressions(nodes);
+
+            for (int i = 0; i < nodes.size(); i++) {
+                Node node = nodes.get(i);
+                if (node instanceof ValueNode) {
+                    ValueNode valueNode = (ValueNode) node;
+                    if (Options.TraceLIRGeneratorLevel.getValue() >= 3) {
+                        TTY.println("LIRGen for " + valueNode);
+                    }
+                    Value operand = getOperand(valueNode);
+                    if (operand == null) {
+                        if (!peephole(valueNode)) {
+                            try {
+                                doRoot(valueNode);
+                            } catch (JVMCIError e) {
+                                throw GraalGraphJVMCIError.transformAndAddContext(e, valueNode);
+                            } catch (Throwable e) {
+                                throw new GraalGraphJVMCIError(e).addContext(valueNode);
+                            }
+                        }
+                    } else if (ComplexMatchValue.INTERIOR_MATCH.equals(operand)) {
+                        // Doesn't need to be evaluated
+                        Debug.log("interior match for %s", valueNode);
+                    } else if (operand instanceof ComplexMatchValue) {
+                        Debug.log("complex match for %s", valueNode);
+                        ComplexMatchValue match = (ComplexMatchValue) operand;
+                        operand = match.evaluate(this);
+                        if (operand != null) {
+                            setResult(valueNode, operand);
+                        }
+                    } else {
+                        // There can be cases in which the result of an instruction is already set
+                        // before by other instructions.
+                    }
+                }
+            }
+
+            if (!gen.hasBlockEnd(block)) {
+                NodeClassIterable successors = block.getEndNode().successors();
+                assert successors.count() == block.getSuccessorCount();
+                if (block.getSuccessorCount() != 1) {
+                    /*
+                     * If we have more than one successor, we cannot just use the first one. Since
+                     * successors are unordered, this would be a random choice.
+                     */
+                    throw new JVMCIError("Block without BlockEndOp: " + block.getEndNode());
+                }
+                gen.emitJump(getLIRBlock((FixedNode) successors.first()));
+            }
+
+            assert verifyBlock(gen.getResult().getLIR(), block);
+        }
+    }
+
+    protected void matchComplexExpressions(List<Node> nodes) {
         if (matchRules != null) {
             try (Scope s = Debug.scope("MatchComplexExpressions")) {
                 if (LogVerbose.getValue()) {
                     int i = 0;
-                    for (ValueNode node : nodes) {
+                    for (Node node : nodes) {
                         Debug.log("%d: (%s) %1S", i++, node.getUsageCount(), node);
                     }
                 }
 
                 // Match the nodes in backwards order to encourage longer matches.
                 for (int index = nodes.size() - 1; index >= 0; index--) {
-                    ValueNode node = nodes.get(index);
+                    Node node = nodes.get(index);
                     if (getOperand(node) != null) {
                         continue;
                     }
@@ -301,15 +386,15 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
     }
 
     protected void emitNode(ValueNode node) {
-        if (Debug.isLogEnabled() && node.stamp() instanceof IllegalStamp) {
-            Debug.log("This node has invalid type, we are emitting dead code(?): %s", node);
+        if (Debug.isLogEnabled() && node.stamp().isEmpty()) {
+            Debug.log("This node has an empty stamp, we are emitting dead code(?): %s", node);
         }
         if (node instanceof LIRLowerable) {
             ((LIRLowerable) node).generate(this);
         } else if (node instanceof ArithmeticLIRLowerable) {
             ((ArithmeticLIRLowerable) node).generate(this, gen);
         } else {
-            throw GraalInternalError.shouldNotReachHere("node is not LIRLowerable: " + node);
+            throw JVMCIError.shouldNotReachHere("node is not LIRLowerable: " + node);
         }
     }
 
@@ -342,7 +427,14 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
 
     @Override
     public void visitEndNode(AbstractEndNode end) {
-        moveToPhi(end.merge(), end);
+        AbstractMergeNode merge = end.merge();
+        JumpOp jump = newJumpOp(getLIRBlock(merge));
+        if (ConstructionSSAlirDuringLirBuilding.getValue()) {
+            jump.setOutgoingValues(createPhiOut(merge, end));
+        } else {
+            moveToPhi(merge, end);
+        }
+        append(jump);
     }
 
     /**
@@ -356,7 +448,7 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
         if (Options.TraceLIRGeneratorLevel.getValue() >= 1) {
             TTY.println("MOVE TO PHI from " + pred + " to " + merge);
         }
-        PhiResolver resolver = new PhiResolver(gen);
+        PhiResolver resolver = PhiResolver.create(gen);
         for (PhiNode phi : merge.phis()) {
             if (phi instanceof ValuePhiNode) {
                 ValueNode curVal = phi.valueAt(pred);
@@ -364,8 +456,6 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
             }
         }
         resolver.dispose();
-
-        append(newJumpOp(getLIRBlock(merge)));
     }
 
     protected JumpOp newJumpOp(LabelRef ref) {
@@ -403,7 +493,7 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
         } else if (node instanceof IntegerTestNode) {
             emitIntegerTestBranch((IntegerTestNode) node, trueSuccessor, falseSuccessor, trueSuccessorProbability);
         } else {
-            throw GraalInternalError.unimplemented(node.toString());
+            throw JVMCIError.unimplemented(node.toString());
         }
     }
 
@@ -448,7 +538,7 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
             IntegerTestNode test = (IntegerTestNode) node;
             return gen.emitIntegerTestMove(operand(test.getX()), operand(test.getY()), trueValue, falseValue);
         } else {
-            throw GraalInternalError.unimplemented(node.toString());
+            throw JVMCIError.unimplemented(node.toString());
         }
     }
 
@@ -473,7 +563,7 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
         } else if (callTarget instanceof IndirectCallTargetNode) {
             emitIndirectCall((IndirectCallTargetNode) callTarget, result, parameters, AllocatableValue.NONE, callState);
         } else {
-            throw GraalInternalError.shouldNotReachHere();
+            throw JVMCIError.shouldNotReachHere();
         }
 
         if (isLegal(result)) {
@@ -501,7 +591,7 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
                 result[j] = operand;
                 j++;
             } else {
-                throw GraalInternalError.shouldNotReachHere("I thought we no longer have null entries for two-slot types...");
+                throw JVMCIError.shouldNotReachHere("I thought we no longer have null entries for two-slot types...");
             }
         }
         return result;
@@ -546,11 +636,6 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
                 }
             }
         }
-    }
-
-    public final NodeMap<Value> getNodeOperands() {
-        assert nodeOperands != null;
-        return nodeOperands;
     }
 
     public DebugInfoBuilder getDebugInfoBuilder() {

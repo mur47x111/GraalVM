@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,11 +22,13 @@
  */
 package com.oracle.graal.asm.amd64;
 
-import static com.oracle.graal.asm.amd64.AMD64AsmOptions.*;
+import jdk.internal.jvmci.amd64.*;
+import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.meta.*;
 
-import com.oracle.graal.amd64.*;
-import com.oracle.graal.api.code.*;
-import com.oracle.graal.api.meta.*;
+import com.oracle.graal.asm.*;
+
+import static com.oracle.graal.asm.amd64.AMD64AsmOptions.*;
 
 /**
  * This class implements commonly used X86 code patterns.
@@ -35,10 +37,6 @@ public class AMD64MacroAssembler extends AMD64Assembler {
 
     public AMD64MacroAssembler(TargetDescription target, RegisterConfig registerConfig) {
         super(target, registerConfig);
-    }
-
-    public final void xorptr(Register dst, Register src) {
-        xorq(dst, src);
     }
 
     public final void decrementq(Register reg, int value) {
@@ -60,6 +58,25 @@ public class AMD64MacroAssembler extends AMD64Assembler {
         }
     }
 
+    public final void decrementq(AMD64Address dst, int value) {
+        if (value == Integer.MIN_VALUE) {
+            subq(dst, value);
+            return;
+        }
+        if (value < 0) {
+            incrementq(dst, -value);
+            return;
+        }
+        if (value == 0) {
+            return;
+        }
+        if (value == 1 && UseIncDec) {
+            decq(dst);
+        } else {
+            subq(dst, value);
+        }
+    }
+
     public void incrementq(Register reg, int value) {
         if (value == Integer.MIN_VALUE) {
             addq(reg, value);
@@ -76,6 +93,25 @@ public class AMD64MacroAssembler extends AMD64Assembler {
             incq(reg);
         } else {
             addq(reg, value);
+        }
+    }
+
+    public final void incrementq(AMD64Address dst, int value) {
+        if (value == Integer.MIN_VALUE) {
+            addq(dst, value);
+            return;
+        }
+        if (value < 0) {
+            decrementq(dst, -value);
+            return;
+        }
+        if (value == 0) {
+            return;
+        }
+        if (value == 1 && UseIncDec) {
+            incq(dst);
+        } else {
+            addq(dst, value);
         }
     }
 
@@ -175,10 +211,6 @@ public class AMD64MacroAssembler extends AMD64Assembler {
         }
     }
 
-    public final void signExtendShort(Register reg) {
-        movswl(reg, reg);
-    }
-
     public void movflt(Register dst, Register src) {
         assert dst.getRegisterCategory().equals(AMD64.XMM) && src.getRegisterCategory().equals(AMD64.XMM);
         if (UseXmmRegToRegMoveAll) {
@@ -226,9 +258,14 @@ public class AMD64MacroAssembler extends AMD64Assembler {
      * volatile field!
      */
     public final void movlong(AMD64Address dst, long src) {
-        AMD64Address high = new AMD64Address(dst.getBase(), dst.getIndex(), dst.getScale(), dst.getDisplacement() + 4);
-        movl(dst, (int) (src & 0xFFFFFFFF));
-        movl(high, (int) (src >> 32));
+        if (NumUtil.isInt(src)) {
+            AMD64MIOp.MOV.emit(this, OperandSize.QWORD, dst, (int) src);
+        } else {
+            AMD64Address high = new AMD64Address(dst.getBase(), dst.getIndex(), dst.getScale(), dst.getDisplacement() + 4);
+            movl(dst, (int) (src & 0xFFFFFFFF));
+            movl(high, (int) (src >> 32));
+        }
+
     }
 
     public final void flog(Register dest, Register value, boolean base10) {

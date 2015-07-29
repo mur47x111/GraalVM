@@ -22,21 +22,28 @@
  */
 package com.oracle.graal.lir.phases;
 
+import static com.oracle.graal.lir.phases.LIRPhase.Options.*;
+import jdk.internal.jvmci.options.*;
+
 import com.oracle.graal.lir.*;
-import com.oracle.graal.lir.phases.PostAllocationOptimizationPhase.*;
-import com.oracle.graal.options.*;
+import com.oracle.graal.lir.phases.PostAllocationOptimizationPhase.PostAllocationOptimizationContext;
+import com.oracle.graal.lir.profiling.*;
 
 public class PostAllocationOptimizationStage extends LIRPhaseSuite<PostAllocationOptimizationContext> {
     public static class Options {
         // @formatter:off
         @Option(help = "", type = OptionType.Debug)
-        public static final OptionValue<Boolean> LIROptEdgeMoveOptimizer = new OptionValue<>(true);
+        public static final NestedBooleanOptionValue LIROptEdgeMoveOptimizer = new NestedBooleanOptionValue(LIROptimization, true);
         @Option(help = "", type = OptionType.Debug)
-        public static final OptionValue<Boolean> LIROptControlFlowOptmizer = new OptionValue<>(true);
+        public static final NestedBooleanOptionValue LIROptControlFlowOptimizer = new NestedBooleanOptionValue(LIROptimization, true);
         @Option(help = "", type = OptionType.Debug)
-        public static final OptionValue<Boolean> LIROptRedundantMoveElimination = new OptionValue<>(true);
+        public static final NestedBooleanOptionValue LIROptRedundantMoveElimination = new NestedBooleanOptionValue(LIROptimization, true);
         @Option(help = "", type = OptionType.Debug)
-        public static final OptionValue<Boolean> LIROptNullCheckOptimizer = new OptionValue<>(true);
+        public static final NestedBooleanOptionValue LIROptNullCheckOptimizer = new NestedBooleanOptionValue(LIROptimization, true);
+        @Option(help = "Enables profiling of move types on LIR level. " +
+                       "Move types are for example stores (register to stack), " +
+                       "constant loads (constant to register) or copies (register to register).", type = OptionType.Debug)
+        public static final OptionValue<Boolean> LIRProfileMoves = new OptionValue<>(false);
         // @formatter:on
     }
 
@@ -44,7 +51,7 @@ public class PostAllocationOptimizationStage extends LIRPhaseSuite<PostAllocatio
         if (Options.LIROptEdgeMoveOptimizer.getValue()) {
             appendPhase(new EdgeMoveOptimizer());
         }
-        if (Options.LIROptControlFlowOptmizer.getValue()) {
+        if (Options.LIROptControlFlowOptimizer.getValue()) {
             appendPhase(new ControlFlowOptimizer());
         }
         if (Options.LIROptRedundantMoveElimination.getValue()) {
@@ -52,6 +59,9 @@ public class PostAllocationOptimizationStage extends LIRPhaseSuite<PostAllocatio
         }
         if (Options.LIROptNullCheckOptimizer.getValue()) {
             appendPhase(new NullCheckOptimizer());
+        }
+        if (Options.LIRProfileMoves.getValue()) {
+            appendPhase(new MoveProfiling());
         }
     }
 }

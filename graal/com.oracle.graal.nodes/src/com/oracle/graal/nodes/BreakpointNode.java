@@ -38,7 +38,7 @@ import com.oracle.graal.nodes.spi.*;
  * <pre>
  *     {@literal @}NodeIntrinsic(BreakpointNode.class)
  *     static void breakpoint(Object object, Word mark, Word value) {
- *          throw new GraalInternalError("");
+ *          throw new JVMCIError("");
  *     }
  * </pre>
  *
@@ -51,7 +51,7 @@ public final class BreakpointNode extends FixedWithNextNode implements LIRLowera
     public static final NodeClass<BreakpointNode> TYPE = NodeClass.create(BreakpointNode.class);
     @Input NodeInputList<ValueNode> arguments;
 
-    public BreakpointNode(ValueNode[] arguments) {
+    public BreakpointNode(ValueNode... arguments) {
         super(TYPE, StampFactory.forVoid());
         this.arguments = new NodeInputList<>(this, arguments);
     }
