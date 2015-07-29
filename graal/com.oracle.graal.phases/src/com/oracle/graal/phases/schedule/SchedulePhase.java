@@ -755,7 +755,6 @@ public final class SchedulePhase extends Phase {
                     for (LocationIdentity locId : killSets.get(b).getCopyAsList()) {
                         buf.format("X %s killed by %s%n", locId, "dunno anymore");
                     }
->>>>>>> upstream/master
                 }
             }
 

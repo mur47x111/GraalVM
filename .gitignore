@@ -20,3 +20,6 @@
 /graal/*/ap/
 /src/share/tools/IdealGraphVisualizer/*
 /.ideal_graph_visualizer.log
+/jvmci/*/bin
+/jvmci/*/src_gen
+/jvmci/*/ap
