@@ -14,7 +14,6 @@ import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.inlining.*;
-import com.oracle.graal.phases.query.*;
 import com.oracle.graal.phases.tiers.*;
 
 public class InlineICGPhase extends BasePhase<LowTierContext> {
@@ -22,7 +21,7 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
     @Override
     protected void run(StructuredGraph graph, LowTierContext context) {
         for (InstrumentationNode instrumentation : graph.getNodes().filter(InstrumentationNode.class)) {
-            StructuredGraph icg = instrumentation.getICG().graph();
+            StructuredGraph icg = instrumentation.icg();
             int length = instrumentation.getWeakDependencies().count();
             ValueNode[] arguments = new ValueNode[length];
 

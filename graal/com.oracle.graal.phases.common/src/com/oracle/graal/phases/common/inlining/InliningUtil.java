@@ -32,14 +32,12 @@ import java.util.*;
 import jdk.internal.jvmci.code.*;
 import jdk.internal.jvmci.common.*;
 import jdk.internal.jvmci.debug.*;
-
-import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
-
 import jdk.internal.jvmci.meta.*;
 
 import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.compiler.common.type.*;
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.Scope;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.Graph.DuplicationReplacement;
 import com.oracle.graal.nodeinfo.*;
@@ -52,7 +50,7 @@ import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.nodes.type.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.common.inlining.info.*;
-import com.oracle.graal.phases.query.*;
+import com.oracle.graal.phases.common.query.*;
 
 public class InliningUtil {
 
@@ -220,19 +218,6 @@ public class InliningUtil {
             return "receiver is null";
         }
         return null;
-    }
-
-    public static void removeAttachedInstrumentation(Invoke invoke) {
-        if (UseCompilerDecision.getValue()) {
-            FixedNode invokeNode = invoke.asNode();
-
-            for (InstrumentationNode instrumentation : invokeNode.usages().filter(InstrumentationNode.class)) {
-                if (instrumentation.target() == invoke) {
-                    GraphUtil.unlinkFixedNode(instrumentation);
-                    instrumentation.safeDelete();
-                }
-            }
-        }
     }
 
     /**
@@ -730,16 +715,21 @@ public class InliningUtil {
     }
 
     public static int getNodeCount(StructuredGraph graph) {
-        NodeBitMap instrumented = graph.createNodeBitMap();
+        // TODO (yz) mark parameters only used by instrumentation node
+        return graph.getNodeCount() - graph.getNodes().filter(InstrumentationNode.class).count();
+    }
 
-        for (Node node : graph.getNodes()) {
-            if (node instanceof InstrumentationNode) {
-                instrumented.mark(node);
+    public static void removeAttachedInstrumentation(Invoke invoke) {
+        if (UseCompilerDecision.getValue()) {
+            FixedNode invokeNode = invoke.asNode();
+
+            for (InstrumentationNode instrumentation : invokeNode.usages().filter(InstrumentationNode.class)) {
+                if (instrumentation.target() == invoke) {
+                    GraphUtil.unlinkFixedNode(instrumentation);
+                    instrumentation.safeDelete();
+                }
             }
         }
-
-        // TODO (yz) mark parameters only used by instrumentation node
-        return graph.getNodeCount() - instrumented.count();
     }
 
 }

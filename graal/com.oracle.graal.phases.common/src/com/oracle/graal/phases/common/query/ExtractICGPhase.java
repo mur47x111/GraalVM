@@ -9,11 +9,9 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.java.*;
-import com.oracle.graal.nodes.query.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
 import com.oracle.graal.phases.common.*;
-import com.oracle.graal.phases.query.*;
 import com.oracle.graal.phases.tiers.*;
 
 public class ExtractICGPhase extends BasePhase<HighTierContext> {
@@ -156,7 +154,7 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
         }
 
         for (InstrumentationNode instrumentation : graph.getNodes().filter(InstrumentationNode.class)) {
-            for (Node node : instrumentation.getICG().graph().getNodes()) {
+            for (Node node : instrumentation.icg().getNodes()) {
                 if (node instanceof CompilerDecisionQuery) {
                     ((CompilerDecisionQuery) node).onExtractICG(instrumentation);
                 }

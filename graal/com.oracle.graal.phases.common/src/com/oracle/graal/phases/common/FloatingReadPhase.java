@@ -22,6 +22,7 @@
  */
 package com.oracle.graal.phases.common;
 
+import static com.oracle.graal.compiler.common.GraalOptions.*;
 import static com.oracle.graal.graph.Graph.NodeEvent.*;
 import static jdk.internal.jvmci.meta.LocationIdentity.*;
 
@@ -33,7 +34,6 @@ import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.cfg.*;
 import com.oracle.graal.graph.Graph.NodeEventScope;
 import com.oracle.graal.graph.*;
-import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.cfg.*;
@@ -41,11 +41,11 @@ import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
+import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.common.util.*;
 import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.graph.ReentrantNodeIterator.LoopInfo;
 import com.oracle.graal.phases.graph.ReentrantNodeIterator.NodeIteratorClosure;
-import com.oracle.graal.phases.query.*;
 
 public class FloatingReadPhase extends Phase {
 
@@ -196,6 +196,12 @@ public class FloatingReadPhase extends Phase {
             assert !graph.isAfterFloatingReadPhase();
             graph.setAfterFloatingReadPhase(true);
         }
+
+        if (UseCompilerDecision.getValue()) {
+            for (StructuredGraph icg : ICGUtil.getAllICGs(graph)) {
+                new FloatingReadPhase(false, true).apply(icg, false);
+            }
+        }
     }
 
     public static MemoryMapImpl mergeMemoryMaps(AbstractMergeNode merge, List<? extends MemoryMap> states) {
@@ -281,18 +287,6 @@ public class FloatingReadPhase extends Phase {
                 ((ReturnNode) node).setMemoryMap(node.graph().unique(new MemoryMapNode(state.lastMemorySnapshot)));
             }
 
-            if (node instanceof InstrumentationNode) {
-                InsertedCodeGraph icg = ((InstrumentationNode) node).getICG();
-
-                if (!icg.isPassed("FloatingReadPhase")) {
-                    new FloatingReadPhase(false, true).apply(icg.graph(), false);
-
-                    StartNode start = icg.graph().start();
-                    FixedNode anchor = start.next();
-                    start.replaceAtUsages(InputType.Memory, anchor);
-                    icg.pass("FloatingReadPhase");
-                }
-            }
             return state;
         }
 

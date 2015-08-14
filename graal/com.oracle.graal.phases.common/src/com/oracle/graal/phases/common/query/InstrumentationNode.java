@@ -1,4 +1,4 @@
-package com.oracle.graal.phases.query;
+package com.oracle.graal.phases.common.query;
 
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
@@ -15,7 +15,7 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
     @OptionalInput(value = InputType.Association) protected ValueNode target;
     @OptionalInput protected NodeInputList<ValueNode> weakDependencies;
 
-    protected InsertedCodeGraph icg;
+    protected StructuredGraph icg;
     protected final int offset;
 
     public InstrumentationNode(FixedNode target, StructuredGraph icg, int offset) {
@@ -23,7 +23,7 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
 
         this.target = target;
         this.offset = offset;
-        this.icg = new InsertedCodeGraph(icg);
+        this.icg = icg;
         this.weakDependencies = new NodeInputList<>(this);
     }
 
@@ -39,7 +39,7 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
         return target;
     }
 
-    public InsertedCodeGraph getICG() {
+    public StructuredGraph icg() {
         return icg;
     }
 

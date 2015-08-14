@@ -22,6 +22,8 @@
  */
 package com.oracle.graal.phases.common;
 
+import static com.oracle.graal.compiler.common.GraalOptions.*;
+
 import java.util.*;
 
 import jdk.internal.jvmci.common.*;
@@ -32,9 +34,9 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.GuardsStage;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
+import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.graph.ReentrantNodeIterator.NodeIteratorClosure;
-import com.oracle.graal.phases.query.*;
 
 /**
  * This phase transfers {@link FrameState} nodes from {@link StateSplit} nodes to
@@ -86,15 +88,6 @@ public class FrameStateAssignmentPhase extends Phase {
                 }
             }
 
-            if (node instanceof InstrumentationNode) {
-                InsertedCodeGraph icg = ((InstrumentationNode) node).getICG();
-
-                if (!icg.isPassed("FrameStateAssignmentPhase")) {
-                    new FrameStateAssignmentPhase().apply(icg.graph(), false);
-                    icg.pass("FrameStateAssignmentPhase");
-                }
-            }
-
             return currentState;
         }
 
@@ -122,6 +115,12 @@ public class FrameStateAssignmentPhase extends Phase {
             ReentrantNodeIterator.apply(new FrameStateAssignmentClosure(), graph.start(), null);
             graph.setGuardsStage(GuardsStage.AFTER_FSA);
             graph.getNodes(FrameState.TYPE).filter(state -> state.hasNoUsages()).forEach(GraphUtil::killWithUnusedFloatingInputs);
+        }
+
+        if (UseCompilerDecision.getValue()) {
+            for (StructuredGraph icg : ICGUtil.getAllICGs(graph)) {
+                new FrameStateAssignmentPhase().apply(icg, false);
+            }
         }
     }
 

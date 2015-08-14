@@ -5,7 +5,6 @@ import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
-import com.oracle.graal.phases.query.*;
 import com.oracle.graal.phases.tiers.*;
 
 public class RedirectICGPhase extends BasePhase<MidTierContext> {

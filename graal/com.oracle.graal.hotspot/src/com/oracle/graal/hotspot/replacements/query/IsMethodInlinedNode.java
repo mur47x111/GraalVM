@@ -7,7 +7,6 @@ import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
-import com.oracle.graal.phases.query.*;
 
 @NodeInfo
 public final class IsMethodInlinedNode extends FixedWithNextNode implements CompilerDecisionQuery {

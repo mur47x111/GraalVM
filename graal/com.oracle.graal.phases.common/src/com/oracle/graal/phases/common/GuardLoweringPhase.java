@@ -27,10 +27,10 @@ import static com.oracle.graal.compiler.common.GraalOptions.*;
 import java.util.*;
 import java.util.Map.Entry;
 
-import com.oracle.graal.debug.*;
 import jdk.internal.jvmci.meta.*;
 
 import com.oracle.graal.compiler.common.cfg.*;
+import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.GuardsStage;
@@ -40,8 +40,8 @@ import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.memory.address.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
+import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.graph.*;
-import com.oracle.graal.phases.query.*;
 import com.oracle.graal.phases.schedule.*;
 import com.oracle.graal.phases.schedule.SchedulePhase.SchedulingStrategy;
 import com.oracle.graal.phases.tiers.*;
@@ -204,15 +204,7 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
                 } else {
                     lowerToIf(guard);
                 }
-            } else if (node instanceof InstrumentationNode) {
-                InsertedCodeGraph icg = ((InstrumentationNode) node).getICG();
-
-                if (!icg.isPassed("GuardLoweringPhase")) {
-                    new GuardLoweringPhase().apply(icg.graph(), null, false);
-                    icg.pass("GuardLoweringPhase");
-                }
             }
-
         }
 
         private void lowerToIf(GuardNode guard) {
@@ -261,6 +253,12 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
         }
 
         assert assertNoGuardsLeft(graph);
+
+        if (UseCompilerDecision.getValue()) {
+            for (StructuredGraph icg : ICGUtil.getAllICGs(graph)) {
+                new GuardLoweringPhase().apply(icg, null, false);
+            }
+        }
     }
 
     private static boolean assertNoGuardsLeft(StructuredGraph graph) {
