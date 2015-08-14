@@ -3,6 +3,7 @@
 /jdk*/
 /lib/
 /mx/*
+/mx.graal/*
 /mxtool/*
 /graal/*/bin
 /graal/*/.settings
@@ -21,5 +22,16 @@
 /src/share/tools/IdealGraphVisualizer/*
 /.ideal_graph_visualizer.log
 /jvmci/*/bin
+/jvmci/*/.settings
+/jvmci/*/.checkstyle
+/jvmci/*/.classpath
+/jvmci/*/.externalToolBuilders/
+/jvmci/*/.gitignore
+/jvmci/*/.project
+/jvmci/*/build.xml
+/jvmci/*/nbproject/
+/jvmci/*/.factorypath
+/jvmci/*/*.jar
 /jvmci/*/src_gen
-/jvmci/*/ap
+/jvmci/*/*iml
+/jvmci/*/ap/
