@@ -1,5 +1,8 @@
 package com.oracle.graal.hotspot.replacements.query;
 
+import jdk.internal.jvmci.meta.*;
+
+import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
@@ -7,28 +10,28 @@ import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.query.*;
 
 @NodeInfo
-public final class IsMethodInlinedNode extends ICGMacroNode implements CompilerDecisionQuery {
+public final class IsMethodInlinedNode extends FixedWithNextNode implements CompilerDecisionQuery {
 
     public static final NodeClass<IsMethodInlinedNode> TYPE = NodeClass.create(IsMethodInlinedNode.class);
 
     protected String original;
 
-    public IsMethodInlinedNode(Invoke invoke) {
-        super(TYPE, invoke);
+    public IsMethodInlinedNode() {
+        super(TYPE, StampFactory.forKind(Kind.Boolean));
     }
 
-    public ConstantNode resolve() {
-        original = CompilerDecisionUtil.getMethodFullName(graph().method());
-        return null;
+    @Override
+    public void onExtractICG(InstrumentationNode instrumentation) {
+        original = CompilerDecisionUtil.getMethodFullName(instrumentation.graph().method());
     }
 
-    public void inline(InstrumentationNode instrumentation) {
-        String root = CompilerDecisionUtil.getMethodFullName(graph().method());
+    @Override
+    public void onInlineICG(InstrumentationNode instrumentation) {
+        String root = CompilerDecisionUtil.getMethodFullName(instrumentation.graph().method());
         graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(!root.equals(original), graph()));
     }
 
-    public ConstantNode defaultValue() {
-        return ConstantNode.forBoolean(false, graph());
-    }
+    @NodeIntrinsic
+    public static native boolean instantiate();
 
 }

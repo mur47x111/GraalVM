@@ -5843,7 +5843,7 @@ def _findPrimarySuiteMxDir():
     if mxDir is not None:
         return mxDir
     # backwards compatibility: search from path of this file
-    return _findPrimarySuiteMxDirFrom(dirname(__file__))
+    return _findPrimarySuiteMxDirFrom(join(dirname(__file__), '..'))
 
 def main():
     mxMxDir = _is_suite_dir(os.path.abspath(dirname(__file__)))

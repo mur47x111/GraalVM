@@ -79,6 +79,10 @@ public class PartialEscapePhase extends EffectsPhase<PhaseContext> {
                 runAnalysis(graph, context);
             }
         }
+
+        if (UseCompilerDecision.getValue()) {
+            ICGUtil.redirect(graph);
+        }
     }
 
     @Override

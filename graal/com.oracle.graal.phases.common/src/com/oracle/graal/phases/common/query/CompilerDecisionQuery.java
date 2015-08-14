@@ -1,17 +1,13 @@
 package com.oracle.graal.phases.common.query;
 
-import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.query.*;
 
 public interface CompilerDecisionQuery {
 
-    ConstantNode defaultValue();
-
-    default ConstantNode resolve() {
-        return null;
+    default void onExtractICG(@SuppressWarnings("unused") InstrumentationNode instrumentation) {
     }
 
-    default void inline(@SuppressWarnings("unused") InstrumentationNode instrumentation) {
+    default void onInlineICG(@SuppressWarnings("unused") InstrumentationNode instrumentation) {
     }
 
 }

@@ -270,15 +270,6 @@ public class StructuredGraph extends Graph implements JavaMethodContex {
         return copy;
     }
 
-    public Map<Node, Node> copyTo(StructuredGraph copy) {
-        copy.setGuardsStage(getGuardsStage());
-        copy.isAfterFloatingReadPhase = isAfterFloatingReadPhase;
-        copy.hasValueProxies = hasValueProxies;
-        Map<Node, Node> replacements = Node.newMap();
-        replacements.put(start, copy.start);
-        return copy.addDuplicates(getNodes(), this, this.getNodeCount(), replacements);
-    }
-
     public ParameterNode getParameter(int index) {
         for (ParameterNode param : getNodes(ParameterNode.TYPE)) {
             if (param.index() == index) {

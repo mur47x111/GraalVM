@@ -23,6 +23,7 @@
 package com.oracle.graal.hotspot.replacements;
 
 import jdk.internal.jvmci.code.*;
+import jdk.internal.jvmci.debug.*;
 import jdk.internal.jvmci.hotspot.*;
 import jdk.internal.jvmci.meta.*;
 import jdk.internal.jvmci.service.*;
@@ -30,9 +31,6 @@ import sun.reflect.*;
 import sun.reflect.ConstantPool;
 
 import com.oracle.graal.api.replacements.*;
-import com.oracle.graal.api.runtime.*;
-import com.oracle.graal.debug.external.*;
-import com.oracle.graal.hotspot.bridge.*;
 import com.oracle.graal.nodes.spi.*;
 
 @ServiceProvider(ReplacementsProvider.class)
@@ -46,5 +44,6 @@ public class HotSpotSubstitutions implements ReplacementsProvider {
         replacements.registerSubstitutions(ConstantPool.class, ConstantPoolSubstitutions.class);
         replacements.registerSubstitutions(CompilerToVMImpl.class, CompilerToVMImplSubstitutions.class);
         replacements.registerSubstitutions(CompilerDecision.class, CompilerDecisionSubstitutions.class);
+        replacements.registerSubstitutions(DelimitationAPI.class, DelimitationAPISubstitutions.class);
     }
 }

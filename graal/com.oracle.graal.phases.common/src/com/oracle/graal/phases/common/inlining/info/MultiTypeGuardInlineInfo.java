@@ -216,11 +216,12 @@ public class MultiTypeGuardInlineInfo extends AbstractInlineInfo {
         // replace the invoke with a switch on the type of the actual receiver
         boolean methodDispatch = createDispatchOnTypeBeforeInvoke(graph, successors, false, providers.getStampProvider());
 
+        InliningUtil.removeAttachedInstrumentation(invoke);
+
         assert invoke.next() == continuation;
         invoke.setNext(null);
         returnMerge.setNext(continuation);
         if (returnValuePhi != null) {
-            InliningUtil.removeAttachedInstrumentation(invoke);
             invoke.asNode().replaceAtUsages(returnValuePhi);
         }
 

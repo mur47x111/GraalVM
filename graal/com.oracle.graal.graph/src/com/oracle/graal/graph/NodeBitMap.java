@@ -241,4 +241,19 @@ public final class NodeBitMap implements NodeIterable<Node> {
     public String toString() {
         return snapshot().toString();
     }
+
+    public boolean compare(NodeBitMap other) {
+        if (bits.length != other.bits.length) {
+            return false;
+        }
+
+        for (int i = 0; i < bits.length; i++) {
+            if (bits[i] != other.bits[i]) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
 }

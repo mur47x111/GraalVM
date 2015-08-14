@@ -1271,14 +1271,14 @@ public class SnippetTemplate {
 
             updateStamps(replacee, duplicates);
 
-            for (Node node : replaceeGraph.getNodes()) {
-                if (node instanceof InstrumentationNode) {
-                    InstrumentationNode instrumentation = (InstrumentationNode) node;
-
-                    if (instrumentation.target() == replacee) {
+            for (InstrumentationNode instrumentation : replaceeGraph.getNodes().filter(InstrumentationNode.class)) {
+                if (instrumentation.target() == replacee) {
+                    if (instrumentation.offset() < 0) {
                         ReturnNode returnDuplicate = (ReturnNode) duplicates.get(returnNode);
                         FixedWithNextNode pred = (FixedWithNextNode) returnDuplicate.predecessor();
                         instrumentation.replaceFirstInput(replacee, pred);
+                    } else {
+                        instrumentation.replaceFirstInput(replacee, firstCFGNodeDuplicate);
                     }
                 }
             }

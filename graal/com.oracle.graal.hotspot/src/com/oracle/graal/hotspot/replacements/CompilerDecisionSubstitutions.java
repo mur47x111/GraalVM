@@ -1,47 +1,36 @@
 package com.oracle.graal.hotspot.replacements;
 
+import jdk.internal.jvmci.debug.*;
+
 import com.oracle.graal.api.replacements.*;
-import com.oracle.graal.debug.external.*;
 import com.oracle.graal.hotspot.replacements.query.*;
-import com.oracle.graal.nodes.spi.*;
 
 @ClassSubstitution(CompilerDecision.class)
 public class CompilerDecisionSubstitutions {
 
-    @MacroSubstitution(forced = true, isStatic = true, macro = InstrumentationBeginNode.class)
-    public static native void instrumentationBegin(int target);
+    @MethodSubstitution(isStatic = true)
+    public static boolean isMethodCompiled() {
+        return true;
+    }
 
-    @MacroSubstitution(forced = true, isStatic = true, macro = InstrumentationEndNode.class)
-    public static native void instrumentationEnd();
+    @MethodSubstitution(isStatic = true)
+    public static boolean isMethodInlined() {
+        return IsMethodInlinedNode.instantiate();
+    }
 
-    @MacroSubstitution(forced = true, isStatic = true, macro = ObservedReferenceNode.class)
-    public static native Object observedReference(Object object);
+    @MethodSubstitution(isStatic = true)
+    public static String getRootName() {
+        return RootNameNode.instantiate();
+    }
 
-    @MacroSubstitution(forced = true, isStatic = true, macro = IsAllocationVirtualNode.class)
-    public static native boolean isAllocationVirtual();
+    @MethodSubstitution(isStatic = true)
+    public static int getAllocationType() {
+        return RuntimePathNode.instantiate();
+    }
 
-    @MacroSubstitution(forced = true, isStatic = true, macro = IsHeapAllocNode.class)
-    public static native boolean isHeapAlloc();
-
-    @MacroSubstitution(forced = true, isStatic = true, macro = IsMethodCompiledNode.class)
-    public static native boolean isMethodCompiled();
-
-    @MacroSubstitution(forced = true, isStatic = true, macro = IsMethodInlinedNode.class)
-    public static native boolean isMethodInlined();
-
-    @MacroSubstitution(forced = true, isStatic = true, macro = IsCallsiteInlinedNode.class)
-    public static native boolean isCallsiteInlined();
-
-    @MacroSubstitution(forced = true, isStatic = true, macro = MethodNameNode.class)
-    public static native String getMethodName();
-
-    @MacroSubstitution(forced = true, isStatic = true, macro = RootNameNode.class)
-    public static native String getRootName();
-
-    @MacroSubstitution(forced = true, isStatic = true, macro = AllocationTypeNode.class)
-    public static native int getAllocationType();
-
-    @MacroSubstitution(forced = true, isStatic = true, macro = LockTypeNode.class)
-    public static native int getLockType();
+    @MethodSubstitution(isStatic = true)
+    public static int getLockType() {
+        return RuntimePathNode.instantiate();
+    }
 
 }

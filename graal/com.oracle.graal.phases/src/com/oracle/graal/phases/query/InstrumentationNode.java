@@ -1,16 +1,14 @@
 package com.oracle.graal.phases.query;
 
-import com.oracle.graal.api.meta.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo
-public class InstrumentationNode extends FixedWithNextNode implements Virtualizable, MemoryCheckpoint.Single {
+public class InstrumentationNode extends FixedWithNextNode implements Virtualizable {
 
     public static final NodeClass<InstrumentationNode> TYPE = NodeClass.create(InstrumentationNode.class);
 
@@ -18,17 +16,23 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
     @OptionalInput protected NodeInputList<ValueNode> weakDependencies;
 
     protected InsertedCodeGraph icg;
+    protected final int offset;
 
-    public InstrumentationNode(FixedNode target, StructuredGraph icg) {
+    public InstrumentationNode(FixedNode target, StructuredGraph icg, int offset) {
         super(TYPE, StampFactory.forVoid());
 
         this.target = target;
+        this.offset = offset;
         this.icg = new InsertedCodeGraph(icg);
         this.weakDependencies = new NodeInputList<>(this);
     }
 
     public boolean addInput(Node node) {
         return weakDependencies.add(node);
+    }
+
+    public int offset() {
+        return offset;
     }
 
     public ValueNode target() {
@@ -48,10 +52,8 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
             tool.replaceFirstInput(target, ((MonitorEnterNode) target).getMonitorId());
         } else {
             tool.setDeleted();
-
             if (target != null) {
                 State state = tool.getObjectState(target);
-
                 if (state != null) {
                     if (state.getState() == EscapeState.Virtual) {
                         tool.replaceFirstInput(target, state.getVirtualObject());
@@ -61,11 +63,8 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
                 }
             }
         }
-
-        for (int i = 0; i < weakDependencies.count(); i++) {
-            ValueNode input = weakDependencies.get(i);
+        for (ValueNode input : weakDependencies) {
             State state = tool.getObjectState(input);
-
             if (state != null) {
                 if (state.getState() == EscapeState.Virtual) {
                     // TODO (yz) check if in order
@@ -75,13 +74,6 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
                 }
             }
         }
-
-        // TODO (yz) the following statement is for cheating PEA
-        // a more elegant way should be creating another edge type
-    }
-
-    public LocationIdentity getLocationIdentity() {
-        return LocationIdentity.ANY_LOCATION;
     }
 
 }

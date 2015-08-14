@@ -223,14 +223,13 @@ public class InliningUtil {
     }
 
     public static void removeAttachedInstrumentation(Invoke invoke) {
-        FixedNode invokeNode = invoke.asNode();
+        if (UseCompilerDecision.getValue()) {
+            FixedNode invokeNode = invoke.asNode();
 
-        for (Node usage : invokeNode.usages()) {
-            if (usage instanceof InstrumentationNode) {
-                InstrumentationNode instrumentation = (InstrumentationNode) usage;
-
-                if (instrumentation.target() == invokeNode) {
-                    usage.replaceFirstInput(invokeNode, null);
+            for (InstrumentationNode instrumentation : invokeNode.usages().filter(InstrumentationNode.class)) {
+                if (instrumentation.target() == invoke) {
+                    GraphUtil.unlinkFixedNode(instrumentation);
+                    instrumentation.safeDelete();
                 }
             }
         }
@@ -334,6 +333,7 @@ public class InliningUtil {
             unwindNode = (UnwindNode) duplicates.get(unwindNode);
         }
 
+        removeAttachedInstrumentation(invoke);
         finishInlining(invoke, graph, firstCFGNode, returnNodes, unwindNode, inlineGraph.getAssumptions(), inlineGraph, canonicalizedNodes);
 
         GraphUtil.killCFG(invokeNode);
@@ -383,7 +383,6 @@ public class InliningUtil {
 
         ValueNode returnValue;
         if (!returnNodes.isEmpty()) {
-            removeAttachedInstrumentation(invoke);
             FixedNode n = invoke.next();
             invoke.setNext(null);
             if (returnNodes.size() == 1) {
