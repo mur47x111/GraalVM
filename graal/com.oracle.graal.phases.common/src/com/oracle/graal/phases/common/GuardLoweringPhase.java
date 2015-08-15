@@ -40,7 +40,6 @@ import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.memory.address.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
-import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.schedule.*;
 import com.oracle.graal.phases.schedule.SchedulePhase.SchedulingStrategy;
@@ -253,12 +252,6 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
         }
 
         assert assertNoGuardsLeft(graph);
-
-        if (UseCompilerDecision.getValue()) {
-            for (StructuredGraph icg : ICGUtil.getAllICGs(graph)) {
-                new GuardLoweringPhase().apply(icg, null, false);
-            }
-        }
     }
 
     private static boolean assertNoGuardsLeft(StructuredGraph graph) {

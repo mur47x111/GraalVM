@@ -137,7 +137,7 @@ class VirtualizerToolImpl implements VirtualizerTool, CanonicalizerTool {
     }
 
     @Override
-    public void setDeleted() {
+    public void setInvisible() {
         deleted = true;
     }
 

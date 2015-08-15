@@ -22,7 +22,6 @@
  */
 package com.oracle.graal.phases.common;
 
-import static com.oracle.graal.compiler.common.GraalOptions.*;
 import static com.oracle.graal.graph.Graph.NodeEvent.*;
 import static jdk.internal.jvmci.meta.LocationIdentity.*;
 
@@ -41,7 +40,6 @@ import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.phases.*;
-import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.common.util.*;
 import com.oracle.graal.phases.graph.*;
 import com.oracle.graal.phases.graph.ReentrantNodeIterator.LoopInfo;
@@ -196,12 +194,6 @@ public class FloatingReadPhase extends Phase {
             assert !graph.isAfterFloatingReadPhase();
             graph.setAfterFloatingReadPhase(true);
         }
-
-        if (UseCompilerDecision.getValue()) {
-            for (StructuredGraph icg : ICGUtil.getAllICGs(graph)) {
-                new FloatingReadPhase(false, true).apply(icg, false);
-            }
-        }
     }
 
     public static MemoryMapImpl mergeMemoryMaps(AbstractMergeNode merge, List<? extends MemoryMap> states) {
@@ -286,7 +278,6 @@ public class FloatingReadPhase extends Phase {
             if (createMemoryMapNodes && node instanceof ReturnNode) {
                 ((ReturnNode) node).setMemoryMap(node.graph().unique(new MemoryMapNode(state.lastMemorySnapshot)));
             }
-
             return state;
         }
 

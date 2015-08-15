@@ -1,14 +1,17 @@
 package com.oracle.graal.phases.common.query;
 
+import jdk.internal.jvmci.meta.*;
+
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.java.*;
+import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo
-public class InstrumentationNode extends FixedWithNextNode implements Virtualizable {
+public class InstrumentationNode extends FixedWithNextNode implements Virtualizable, MemoryCheckpoint.Single {
 
     public static final NodeClass<InstrumentationNode> TYPE = NodeClass.create(InstrumentationNode.class);
 
@@ -51,7 +54,7 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
         if (target instanceof MonitorEnterNode) {
             tool.replaceFirstInput(target, ((MonitorEnterNode) target).getMonitorId());
         } else {
-            tool.setDeleted();
+            tool.setInvisible();
             if (target != null) {
                 State state = tool.getObjectState(target);
                 if (state != null) {
@@ -74,6 +77,10 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
                 }
             }
         }
+    }
+
+    public LocationIdentity getLocationIdentity() {
+        return LocationIdentity.any();
     }
 
 }

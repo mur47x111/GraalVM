@@ -124,7 +124,7 @@ public interface VirtualizerTool {
      */
     void delete();
 
-    void setDeleted();
+    void setInvisible();
 
     /**
      * Replaces an input of the current node.

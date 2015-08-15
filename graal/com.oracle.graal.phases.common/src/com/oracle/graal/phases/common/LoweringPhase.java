@@ -41,7 +41,6 @@ import com.oracle.graal.nodes.cfg.*;
 import com.oracle.graal.nodes.extended.*;
 import com.oracle.graal.nodes.spi.*;
 import com.oracle.graal.phases.*;
-import com.oracle.graal.phases.common.query.*;
 import com.oracle.graal.phases.schedule.*;
 import com.oracle.graal.phases.tiers.*;
 
@@ -191,12 +190,6 @@ public class LoweringPhase extends BasePhase<PhaseContext> {
     protected void run(final StructuredGraph graph, PhaseContext context) {
         lower(graph, context, 0);
         assert checkPostLowering(graph, context);
-
-        if (UseCompilerDecision.getValue()) {
-            for (StructuredGraph icg : ICGUtil.getAllICGs(graph)) {
-                lower(icg, context, 0);
-            }
-        }
     }
 
     private void lower(StructuredGraph graph, PhaseContext context, int i) {

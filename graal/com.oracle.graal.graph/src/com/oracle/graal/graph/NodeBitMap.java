@@ -63,6 +63,10 @@ public final class NodeBitMap implements NodeIterable<Node> {
     }
 
     public boolean isMarked(Node node) {
+        if (nodeIdAccessor.getNodeId(node) < 0) {
+            throw new RuntimeException(node.toString());
+        }
+
         assert check(node, false);
         int id = nodeIdAccessor.getNodeId(node);
         return isMarked(id);
