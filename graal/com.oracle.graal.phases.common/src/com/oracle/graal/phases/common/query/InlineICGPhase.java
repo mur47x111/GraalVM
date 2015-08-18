@@ -78,8 +78,23 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
             }
         }
 
-        for (CompilerDecisionQueryNode query : graph.getNodes().filter(CompilerDecisionQueryNode.class)) {
-            query.onInlineICG(instrumentation, position);
+        for (Node icgNode : duplicates.keySet()) {
+            if (icgNode instanceof StateSplit) {
+                ((StateSplit) duplicates.get(icgNode)).setStateAfter(instrumentation.stateAfter());
+            }
+            if (icgNode instanceof DeoptimizingNode) {
+                DeoptimizingNode deoptDup = (DeoptimizingNode) duplicates.get(icgNode);
+                if (deoptDup.canDeoptimize()) {
+                    if (deoptDup instanceof DeoptimizingNode.DeoptDuring) {
+                        ((DeoptimizingNode.DeoptDuring) deoptDup).computeStateDuring(instrumentation.stateAfter());
+                    } else if (deoptDup instanceof DeoptimizingNode.DeoptAfter) {
+                        ((DeoptimizingNode.DeoptAfter) deoptDup).setStateAfter(instrumentation.stateAfter());
+                    }
+                }
+            }
+            if (icgNode instanceof CompilerDecisionQueryNode) {
+                ((CompilerDecisionQueryNode) duplicates.get(icgNode)).onInlineICG(instrumentation, position);
+            }
         }
     }
 
@@ -88,13 +103,24 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
         Set<StructuredGraph> icgs = new HashSet<>();
         for (InstrumentationNode instrumentation : graph.getNodes().filter(InstrumentationNode.class)) {
             icgs.add(instrumentation.icg());
+            instrumentation.stateAfter().setOuterFrameState(null);
         }
 
         for (StructuredGraph icg : icgs) {
-            new GuardLoweringPhase().apply(icg, null);
-            new FrameStateAssignmentPhase().apply(icg);
-            new LoweringPhase(new CanonicalizerPhase(), LoweringTool.StandardLoweringStage.LOW_TIER).apply(icg, context);
-            new FloatingReadPhase(true, true).apply(icg);
+            new GuardLoweringPhase().apply(icg, null, false);
+            new LoweringPhase(new CanonicalizerPhase(), LoweringTool.StandardLoweringStage.LOW_TIER).apply(icg, context, false);
+
+            for (Node node : icg.getNodes()) {
+                if (node instanceof StateSplit) {
+                    StateSplit stateSplit = (StateSplit) node;
+                    FrameState frameState = stateSplit.stateAfter();
+                    if (frameState != null) {
+                        stateSplit.setStateAfter(null);
+                    }
+                }
+            }
+
+            new FloatingReadPhase(true, true).apply(icg, false);
 
             MemoryAnchorNode anchor = icg.add(new MemoryAnchorNode());
             icg.start().replaceAtUsages(InputType.Memory, anchor);
@@ -120,7 +146,6 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
             }
 
             GraphUtil.unlinkFixedNode(instrumentation);
-            instrumentation.setStateAfter(null);
             instrumentation.clearInputs();
             GraphUtil.killCFG(instrumentation);
         }
@@ -128,5 +153,7 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
         for (CompilerDecisionQueryNode query : graph.getNodes().filter(CompilerDecisionQueryNode.class)) {
             query.replaceWithDefault();
         }
+
+        new CanonicalizerPhase().apply(graph, context, false);
     }
 }

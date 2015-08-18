@@ -13,7 +13,7 @@ public final class IsMethodInlinedNode extends CompilerDecisionQueryNode {
 
     public static final NodeClass<IsMethodInlinedNode> TYPE = NodeClass.create(IsMethodInlinedNode.class);
 
-    protected String original;
+    protected int original;
 
     public IsMethodInlinedNode() {
         super(TYPE, StampFactory.forKind(Kind.Boolean));
@@ -21,13 +21,12 @@ public final class IsMethodInlinedNode extends CompilerDecisionQueryNode {
 
     @Override
     public void onExtractICG(InstrumentationNode instrumentation) {
-        original = CompilerDecisionUtil.getMethodFullName(instrumentation.graph().method());
+        original = System.identityHashCode(instrumentation.graph());
     }
 
     @Override
     public void onInlineICG(InstrumentationNode instrumentation, FixedNode position) {
-        String root = CompilerDecisionUtil.getMethodFullName(instrumentation.graph().method());
-        graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(!root.equals(original), graph()));
+        graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(original != System.identityHashCode(instrumentation.graph()), graph()));
     }
 
     @Override

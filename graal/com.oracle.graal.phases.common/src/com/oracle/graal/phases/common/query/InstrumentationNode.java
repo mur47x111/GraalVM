@@ -8,7 +8,7 @@ import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo
-public class InstrumentationNode extends AbstractStateSplit implements Virtualizable {
+public class InstrumentationNode extends AbstractStateSplit implements Virtualizable, DeoptimizingNode.DeoptAfter {
 
     public static final NodeClass<InstrumentationNode> TYPE = NodeClass.create(InstrumentationNode.class);
 
@@ -81,6 +81,10 @@ public class InstrumentationNode extends AbstractStateSplit implements Virtualiz
                 }
             }
         }
+    }
+
+    public boolean canDeoptimize() {
+        return true;
     }
 
 }
