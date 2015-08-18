@@ -20,17 +20,32 @@ public class CompilerDecisionSubstitutions {
 
     @MethodSubstitution(isStatic = true)
     public static String getRootName() {
-        return RootNameNode.instantiate();
+        return GetRootNameNode.instantiate();
     }
 
     @MethodSubstitution(isStatic = true)
     public static int getAllocationType() {
-        return RuntimePathNode.instantiate();
+        return GetRuntimePathNode.instantiate();
     }
 
     @MethodSubstitution(isStatic = true)
     public static int getLockType() {
-        return RuntimePathNode.instantiate();
+        return GetRuntimePathNode.instantiate();
+    }
+
+    @MethodSubstitution(isStatic = true)
+    public static int getDeoptReason() {
+        return GetDeoptReasonNode.instantiate();
+    }
+
+    @MethodSubstitution(isStatic = true)
+    public static int getDeoptAction() {
+        return GetDeoptActionNode.instantiate();
+    }
+
+    @MethodSubstitution(isStatic = true)
+    public static int getDeoptBCI() {
+        return GetDeoptBCINode.instantiate();
     }
 
 }

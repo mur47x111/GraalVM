@@ -25,7 +25,7 @@ public final class IsMethodInlinedNode extends FixedWithNextNode implements Comp
     }
 
     @Override
-    public void onInlineICG(InstrumentationNode instrumentation) {
+    public void onInlineICG(InstrumentationNode instrumentation, FixedNode position) {
         String root = CompilerDecisionUtil.getMethodFullName(instrumentation.graph().method());
         graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(!root.equals(original), graph()));
     }

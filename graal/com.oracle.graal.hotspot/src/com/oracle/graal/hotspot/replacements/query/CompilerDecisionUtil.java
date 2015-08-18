@@ -8,11 +8,7 @@ import com.oracle.graal.nodes.*;
 
 public class CompilerDecisionUtil {
 
-    public static final Stamp STAMP_STRING = exactNonNull(String.class);
-
-    public static Stamp exactNonNull(Class<?> klass) {
-        return StampFactory.exactNonNull(HotSpotResolvedJavaType.fromClass(klass));
-    }
+    public static final Stamp STAMP_STRING = StampFactory.exactNonNull(HotSpotResolvedJavaType.fromClass(String.class));
 
     public static String getMethodFullName(ResolvedJavaMethod method) {
         // Class name format "L" + full_class_name + ";"
@@ -33,16 +29,6 @@ public class CompilerDecisionUtil {
 
     public static ConstantNode createStringConstant(StructuredGraph graph, String str) {
         return graph.unique(new ConstantNode(HotSpotObjectConstantImpl.forBoxedValue(Kind.Object, str), STAMP_STRING));
-    }
-
-    public static ValuePhiNode createValuePhi(StructuredGraph graph, AbstractMergeNode merge) {
-        ValuePhiNode phi = graph.addWithoutUnique(new ValuePhiNode(StampFactory.intValue(), merge));
-
-        for (int i = 0; i < merge.cfgPredecessors().count(); i++) {
-            phi.addInput(ConstantNode.forInt(i + 1, merge.graph()));
-        }
-
-        return phi;
     }
 
 }

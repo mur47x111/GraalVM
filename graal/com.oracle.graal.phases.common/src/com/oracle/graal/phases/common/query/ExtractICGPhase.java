@@ -115,8 +115,9 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
 
             FixedNode target = getTarget(icgBegin, icgEnd);
             StructuredGraph icg = new StructuredGraph(AllowAssumptions.YES);
-            InstrumentationNode instrumentation = new InstrumentationNode(target, icg, icgBegin.getOffset());
+            InstrumentationNode instrumentation = new InstrumentationNode(target, icg, icgBegin.getOffset(), icgBegin.getType());
             graph.addWithoutUnique(instrumentation);
+            instrumentation.setStateAfter(icgEnd.stateAfter());
 
             Map<Node, Node> replacements = Node.newMap();
             int index = 0;

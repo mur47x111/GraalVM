@@ -9,19 +9,25 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
 
 @NodeInfo
-public final class RuntimePathNode extends FixedWithNextNode implements CompilerDecisionQuery {
+public final class GetRuntimePathNode extends FixedWithNextNode implements CompilerDecisionQuery {
 
-    public static final NodeClass<RuntimePathNode> TYPE = NodeClass.create(RuntimePathNode.class);
+    public static final NodeClass<GetRuntimePathNode> TYPE = NodeClass.create(GetRuntimePathNode.class);
 
-    public RuntimePathNode() {
+    public GetRuntimePathNode() {
         super(TYPE, StampFactory.forKind(Kind.Int));
     }
 
     @Override
-    public void onInlineICG(InstrumentationNode instrumentation) {
+    public void onInlineICG(InstrumentationNode instrumentation, FixedNode position) {
         if (instrumentation.target() instanceof AbstractMergeNode) {
             AbstractMergeNode merge = (AbstractMergeNode) instrumentation.target();
-            graph().replaceFixedWithFloating(this, CompilerDecisionUtil.createValuePhi(graph(), merge));
+            ValuePhiNode phi = graph().addWithoutUnique(new ValuePhiNode(StampFactory.intValue(), merge));
+
+            for (int i = 0; i < merge.cfgPredecessors().count(); i++) {
+                phi.addInput(ConstantNode.forInt(i, merge.graph()));
+            }
+
+            graph().replaceFixedWithFloating(this, phi);
         } else {
             graph().replaceFixedWithFloating(this, ConstantNode.forInt(0, graph()));
         }

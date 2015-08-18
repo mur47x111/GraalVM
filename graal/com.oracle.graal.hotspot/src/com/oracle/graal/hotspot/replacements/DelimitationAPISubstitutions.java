@@ -10,7 +10,12 @@ public class DelimitationAPISubstitutions {
 
     @MethodSubstitution(isStatic = true)
     public static void instrumentationBegin(int target) {
-        InstrumentationBeginNode.instantiate(target);
+        InstrumentationBeginNode.instantiate(target, 0);
+    }
+
+    @MethodSubstitution(isStatic = true)
+    public static void instrumentationBegin(int target, int type) {
+        InstrumentationBeginNode.instantiate(target, type);
     }
 
     @MethodSubstitution(isStatic = true)

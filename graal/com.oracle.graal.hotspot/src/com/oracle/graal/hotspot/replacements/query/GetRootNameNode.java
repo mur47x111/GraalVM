@@ -6,16 +6,16 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
 
 @NodeInfo
-public final class RootNameNode extends FixedWithNextNode implements CompilerDecisionQuery {
+public final class GetRootNameNode extends FixedWithNextNode implements CompilerDecisionQuery {
 
-    public static final NodeClass<RootNameNode> TYPE = NodeClass.create(RootNameNode.class);
+    public static final NodeClass<GetRootNameNode> TYPE = NodeClass.create(GetRootNameNode.class);
 
-    public RootNameNode() {
+    public GetRootNameNode() {
         super(TYPE, CompilerDecisionUtil.STAMP_STRING);
     }
 
     @Override
-    public void onInlineICG(InstrumentationNode instrumentation) {
+    public void onInlineICG(InstrumentationNode instrumentation, FixedNode position) {
         String methodName = CompilerDecisionUtil.getMethodFullName(instrumentation.graph().method());
         graph().replaceFixedWithFloating(this, CompilerDecisionUtil.createStringConstant(graph(), methodName));
     }

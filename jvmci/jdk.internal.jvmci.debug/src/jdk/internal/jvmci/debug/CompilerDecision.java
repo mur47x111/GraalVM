@@ -35,11 +35,11 @@ public final class CompilerDecision {
 
     // Dynamic query intrinsics
 
-    public final static int ERROR = 0;
+    public final static int ERROR = -1;
 
     /**
      * @return the kind of heap allocation for a directly preceding allocation site. The possible
-     *         return values are {ERROR(0), TLAB(1), HEAP(2)}. While ERROR denotes either the
+     *         return values are {ERROR(-1), TLAB(0), HEAP(1)}. While ERROR denotes either the
      *         utility is not supported, e.g. in interpreter, or if the allocation site was
      *         eliminated, the other two represent a TLAB allocation (fast path) or a direct heap
      *         allocation (slow path).
@@ -50,10 +50,22 @@ public final class CompilerDecision {
 
     /**
      * @return the runtime lock type for a directly preceding lock site. The possible return values
-     *         are {ERROR(0), STUB_REVOKE(1), STUB_EPOCH_EXPIRED(2), STUB_FAILED-CAS(3),
-     *         BIAS_EXISTING(4), BIAS_ACQUIRED(5), BIAS_TRANSFER(6), RECURSIVE(7), CAS(8)}.
+     *         are {ERROR(-1), bias:existing(0), bias:acquired(1), bias:transfer(2),
+     *         stub:revoke_or_stub:epoch-expired(3), stub:failed-cas(4), recursive(5), cas(6)}.
      */
     public static int getLockType() {
+        return ERROR;
+    }
+
+    public static int getDeoptReason() {
+        return ERROR;
+    }
+
+    public static int getDeoptAction() {
+        return ERROR;
+    }
+
+    public static int getDeoptBCI() {
         return ERROR;
     }
 

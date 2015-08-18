@@ -1,17 +1,14 @@
 package com.oracle.graal.phases.common.query;
 
-import jdk.internal.jvmci.meta.*;
-
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.java.*;
-import com.oracle.graal.nodes.memory.*;
 import com.oracle.graal.nodes.spi.*;
 
 @NodeInfo
-public class InstrumentationNode extends FixedWithNextNode implements Virtualizable, MemoryCheckpoint.Single {
+public class InstrumentationNode extends AbstractStateSplit implements Virtualizable {
 
     public static final NodeClass<InstrumentationNode> TYPE = NodeClass.create(InstrumentationNode.class);
 
@@ -20,22 +17,21 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
 
     protected StructuredGraph icg;
     protected final int offset;
+    protected final int type;
 
-    public InstrumentationNode(FixedNode target, StructuredGraph icg, int offset) {
+    public InstrumentationNode(FixedNode target, StructuredGraph icg, int offset, int type) {
         super(TYPE, StampFactory.forVoid());
 
         this.target = target;
-        this.offset = offset;
         this.icg = icg;
+        this.offset = offset;
+        this.type = type;
+
         this.weakDependencies = new NodeInputList<>(this);
     }
 
     public boolean addInput(Node node) {
         return weakDependencies.add(node);
-    }
-
-    public int offset() {
-        return offset;
     }
 
     public ValueNode target() {
@@ -44,6 +40,14 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
 
     public StructuredGraph icg() {
         return icg;
+    }
+
+    public int offset() {
+        return offset;
+    }
+
+    public int type() {
+        return type;
     }
 
     public NodeInputList<ValueNode> getWeakDependencies() {
@@ -77,10 +81,6 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
                 }
             }
         }
-    }
-
-    public LocationIdentity getLocationIdentity() {
-        return LocationIdentity.any();
     }
 
 }

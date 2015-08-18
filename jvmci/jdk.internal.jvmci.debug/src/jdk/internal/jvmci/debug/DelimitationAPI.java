@@ -10,6 +10,9 @@ public class DelimitationAPI {
     public static void instrumentationBegin(@SuppressWarnings("unused") int offset) {
     }
 
+    public static void instrumentationBegin(@SuppressWarnings("unused") int offset, @SuppressWarnings("unused") int type) {
+    }
+
     /**
      * Marks the end of the instrumentation boundary.
      */

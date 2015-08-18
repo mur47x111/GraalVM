@@ -11,17 +11,23 @@ public final class InstrumentationBeginNode extends FixedWithNextNode {
     public static final NodeClass<InstrumentationBeginNode> TYPE = NodeClass.create(InstrumentationBeginNode.class);
 
     protected final int offset;
+    protected final int type;
 
-    public InstrumentationBeginNode(int offset) {
+    public InstrumentationBeginNode(int offset, int type) {
         super(TYPE, StampFactory.forVoid());
         this.offset = offset;
+        this.type = type;
     }
 
     public int getOffset() {
         return offset;
     }
 
+    public int getType() {
+        return type;
+    }
+
     @NodeIntrinsic
-    public static native void instantiate(@ConstantNodeParameter int offset);
+    public static native void instantiate(@ConstantNodeParameter int offset, @ConstantNodeParameter int type);
 
 }
