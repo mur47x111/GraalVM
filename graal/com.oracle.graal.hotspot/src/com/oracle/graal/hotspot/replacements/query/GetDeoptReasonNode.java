@@ -9,7 +9,7 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
 
 @NodeInfo
-public final class GetDeoptReasonNode extends FixedWithNextNode implements CompilerDecisionQuery {
+public final class GetDeoptReasonNode extends CompilerDecisionQueryNode {
 
     public static final NodeClass<GetDeoptReasonNode> TYPE = NodeClass.create(GetDeoptReasonNode.class);
 
@@ -22,8 +22,13 @@ public final class GetDeoptReasonNode extends FixedWithNextNode implements Compi
         if (position instanceof DeoptimizeNode) {
             graph().replaceFixedWithFloating(this, ConstantNode.forInt(((DeoptimizeNode) position).action().ordinal(), graph()));
         } else {
-            graph().replaceFixedWithFloating(this, ConstantNode.forInt(-1, graph()));
+            replaceWithDefault();
         }
+    }
+
+    @Override
+    protected void replaceWithDefault() {
+        graph().replaceFixedWithFloating(this, ConstantNode.forInt(-1, graph()));
     }
 
     @NodeIntrinsic

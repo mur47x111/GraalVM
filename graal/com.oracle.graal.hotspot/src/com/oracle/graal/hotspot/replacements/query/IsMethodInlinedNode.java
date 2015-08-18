@@ -9,7 +9,7 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
 
 @NodeInfo
-public final class IsMethodInlinedNode extends FixedWithNextNode implements CompilerDecisionQuery {
+public final class IsMethodInlinedNode extends CompilerDecisionQueryNode {
 
     public static final NodeClass<IsMethodInlinedNode> TYPE = NodeClass.create(IsMethodInlinedNode.class);
 
@@ -28,6 +28,11 @@ public final class IsMethodInlinedNode extends FixedWithNextNode implements Comp
     public void onInlineICG(InstrumentationNode instrumentation, FixedNode position) {
         String root = CompilerDecisionUtil.getMethodFullName(instrumentation.graph().method());
         graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(!root.equals(original), graph()));
+    }
+
+    @Override
+    protected void replaceWithDefault() {
+        graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(false, graph()));
     }
 
     @NodeIntrinsic

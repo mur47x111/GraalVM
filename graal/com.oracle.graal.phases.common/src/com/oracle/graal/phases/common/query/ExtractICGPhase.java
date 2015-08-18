@@ -155,10 +155,8 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
         }
 
         for (InstrumentationNode instrumentation : graph.getNodes().filter(InstrumentationNode.class)) {
-            for (Node node : instrumentation.icg().getNodes()) {
-                if (node instanceof CompilerDecisionQuery) {
-                    ((CompilerDecisionQuery) node).onExtractICG(instrumentation);
-                }
+            for (CompilerDecisionQueryNode query : instrumentation.icg().getNodes().filter(CompilerDecisionQueryNode.class)) {
+                query.onExtractICG(instrumentation);
             }
         }
     }

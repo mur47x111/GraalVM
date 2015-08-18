@@ -78,10 +78,8 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
             }
         }
 
-        for (Node node : graph.getNodes()) {
-            if (node instanceof CompilerDecisionQuery) {
-                ((CompilerDecisionQuery) node).onInlineICG(instrumentation, position);
-            }
+        for (CompilerDecisionQueryNode query : graph.getNodes().filter(CompilerDecisionQueryNode.class)) {
+            query.onInlineICG(instrumentation, position);
         }
     }
 
@@ -125,6 +123,10 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
             instrumentation.setStateAfter(null);
             instrumentation.clearInputs();
             GraphUtil.killCFG(instrumentation);
+        }
+
+        for (CompilerDecisionQueryNode query : graph.getNodes().filter(CompilerDecisionQueryNode.class)) {
+            query.replaceWithDefault();
         }
     }
 }
