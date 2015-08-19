@@ -78,22 +78,17 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
             }
         }
 
-        for (Node icgNode : duplicates.keySet()) {
-            if (icgNode instanceof StateSplit) {
-                ((StateSplit) duplicates.get(icgNode)).setStateAfter(instrumentation.stateAfter());
-            }
-            if (icgNode instanceof DeoptimizingNode) {
-                DeoptimizingNode deoptDup = (DeoptimizingNode) duplicates.get(icgNode);
-                if (deoptDup.canDeoptimize()) {
-                    if (deoptDup instanceof DeoptimizingNode.DeoptDuring) {
-                        ((DeoptimizingNode.DeoptDuring) deoptDup).computeStateDuring(instrumentation.stateAfter());
-                    } else if (deoptDup instanceof DeoptimizingNode.DeoptAfter) {
-                        ((DeoptimizingNode.DeoptAfter) deoptDup).setStateAfter(instrumentation.stateAfter());
-                    }
-                }
-            }
-            if (icgNode instanceof CompilerDecisionQueryNode) {
-                ((CompilerDecisionQueryNode) duplicates.get(icgNode)).onInlineICG(instrumentation, position);
+        for (CompilerDecisionQueryNode query : graph.getNodes().filter(CompilerDecisionQueryNode.class)) {
+            query.onInlineICG(instrumentation, position);
+        }
+
+        for (Node replacee : duplicates.values()) {
+            if (replacee instanceof FrameState) {
+                FrameState oldState = (FrameState) replacee;
+                FrameState newState = new FrameState(null, oldState.method(), oldState.bci, 0, 0, 0, oldState.rethrowException(), oldState.duringCall(), null,
+                                Collections.<EscapeObjectState> emptyList());
+                graph.addWithoutUnique(newState);
+                oldState.replaceAtUsages(newState);
             }
         }
     }
@@ -103,23 +98,12 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
         Set<StructuredGraph> icgs = new HashSet<>();
         for (InstrumentationNode instrumentation : graph.getNodes().filter(InstrumentationNode.class)) {
             icgs.add(instrumentation.icg());
-            instrumentation.stateAfter().setOuterFrameState(null);
         }
 
         for (StructuredGraph icg : icgs) {
             new GuardLoweringPhase().apply(icg, null, false);
+            new FrameStateAssignmentPhase().apply(icg, false);
             new LoweringPhase(new CanonicalizerPhase(), LoweringTool.StandardLoweringStage.LOW_TIER).apply(icg, context, false);
-
-            for (Node node : icg.getNodes()) {
-                if (node instanceof StateSplit) {
-                    StateSplit stateSplit = (StateSplit) node;
-                    FrameState frameState = stateSplit.stateAfter();
-                    if (frameState != null) {
-                        stateSplit.setStateAfter(null);
-                    }
-                }
-            }
-
             new FloatingReadPhase(true, true).apply(icg, false);
 
             MemoryAnchorNode anchor = icg.add(new MemoryAnchorNode());
