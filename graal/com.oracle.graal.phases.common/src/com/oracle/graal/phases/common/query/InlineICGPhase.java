@@ -150,10 +150,6 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
             GraphUtil.killCFG(instrumentation);
         }
 
-        for (CompilerDecisionQueryNode query : graph.getNodes().filter(CompilerDecisionQueryNode.class)) {
-            query.replaceWithDefault();
-        }
-
         new CanonicalizerPhase().apply(graph, context, false);
     }
 }
