@@ -16,6 +16,12 @@ import com.oracle.graal.phases.tiers.*;
 
 public class ExtractICGPhase extends BasePhase<HighTierContext> {
 
+    private boolean isTopLevel;
+
+    public ExtractICGPhase(boolean isTopLevel) {
+        this.isTopLevel = isTopLevel;
+    }
+
     private static boolean shouldIncludeFloatingNode(Node node, NodeBitMap icgNodes) {
         NodePosIterator iterator = node.inputs().iterator();
         while (iterator.hasNext()) {
@@ -70,6 +76,41 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
         return null;
     }
 
+    private static InstrumentationNode createInstrumentationNode(InstrumentationBeginNode icgBegin, InstrumentationEndNode icgEnd, NodeBitMap icgNodes) {
+        FixedNode target = getTarget(icgBegin, icgEnd);
+        StructuredGraph icg = new StructuredGraph(AllowAssumptions.YES);
+        InstrumentationNode instrumentation = new InstrumentationNode(target, icg, icgBegin.getOffset(), icgBegin.getType());
+        icgBegin.graph().addWithoutUnique(instrumentation);
+
+        Map<Node, Node> replacements = Node.newMap();
+        int index = 0;
+
+        for (Node current : icgNodes) {
+            if (current instanceof FrameState) {
+                continue;
+            }
+            for (Node input : current.inputs()) {
+                if (!(input instanceof ValueNode)) {
+                    continue;
+                }
+                if (!icgNodes.isMarked(input) && !replacements.containsKey(input)) {
+                    ParameterNode parameter = new ParameterNode(index++, ((ValueNode) input).stamp());
+                    icg.addWithoutUnique(parameter);
+                    replacements.put(input, parameter);
+                    instrumentation.addInput(input);
+                }
+            }
+        }
+
+        replacements = icg.addDuplicates(icgNodes, icgBegin.graph(), icgNodes.count(), replacements);
+        icg.start().setNext((FixedNode) replacements.get(icgBegin.next()));
+        replacements.get(icgEnd).replaceAtPredecessor(icg.addWithoutUnique(new ReturnNode(null)));
+
+        new DeadCodeEliminationPhase().apply(icg, false);
+        Debug.dump(icg, "After extracted ICG at " + instrumentation);
+        return instrumentation;
+    }
+
     @Override
     protected void run(StructuredGraph graph, HighTierContext context) {
         for (InstrumentationBeginNode icgBegin : graph.getNodes().filter(InstrumentationBeginNode.class)) {
@@ -96,7 +137,6 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
             // iterate data flow
             NodeBitMap icgNodes = icgFlood.getVisited();
             icgNodes.clear(icgBegin);
-
             NodeBitMap before;
 
             do {
@@ -113,42 +153,14 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                 }
             }
 
-            FixedNode target = getTarget(icgBegin, icgEnd);
-            StructuredGraph icg = new StructuredGraph(AllowAssumptions.YES);
-            InstrumentationNode instrumentation = new InstrumentationNode(target, icg, icgBegin.getOffset(), icgBegin.getType());
-            graph.addWithoutUnique(instrumentation);
-
-            Map<Node, Node> replacements = Node.newMap();
-            int index = 0;
-
-            for (Node current : icgNodes) {
-                if (current instanceof FrameState) {
-                    continue;
-                }
-                for (Node input : current.inputs()) {
-                    if (!(input instanceof ValueNode)) {
-                        continue;
-                    }
-                    if (!icgNodes.isMarked(input) && !replacements.containsKey(input)) {
-                        ParameterNode parameter = new ParameterNode(index++, ((ValueNode) input).stamp());
-                        icg.addWithoutUnique(parameter);
-                        replacements.put(input, parameter);
-                        instrumentation.addInput(input);
-                    }
-                }
+            if (icgBegin.getType() == 0 || isTopLevel) {
+                InstrumentationNode instrumentation = createInstrumentationNode(icgBegin, icgEnd, icgNodes);
+                graph.addBeforeFixed(icgBegin, instrumentation);
             }
 
-            replacements = icg.addDuplicates(icgNodes, graph, icgNodes.count(), replacements);
-            icg.start().setNext((FixedNode) replacements.get(icgBegin.next()));
-            replacements.get(icgEnd).replaceAtPredecessor(icg.addWithoutUnique(new ReturnNode(null)));
-
-            new DeadCodeEliminationPhase().apply(icg, false);
-            Debug.dump(icg, "After extracted ICG at " + instrumentation);
-
-            icgBegin.replaceAtPredecessor(instrumentation);
-            FixedNode instrumentationNext = icgEnd.next();
+            FixedNode next = icgEnd.next();
             icgEnd.setNext(null);
-            instrumentation.setNext(instrumentationNext);
+            icgBegin.replaceAtPredecessor(next);
 
             GraphUtil.killCFG(icgBegin);
         }

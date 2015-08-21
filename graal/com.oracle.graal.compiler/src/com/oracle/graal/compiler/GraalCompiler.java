@@ -190,7 +190,7 @@ public class GraalCompiler {
             if (graph.start().next() == null) {
                 graphBuilderSuite.apply(graph, highTierContext);
                 if (UseCompilerDecision.getValue()) {
-                    new ExtractICGPhase().apply(graph, highTierContext);
+                    new ExtractICGPhase(true).apply(graph, highTierContext);
                 }
                 new DeadCodeEliminationPhase(Optional).apply(graph);
             } else {
