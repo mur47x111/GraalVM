@@ -78,7 +78,7 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
             }
         }
 
-        for (CompilerDecisionQueryNode query : graph.getNodes().filter(CompilerDecisionQueryNode.class)) {
+        for (GraalQueryNode query : graph.getNodes().filter(GraalQueryNode.class)) {
             query.onInlineICG(instrumentation, position);
         }
 

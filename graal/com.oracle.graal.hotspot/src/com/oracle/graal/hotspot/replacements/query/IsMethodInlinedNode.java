@@ -9,7 +9,7 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
 
 @NodeInfo
-public final class IsMethodInlinedNode extends CompilerDecisionQueryNode {
+public final class IsMethodInlinedNode extends GraalQueryNode {
 
     public static final NodeClass<IsMethodInlinedNode> TYPE = NodeClass.create(IsMethodInlinedNode.class);
 
@@ -27,11 +27,6 @@ public final class IsMethodInlinedNode extends CompilerDecisionQueryNode {
     @Override
     public void onInlineICG(InstrumentationNode instrumentation, FixedNode position) {
         graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(original != System.identityHashCode(instrumentation.graph()), graph()));
-    }
-
-    @Override
-    protected void replaceWithDefault() {
-        graph().replaceFixedWithFloating(this, ConstantNode.forBoolean(false, graph()));
     }
 
     @NodeIntrinsic

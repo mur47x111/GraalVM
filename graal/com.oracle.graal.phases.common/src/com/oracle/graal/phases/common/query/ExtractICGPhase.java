@@ -22,32 +22,24 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
         this.isTopLevel = isTopLevel;
     }
 
-    private static boolean shouldIncludeFloatingNode(Node node, NodeBitMap icgNodes) {
-        NodePosIterator iterator = node.inputs().iterator();
-        while (iterator.hasNext()) {
-            Position pos = iterator.nextPosition();
-            if (pos.getInputType() == InputType.Value) {
-                continue;
-            }
-            if (!icgNodes.contains(pos.get(node))) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static void iterateInput(Node node, NodeBitMap icgNodes) {
-        for (Node input : node.inputs()) {
-            if (input instanceof FloatingNode) {
-                if (!(input instanceof AbstractLocalNode) && shouldIncludeFloatingNode(input, icgNodes)) {
-                    icgNodes.mark(input);
-                } else {
-
+    private static boolean shouldIncludeInput(Node node, NodeBitMap cfgNodes) {
+        if (node instanceof FloatingNode && !(node instanceof AbstractLocalNode)) {
+            NodePosIterator iterator = node.inputs().iterator();
+            while (iterator.hasNext()) {
+                Position pos = iterator.nextPosition();
+                if (pos.getInputType() == InputType.Value) {
+                    continue;
                 }
-            } else if (input instanceof CallTargetNode || input instanceof MonitorIdNode) {
-                icgNodes.mark(input);
+                if (!cfgNodes.isMarked(pos.get(node))) {
+                    return false;
+                }
             }
+            return true;
         }
+        if (node instanceof CallTargetNode || node instanceof MonitorIdNode || node instanceof FrameState) {
+            return true;
+        }
+        return false;
     }
 
     private static FixedNode getTarget(InstrumentationBeginNode icgBegin, InstrumentationEndNode icgEnd) {
@@ -115,58 +107,48 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
     protected void run(StructuredGraph graph, HighTierContext context) {
         for (InstrumentationBeginNode icgBegin : graph.getNodes().filter(InstrumentationBeginNode.class)) {
             InstrumentationEndNode icgEnd = null;
-
-            // iterate control flow
-            NodeFlood icgFlood = graph.createNodeFlood();
-            icgFlood.add(icgBegin);
-
-            for (Node current : icgFlood) {
+            // iterate icg nodes via both control flow and data flow
+            NodeFlood icgCFG = graph.createNodeFlood();
+            icgCFG.add(icgBegin.next());
+            for (Node current : icgCFG) {
                 if (current instanceof InstrumentationEndNode) {
                     icgEnd = (InstrumentationEndNode) current;
                 } else if (current instanceof LoopEndNode) {
-                    // TODO (yz) do nothing?
+                    // do nothing
                 } else if (current instanceof AbstractEndNode) {
-                    icgFlood.add(((AbstractEndNode) current).merge());
+                    icgCFG.add(((AbstractEndNode) current).merge());
                 } else {
                     for (Node successor : current.successors()) {
-                        icgFlood.add(successor);
+                        icgCFG.add(successor);
                     }
                 }
             }
 
-            // iterate data flow
-            NodeBitMap icgNodes = icgFlood.getVisited();
-            icgNodes.clear(icgBegin);
-            NodeBitMap before;
-
-            do {
-                before = icgNodes.copy();
-
-                for (Node current : icgNodes) {
-                    iterateInput(current, icgNodes);
-                }
-            } while (!icgNodes.compare(before));
-
-            for (Node current : icgNodes) {
-                for (Node input : current.inputs().filter(FrameState.class)) {
-                    icgNodes.mark(input);
-                }
-            }
-
             if (icgBegin.getType() == 0 || isTopLevel) {
-                InstrumentationNode instrumentation = createInstrumentationNode(icgBegin, icgEnd, icgNodes);
+                NodeBitMap cfgNodes = icgCFG.getVisited();
+                NodeFlood icgDFG = graph.createNodeFlood();
+                icgDFG.addAll(cfgNodes);
+                for (Node current : icgDFG) {
+                    if (current instanceof FrameState) {
+                        continue;
+                    }
+                    for (Node input : current.inputs()) {
+                        if (shouldIncludeInput(input, cfgNodes)) {
+                            icgDFG.add(input);
+                        }
+                    }
+                }
+                InstrumentationNode instrumentation = createInstrumentationNode(icgBegin, icgEnd, icgDFG.getVisited());
                 graph.addBeforeFixed(icgBegin, instrumentation);
             }
-
             FixedNode next = icgEnd.next();
             icgEnd.setNext(null);
             icgBegin.replaceAtPredecessor(next);
-
             GraphUtil.killCFG(icgBegin);
         }
 
         for (InstrumentationNode instrumentation : graph.getNodes().filter(InstrumentationNode.class)) {
-            for (CompilerDecisionQueryNode query : instrumentation.icg().getNodes().filter(CompilerDecisionQueryNode.class)) {
+            for (GraalQueryNode query : instrumentation.icg().getNodes().filter(GraalQueryNode.class)) {
                 query.onExtractICG(instrumentation);
             }
         }

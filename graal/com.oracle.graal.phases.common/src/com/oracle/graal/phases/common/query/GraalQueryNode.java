@@ -6,11 +6,11 @@ import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
 
 @NodeInfo
-public abstract class CompilerDecisionQueryNode extends FixedWithNextNode {
+public abstract class GraalQueryNode extends FixedWithNextNode {
 
-    public static final NodeClass<CompilerDecisionQueryNode> TYPE = NodeClass.create(CompilerDecisionQueryNode.class);
+    public static final NodeClass<GraalQueryNode> TYPE = NodeClass.create(GraalQueryNode.class);
 
-    public CompilerDecisionQueryNode(NodeClass<? extends FixedWithNextNode> c, Stamp stamp) {
+    public GraalQueryNode(NodeClass<? extends FixedWithNextNode> c, Stamp stamp) {
         super(c, stamp);
     }
 
@@ -19,7 +19,5 @@ public abstract class CompilerDecisionQueryNode extends FixedWithNextNode {
 
     protected void onInlineICG(@SuppressWarnings("unused") InstrumentationNode instrumentation, @SuppressWarnings("unused") FixedNode position) {
     }
-
-    protected abstract void replaceWithDefault();
 
 }

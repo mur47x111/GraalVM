@@ -6,7 +6,7 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
 
 @NodeInfo
-public final class GetRootNameNode extends CompilerDecisionQueryNode {
+public final class GetRootNameNode extends GraalQueryNode {
 
     public static final NodeClass<GetRootNameNode> TYPE = NodeClass.create(GetRootNameNode.class);
 
@@ -16,11 +16,6 @@ public final class GetRootNameNode extends CompilerDecisionQueryNode {
 
     @Override
     public void onInlineICG(InstrumentationNode instrumentation, FixedNode position) {
-        replaceWithDefault();
-    }
-
-    @Override
-    protected void replaceWithDefault() {
         String methodName = CompilerDecisionUtil.getMethodFullName(graph().method());
         graph().replaceFixedWithFloating(this, CompilerDecisionUtil.createStringConstant(graph(), methodName));
     }

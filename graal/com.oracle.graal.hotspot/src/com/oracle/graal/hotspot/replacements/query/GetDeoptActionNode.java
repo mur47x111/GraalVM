@@ -9,12 +9,12 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
 
 @NodeInfo
-public final class GetDeoptActionNode extends CompilerDecisionQueryNode {
+public final class GetDeoptActionNode extends GraalQueryNode {
 
     public static final NodeClass<GetDeoptActionNode> TYPE = NodeClass.create(GetDeoptActionNode.class);
 
     public GetDeoptActionNode() {
-        super(TYPE, StampFactory.forKind(Kind.Boolean));
+        super(TYPE, StampFactory.forKind(Kind.Int));
     }
 
     @Override
@@ -22,13 +22,8 @@ public final class GetDeoptActionNode extends CompilerDecisionQueryNode {
         if (position instanceof DeoptimizeNode) {
             graph().replaceFixedWithFloating(this, ConstantNode.forInt(((DeoptimizeNode) position).reason().ordinal(), graph()));
         } else {
-            replaceWithDefault();
+            graph().replaceFixedWithFloating(this, ConstantNode.forInt(-1, graph()));
         }
-    }
-
-    @Override
-    protected void replaceWithDefault() {
-        graph().replaceFixedWithFloating(this, ConstantNode.forInt(-1, graph()));
     }
 
     @NodeIntrinsic

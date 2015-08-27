@@ -9,7 +9,7 @@ import com.oracle.graal.nodes.*;
 import com.oracle.graal.phases.common.query.*;
 
 @NodeInfo
-public final class GetRuntimePathNode extends CompilerDecisionQueryNode {
+public final class GetRuntimePathNode extends GraalQueryNode {
 
     public static final NodeClass<GetRuntimePathNode> TYPE = NodeClass.create(GetRuntimePathNode.class);
 
@@ -29,13 +29,8 @@ public final class GetRuntimePathNode extends CompilerDecisionQueryNode {
 
             graph().replaceFixedWithFloating(this, phi);
         } else {
-            replaceWithDefault();
+            graph().replaceFixedWithFloating(this, ConstantNode.forInt(-1, graph()));
         }
-    }
-
-    @Override
-    protected void replaceWithDefault() {
-        graph().replaceFixedWithFloating(this, ConstantNode.forInt(-1, graph()));
     }
 
     @NodeIntrinsic
