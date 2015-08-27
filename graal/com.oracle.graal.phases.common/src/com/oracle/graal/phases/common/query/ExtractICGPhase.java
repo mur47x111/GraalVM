@@ -6,7 +6,6 @@ import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
-import com.oracle.graal.nodes.StructuredGraph.AllowAssumptions;
 import com.oracle.graal.nodes.calc.*;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.util.*;
@@ -70,9 +69,9 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
 
     private static InstrumentationNode createInstrumentationNode(InstrumentationBeginNode icgBegin, InstrumentationEndNode icgEnd, NodeBitMap icgNodes) {
         FixedNode target = getTarget(icgBegin, icgEnd);
-        StructuredGraph icg = new StructuredGraph(AllowAssumptions.YES);
-        InstrumentationNode instrumentation = new InstrumentationNode(target, icg, icgBegin.getOffset(), icgBegin.getType());
+        InstrumentationNode instrumentation = new InstrumentationNode(target, icgBegin.getOffset(), icgBegin.getType());
         icgBegin.graph().addWithoutUnique(instrumentation);
+        StructuredGraph icg = instrumentation.icg();
 
         Map<Node, Node> replacements = Node.newMap();
         int index = 0;

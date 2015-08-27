@@ -4,6 +4,7 @@ import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodeinfo.*;
 import com.oracle.graal.nodes.*;
+import com.oracle.graal.nodes.StructuredGraph.*;
 import com.oracle.graal.nodes.java.*;
 import com.oracle.graal.nodes.spi.*;
 
@@ -19,11 +20,11 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
     protected final int offset;
     protected final int type;
 
-    public InstrumentationNode(FixedNode target, StructuredGraph icg, int offset, int type) {
+    public InstrumentationNode(FixedNode target, int offset, int type) {
         super(TYPE, StampFactory.forVoid());
 
         this.target = target;
-        this.icg = icg;
+        this.icg = new StructuredGraph(AllowAssumptions.YES);
         this.offset = offset;
         this.type = type;
 
