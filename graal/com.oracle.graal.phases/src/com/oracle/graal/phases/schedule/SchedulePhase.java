@@ -721,25 +721,6 @@ public final class SchedulePhase extends Phase {
         }
     }
 
-/**
-    private void addToLatestSortingHelper(ValueNode i, SortState state) {
-        FrameState stateAfter = null;
-        if (i instanceof StateSplit) {
-            stateAfter = ((StateSplit) i).stateAfter();
-        }
-
-        if (!(i instanceof InstrumentationNode)) {
-            addInputsToLatestSorting(i, state, stateAfter);
-        }
-
-        if (state.readsSize() != 0) {
-            if (i instanceof MemoryCheckpoint.Single) {
-                LocationIdentity identity = ((MemoryCheckpoint.Single) i).getLocationIdentity();
-                processKillLocation(i, identity, state);
-            } else if (i instanceof MemoryCheckpoint.Multi) {
-                for (LocationIdentity identity : ((MemoryCheckpoint.Multi) i).getLocationIdentities()) {
-                    processKillLocation(i, identity, state);
-*/
     public String printScheduleHelper(String desc) {
         Formatter buf = new Formatter();
         buf.format("=== %s / %s / %s ===%n", getCFG().getStartBlock().getBeginNode().graph(), selectedStrategy, desc);
