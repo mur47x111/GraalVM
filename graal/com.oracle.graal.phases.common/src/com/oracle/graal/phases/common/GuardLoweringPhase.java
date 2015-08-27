@@ -27,10 +27,10 @@ import static com.oracle.graal.compiler.common.GraalOptions.*;
 import java.util.*;
 import java.util.Map.Entry;
 
+import com.oracle.graal.debug.*;
 import jdk.internal.jvmci.meta.*;
 
 import com.oracle.graal.compiler.common.cfg.*;
-import com.oracle.graal.debug.*;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.StructuredGraph.GuardsStage;

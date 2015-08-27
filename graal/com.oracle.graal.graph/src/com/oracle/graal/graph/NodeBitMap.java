@@ -241,5 +241,4 @@ public final class NodeBitMap implements NodeIterable<Node> {
     public String toString() {
         return snapshot().toString();
     }
-
 }

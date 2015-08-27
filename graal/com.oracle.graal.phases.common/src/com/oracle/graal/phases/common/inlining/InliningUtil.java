@@ -32,12 +32,14 @@ import java.util.*;
 import jdk.internal.jvmci.code.*;
 import jdk.internal.jvmci.common.*;
 import jdk.internal.jvmci.debug.*;
+
+import com.oracle.graal.debug.*;
+import com.oracle.graal.debug.Debug.Scope;
+
 import jdk.internal.jvmci.meta.*;
 
 import com.oracle.graal.api.replacements.*;
 import com.oracle.graal.compiler.common.type.*;
-import com.oracle.graal.debug.*;
-import com.oracle.graal.debug.Debug.Scope;
 import com.oracle.graal.graph.*;
 import com.oracle.graal.graph.Graph.DuplicationReplacement;
 import com.oracle.graal.nodeinfo.*;
