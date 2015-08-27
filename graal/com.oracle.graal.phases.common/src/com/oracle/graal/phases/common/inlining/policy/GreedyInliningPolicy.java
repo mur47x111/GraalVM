@@ -77,7 +77,7 @@ public class GreedyInliningPolicy extends AbstractInliningPolicy {
         int nodes = info.determineNodeCount();
         int lowLevelGraphSize = previousLowLevelGraphSize(info);
 
-        if (!UseCompilerDecision.getValue() && SmallCompiledLowLevelGraphSize.getValue() > 0 && lowLevelGraphSize > SmallCompiledLowLevelGraphSize.getValue() * inliningBonus) {
+        if (!UseGraalQueries.getValue() && SmallCompiledLowLevelGraphSize.getValue() > 0 && lowLevelGraphSize > SmallCompiledLowLevelGraphSize.getValue() * inliningBonus) {
             InliningUtil.logNotInlinedMethod(info, inliningDepth, "too large previous low-level graph (low-level-nodes: %d, relevance=%f, probability=%f, bonus=%f, nodes=%d)", lowLevelGraphSize,
                             relevance, probability, inliningBonus, nodes);
             return false;

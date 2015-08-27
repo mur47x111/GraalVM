@@ -55,7 +55,7 @@ public class LowTier extends PhaseSuite<LowTierContext> {
 
         appendPhase(new LoweringPhase(canonicalizer, LoweringTool.StandardLoweringStage.LOW_TIER));
 
-        if (UseCompilerDecision.getValue()) {
+        if (UseGraalQueries.getValue()) {
             appendPhase(new InlineICGPhase());
         }
 

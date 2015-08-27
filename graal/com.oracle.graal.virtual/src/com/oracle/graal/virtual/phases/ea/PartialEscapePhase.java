@@ -80,7 +80,7 @@ public class PartialEscapePhase extends EffectsPhase<PhaseContext> {
             }
         }
 
-        if (UseCompilerDecision.getValue()) {
+        if (UseGraalQueries.getValue()) {
             ICGUtil.redirect(graph);
         }
     }

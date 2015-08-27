@@ -189,7 +189,7 @@ public class GraalCompiler {
             HighTierContext highTierContext = new HighTierContext(providers, graphBuilderSuite, optimisticOpts);
             if (graph.start().next() == null) {
                 graphBuilderSuite.apply(graph, highTierContext);
-                if (UseCompilerDecision.getValue()) {
+                if (UseGraalQueries.getValue()) {
                     new ExtractICGPhase(true).apply(graph, highTierContext);
                 }
                 new DeadCodeEliminationPhase(Optional).apply(graph);

@@ -720,7 +720,7 @@ public class InliningUtil {
     }
 
     public static void removeAttachedInstrumentation(Invoke invoke) {
-        if (UseCompilerDecision.getValue()) {
+        if (UseGraalQueries.getValue()) {
             FixedNode invokeNode = invoke.asNode();
 
             for (InstrumentationNode instrumentation : invokeNode.usages().filter(InstrumentationNode.class)) {
