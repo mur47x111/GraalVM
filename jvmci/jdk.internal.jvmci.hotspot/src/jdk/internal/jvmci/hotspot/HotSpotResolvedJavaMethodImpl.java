@@ -275,7 +275,7 @@ public final class HotSpotResolvedJavaMethodImpl extends HotSpotMethod implement
      * @return true if DontInline annotation present, false otherwise
      */
     public boolean isDontInline() {
-        return (getFlags() & runtime().getConfig().methodFlagsDontInline) != 0;
+        return (getFlags() & runtime().getConfig().methodFlagsDontInline) != 0 || getAnnotation(DontInline.class) != null;
     }
 
     /**
@@ -534,9 +534,6 @@ public final class HotSpotResolvedJavaMethodImpl extends HotSpotMethod implement
     @Override
     public boolean canBeInlined() {
         if (isDontInline()) {
-            return false;
-        }
-        if (getAnnotation(DontInline.class) != null) {
             return false;
         }
         return runtime().getCompilerToVM().canInlineMethod(metaspaceMethod);

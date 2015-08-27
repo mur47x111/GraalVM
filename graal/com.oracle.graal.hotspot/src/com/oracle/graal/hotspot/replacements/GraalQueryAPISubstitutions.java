@@ -1,12 +1,11 @@
 package com.oracle.graal.hotspot.replacements;
 
-import jdk.internal.jvmci.debug.*;
-
 import com.oracle.graal.api.replacements.*;
+import com.oracle.graal.debug.query.*;
 import com.oracle.graal.hotspot.replacements.query.*;
 
-@ClassSubstitution(CompilerDecision.class)
-public class CompilerDecisionSubstitutions {
+@ClassSubstitution(GraalQueryAPI.class)
+public class GraalQueryAPISubstitutions {
 
     @MethodSubstitution(isStatic = true)
     public static boolean isMethodCompiled() {

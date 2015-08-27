@@ -1,4 +1,4 @@
-package jdk.internal.jvmci.debug;
+package com.oracle.graal.debug.query;
 
 public class DelimitationAPI {
 

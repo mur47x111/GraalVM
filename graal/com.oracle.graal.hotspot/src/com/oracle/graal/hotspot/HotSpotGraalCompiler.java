@@ -33,6 +33,7 @@ import jdk.internal.jvmci.meta.*;
 import jdk.internal.jvmci.service.*;
 
 import com.oracle.graal.compiler.*;
+import com.oracle.graal.debug.query.*;
 import com.oracle.graal.graphbuilderconf.*;
 import com.oracle.graal.graphbuilderconf.GraphBuilderConfiguration.Plugins;
 import com.oracle.graal.hotspot.meta.*;
@@ -50,17 +51,12 @@ import com.oracle.graal.phases.tiers.*;
 @ServiceProvider(Compiler.class)
 public class HotSpotGraalCompiler implements Compiler {
 
-    private static boolean shouldNotCompileIntrinsic(ResolvedJavaMethod method) {
-        String klass = method.getDeclaringClass().toJavaName();
-        return "jdk.internal.jvmci.debug.CompilerDecision".equals(klass) || "jdk.internal.jvmci.debug.DelimitationAPI".equals(klass);
-    }
-
     public CompilationResult compile(ResolvedJavaMethod method, int entryBCI, boolean mustRecordMethodInlining) {
         HotSpotBackend backend = HotSpotGraalRuntime.runtime().getHostBackend();
         HotSpotProviders providers = HotSpotGraalRuntime.runtime().getHostProviders();
         final boolean isOSR = entryBCI != INVOCATION_ENTRY_BCI;
 
-        StructuredGraph graph = method.isNative() || isOSR || shouldNotCompileIntrinsic(method) ? null : getIntrinsicGraph(method, providers);
+        StructuredGraph graph = method.isNative() || isOSR || QueryUtil.isQueryIntrinsic(method) ? null : getIntrinsicGraph(method, providers);
         if (graph == null) {
             SpeculationLog speculationLog = method.getSpeculationLog();
             if (speculationLog != null) {

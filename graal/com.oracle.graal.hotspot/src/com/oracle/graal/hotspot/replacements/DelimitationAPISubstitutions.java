@@ -1,8 +1,7 @@
 package com.oracle.graal.hotspot.replacements;
 
-import jdk.internal.jvmci.debug.*;
-
 import com.oracle.graal.api.replacements.*;
+import com.oracle.graal.debug.query.*;
 import com.oracle.graal.phases.common.query.*;
 
 @ClassSubstitution(DelimitationAPI.class)
