@@ -117,9 +117,7 @@ public class ExtractICGPhase extends BasePhase<HighTierContext> {
                 } else if (current instanceof AbstractEndNode) {
                     icgCFG.add(((AbstractEndNode) current).merge());
                 } else {
-                    for (Node successor : current.successors()) {
-                        icgCFG.add(successor);
-                    }
+                    icgCFG.addAll(current.successors());
                 }
             }
 

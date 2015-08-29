@@ -28,12 +28,9 @@ public class ICGUtil {
             if (current instanceof LoopEndNode) {
                 continue;
             } else if (current instanceof AbstractEndNode) {
-                AbstractEndNode end = (AbstractEndNode) current;
-                flood.add(end.merge());
+                flood.add(((AbstractEndNode) current).merge());
             } else {
-                for (Node successor : current.successors()) {
-                    flood.add(successor);
-                }
+                flood.addAll(current.successors());
             }
         }
         return flood;
