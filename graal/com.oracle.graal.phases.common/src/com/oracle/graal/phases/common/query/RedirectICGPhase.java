@@ -17,7 +17,6 @@ public class RedirectICGPhase extends BasePhase<MidTierContext> {
             if (target instanceof MonitorIdNode) {
                 MonitorIdNode id = (MonitorIdNode) target;
                 MonitorEnterNode enter = id.usages().filter(MonitorEnterNode.class).first();
-
                 if (enter != null) {
                     instrumentation.replaceFirstInput(id, enter);
                 }

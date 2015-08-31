@@ -1,4 +1,4 @@
-package com.oracle.graal.virtual.phases.ea;
+package com.oracle.graal.phases.common.query;
 
 import java.util.*;
 
@@ -6,9 +6,10 @@ import com.oracle.graal.graph.*;
 import com.oracle.graal.nodes.*;
 import com.oracle.graal.nodes.util.*;
 import com.oracle.graal.nodes.virtual.*;
-import com.oracle.graal.phases.common.query.*;
+import com.oracle.graal.phases.*;
+import com.oracle.graal.phases.tiers.*;
 
-public class ICGUtil {
+public class PostEAPhase extends BasePhase<HighTierContext> {
 
     private static AllocatedObjectNode getAllocatedObject(StructuredGraph graph, CommitAllocationNode commit, VirtualObjectNode virtual) {
         for (AllocatedObjectNode object : graph.getNodes().filter(AllocatedObjectNode.class)) {
@@ -21,7 +22,7 @@ public class ICGUtil {
         return object;
     }
 
-    private static NodeFlood createNodeFlood(StructuredGraph graph, FixedNode start) {
+    private static NodeFlood getCFGAccessible(StructuredGraph graph, FixedNode start) {
         NodeFlood flood = graph.createNodeFlood();
         flood.add(start);
         for (Node current : flood) {
@@ -36,7 +37,8 @@ public class ICGUtil {
         return flood;
     }
 
-    public static void redirect(StructuredGraph graph) {
+    @Override
+    protected void run(StructuredGraph graph, HighTierContext context) {
         for (CommitAllocationNode commit : graph.getNodes().filter(CommitAllocationNode.class)) {
             List<VirtualObjectNode> virtualObjects = commit.getVirtualObjects();
             for (int index = virtualObjects.size() - 1; index >= 0; index--) {
@@ -45,7 +47,7 @@ public class ICGUtil {
                     if (instrumentation.target() != virtual) {
                         continue;
                     }
-                    NodeFlood flood = createNodeFlood(graph, instrumentation);
+                    NodeFlood flood = getCFGAccessible(graph, instrumentation);
                     if (!flood.isMarked(commit)) {
                         continue;
                     }
