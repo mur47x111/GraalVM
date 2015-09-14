@@ -116,19 +116,7 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
         }
 
         for (InstrumentationNode instrumentation : graph.getNodes().filter(InstrumentationNode.class)) {
-            StructuredGraph icg = instrumentation.icg();
-
-            switch (instrumentation.type()) {
-                case 1:
-                    for (AbstractDeoptimizeNode deopt : graph.getNodes().filter(AbstractDeoptimizeNode.class)) {
-                        inlineICG(graph, icg, instrumentation, deopt);
-                    }
-                    break;
-                default:
-                    inlineICG(graph, icg, instrumentation, instrumentation);
-                    break;
-            }
-
+            inlineICG(graph, instrumentation.icg(), instrumentation, instrumentation);
             GraphUtil.unlinkFixedNode(instrumentation);
             instrumentation.clearInputs();
             GraphUtil.killCFG(instrumentation);
