@@ -716,6 +716,7 @@ public class InliningUtil {
         }
     }
 
+    // exclude InstrumentationNode for inlining heuristics
     public static int getNodeCount(StructuredGraph graph) {
         // TODO (yz) mark parameters only used by instrumentation node
         return graph.getNodeCount() - graph.getNodes().filter(InstrumentationNode.class).count();

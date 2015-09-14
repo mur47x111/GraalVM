@@ -45,6 +45,7 @@ import com.oracle.graal.debug.Debug.Scope;
 import jdk.internal.jvmci.meta.*;
 
 import com.oracle.graal.api.replacements.*;
+import com.oracle.graal.compiler.common.*;
 import com.oracle.graal.compiler.common.type.*;
 import com.oracle.graal.graph.Graph.Mark;
 import com.oracle.graal.graph.*;
@@ -1271,14 +1272,16 @@ public class SnippetTemplate {
 
             updateStamps(replacee, duplicates);
 
-            for (InstrumentationNode instrumentation : replaceeGraph.getNodes().filter(InstrumentationNode.class)) {
-                if (instrumentation.target() == replacee) {
-                    if (instrumentation.offset() < 0) {
-                        ReturnNode returnDuplicate = (ReturnNode) duplicates.get(returnNode);
-                        FixedWithNextNode pred = (FixedWithNextNode) returnDuplicate.predecessor();
-                        instrumentation.replaceFirstInput(replacee, pred);
-                    } else {
-                        instrumentation.replaceFirstInput(replacee, firstCFGNodeDuplicate);
+            if (GraalOptions.UseGraalQueries.getValue()) {
+                for (InstrumentationNode instrumentation : replaceeGraph.getNodes().filter(InstrumentationNode.class)) {
+                    if (instrumentation.target() == replacee) {
+                        if (instrumentation.offset() < 0) {
+                            ReturnNode returnDuplicate = (ReturnNode) duplicates.get(returnNode);
+                            FixedWithNextNode pred = (FixedWithNextNode) returnDuplicate.predecessor();
+                            instrumentation.replaceFirstInput(replacee, pred);
+                        } else {
+                            instrumentation.replaceFirstInput(replacee, firstCFGNodeDuplicate);
+                        }
                     }
                 }
             }
