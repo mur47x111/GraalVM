@@ -101,9 +101,9 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
         }
 
         for (StructuredGraph icg : icgs) {
-            new GuardLoweringPhase().apply(icg, null, false);
+            new GuardLoweringPhase().apply(icg, null);
             new FrameStateAssignmentPhase().apply(icg, false);
-            new LoweringPhase(new CanonicalizerPhase(), LoweringTool.StandardLoweringStage.LOW_TIER).apply(icg, context, false);
+            new LoweringPhase(new CanonicalizerPhase(), LoweringTool.StandardLoweringStage.LOW_TIER).apply(icg, context);
             new FloatingReadPhase(true, true).apply(icg, false);
 
             MemoryAnchorNode anchor = icg.add(new MemoryAnchorNode());
@@ -134,6 +134,6 @@ public class InlineICGPhase extends BasePhase<LowTierContext> {
             GraphUtil.killCFG(instrumentation);
         }
 
-        new CanonicalizerPhase().apply(graph, context, false);
+        new CanonicalizerPhase().apply(graph, context);
     }
 }

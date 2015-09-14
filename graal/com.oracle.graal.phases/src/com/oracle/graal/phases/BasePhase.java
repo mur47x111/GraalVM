@@ -136,7 +136,7 @@ public abstract class BasePhase<C> {
         apply(graph, context, true);
     }
 
-    public final void apply(final StructuredGraph graph, final C context, final boolean dumpGraph) {
+    protected final void apply(final StructuredGraph graph, final C context, final boolean dumpGraph) {
         try (DebugCloseable a = timer.start(); Scope s = Debug.scope(getClass(), this); DebugCloseable c = memUseTracker.start()) {
             if (dumpGraph && Debug.isDumpEnabled(BEFORE_PHASE_DUMP_LEVEL)) {
                 Debug.dump(BEFORE_PHASE_DUMP_LEVEL, graph, "Before phase %s", getName());

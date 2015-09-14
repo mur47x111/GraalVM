@@ -84,8 +84,4 @@ public class InstrumentationNode extends FixedWithNextNode implements Virtualiza
         }
     }
 
-    public boolean canDeoptimize() {
-        return true;
-    }
-
 }
