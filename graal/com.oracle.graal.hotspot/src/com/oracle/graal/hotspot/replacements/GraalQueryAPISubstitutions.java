@@ -32,4 +32,19 @@ public class GraalQueryAPISubstitutions {
         return GetRuntimePathNode.instantiate();
     }
 
+    @MethodSubstitution(isStatic = true)
+    public static int getDeoptReason() {
+        return GetDeoptReasonNode.instantiate();
+    }
+
+    @MethodSubstitution(isStatic = true)
+    public static int getDeoptAction() {
+        return GetDeoptActionNode.instantiate();
+    }
+
+    @MethodSubstitution(isStatic = true)
+    public static int getDeoptBCI() {
+        return GetDeoptBCINode.instantiate();
+    }
+
 }

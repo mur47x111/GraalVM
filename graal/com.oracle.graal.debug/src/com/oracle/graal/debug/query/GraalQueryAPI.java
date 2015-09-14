@@ -57,4 +57,16 @@ public final class GraalQueryAPI {
         return ERROR;
     }
 
+    public static int getDeoptReason() {
+        return ERROR;
+    }
+
+    public static int getDeoptAction() {
+        return ERROR;
+    }
+
+    public static int getDeoptBCI() {
+        return ERROR;
+    }
+
 }
