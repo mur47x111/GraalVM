@@ -307,5 +307,5 @@ public final class GraalOptions {
     };
 
     @Option(help = "Enable compiler decision queries")
-    public static final OptionValue<Boolean> UseGraalQueries = new OptionValue<>(true);
+    public static final OptionValue<Boolean> UseGraalQueries = new OptionValue<>(false);
 }

@@ -92,9 +92,8 @@ public class MidTier extends PhaseSuite<MidTierContext> {
         appendPhase(new LoweringPhase(canonicalizer, LoweringTool.StandardLoweringStage.MID_TIER));
 
         if (UseGraalQueries.getValue()) {
-            appendPhase(new RedirectICGPhase());
+            appendPhase(new ReconcileICGPhase(ReconcileICGPhase.State.PRE_FSA));
         }
-
         appendPhase(new FrameStateAssignmentPhase());
 
         if (ReassociateInvariants.getValue()) {

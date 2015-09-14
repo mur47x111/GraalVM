@@ -91,7 +91,7 @@ public class HighTier extends PhaseSuite<HighTierContext> {
             appendPhase(new PartialEscapePhase(true, canonicalizer));
         }
         if (UseGraalQueries.getValue()) {
-            appendPhase(new PostEAPhase());
+            appendPhase(new ReconcileICGPhase(ReconcileICGPhase.State.POST_PEA));
         }
         appendPhase(new RemoveValueProxyPhase());
 
