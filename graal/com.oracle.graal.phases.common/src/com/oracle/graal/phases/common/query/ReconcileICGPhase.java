@@ -46,7 +46,7 @@ public class ReconcileICGPhase extends Phase {
                     if (instrumentation.target() != virtual) {
                         continue;
                     }
-                    // Insert ICG only if the CommitAllocationNode is accessible from the
+                    // insert ICG only if the CommitAllocationNode is accessible from the
                     // instrumentation node
                     NodeFlood flood = graph.createNodeFlood();
                     flood.add(instrumentation);
@@ -65,9 +65,9 @@ public class ReconcileICGPhase extends Phase {
                     InstrumentationNode clone = (InstrumentationNode) instrumentation.copyWithInputs();
                     graph.addAfterFixed(commit, clone);
                     AllocatedObjectNode object = getAllocatedObject(commit, virtual);
-                    // Replacing all input edges originating from the VirtualObjectNode with the
+                    // replacing all input edges originating from the VirtualObjectNode with the
                     // materialized object.
-                    // Better way to do this?
+                    // better way to do this?
                     while (clone.inputs().contains(virtual)) {
                         clone.replaceFirstInput(virtual, object);
                     }
@@ -81,7 +81,7 @@ public class ReconcileICGPhase extends Phase {
         switch (state) {
             case POST_PEA:
                 duplicateICGForMaterialization(graph);
-                // Remove ICG whose target is a non-materialized allocation
+                // remove ICG whose target is a non-materialized allocation
                 for (InstrumentationNode instrumentation : graph.getNodes().filter(InstrumentationNode.class)) {
                     if (instrumentation.target() instanceof VirtualObjectNode) {
                         GraphUtil.unlinkFixedNode(instrumentation);

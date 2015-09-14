@@ -55,8 +55,9 @@ public class HotSpotGraalCompiler implements Compiler {
         HotSpotBackend backend = HotSpotGraalRuntime.runtime().getHostBackend();
         HotSpotProviders providers = HotSpotGraalRuntime.runtime().getHostProviders();
         final boolean isOSR = entryBCI != INVOCATION_ENTRY_BCI;
-
-        StructuredGraph graph = method.isNative() || isOSR || QueryUtil.isQueryIntrinsic(method) ? null : getIntrinsicGraph(method, providers);
+        // avoid compiling the intrinsic graphs for GraalQueryAPI methods
+        boolean bypassIntrinsic = method.isNative() || isOSR || QueryUtil.isQueryIntrinsic(method);
+        StructuredGraph graph = bypassIntrinsic ? null : getIntrinsicGraph(method, providers);
         if (graph == null) {
             SpeculationLog speculationLog = method.getSpeculationLog();
             if (speculationLog != null) {
